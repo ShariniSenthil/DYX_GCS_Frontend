@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "DYX-GCS-Mobile",
+    "slug": "dyx-gcs-mobile",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1628"
+    },
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "android": {
+      "package": "com.dyxgcs.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A1628"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.dyxgcs.mobile"
+    },
+    "web": {
+      "orientation": "landscape"
+    },
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#0A1628",
+      "translucent": false,
+      "hidden": false
+    },
+    "androidNavigationBar": {
+      "visible": "leanback",
+      "barStyle": "dark-content",
+      "backgroundColor": "#0A1628"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5e4ca5bf-e5a2-402e-ae22-e7e102b59c66"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/5e4ca5bf-e5a2-402e-ae22-e7e102b59c66"
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}

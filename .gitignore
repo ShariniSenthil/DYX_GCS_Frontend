@@ -1,0 +1,76 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env.local
+.env.*.local
+
+# AI/IDE tool configs
+.claude/
+.kiro/
+.superpowers/
+.qwen/
+.vscode/
+.hintrc
+
+# Windows nul files (accidentally created)
+nul
+
+# Ignore backup APKs and build artifacts
+*.apk
+Backup_App/
+Backup Apks/
+
+# Project docs, summaries, temp, tasks
+docs/
+summary/
+temp/
+task/
+Tasks/
+
+# Loose markdown files (agent-generated docs, summaries, reports)
+# Keep README.md explicitly via negation
+*.md
+!README.md
+
+# Build logs and test scripts
+build_output.log
+*.csv
+test_beacon_listener.py
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android

@@ -1,0 +1,7 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- WiFi Weak Signal (1/4 bars) -->
+  <path d="M12 18C12.5523 18 13 17.5523 13 17C13 16.4477 12.5523 16 12 16C11.4477 16 11 16.4477 11 17C11 17.5523 11.4477 18 12 18Z" fill="currentColor"/>
+  <path d="M8 14C8.33333 13.6667 8.66667 13.3333 9 13C10.5 11.5 13.5 11.5 15 13C15.3333 13.3333 15.6667 13.6667 16 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <path d="M5 11C5.5 10.5 6 10 6.5 9.5C9 7 15 7 17.5 9.5C18 10 18.5 10.5 19 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <path d="M2 8C3 7 4 6 5.5 5C9 2 15 2 18.5 5C20 6 21 7 22 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+</svg>

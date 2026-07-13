@@ -1,0 +1,10 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ethernet / Network Cable Plug -->
+  <rect x="3" y="2" width="18" height="20" rx="2" stroke="currentColor" stroke-width="1.5"/>
+  <rect x="5" y="4" width="14" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1"/>
+  <!-- Plug pins -->
+  <rect x="6" y="11" width="2" height="8" fill="currentColor"/>
+  <rect x="10" y="11" width="2" height="8" fill="currentColor"/>
+  <rect x="14" y="11" width="2" height="8" fill="currentColor"/>
+  <rect x="18" y="11" width="2" height="8" fill="currentColor"/>
+</svg>
