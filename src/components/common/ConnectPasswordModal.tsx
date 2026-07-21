@@ -3,7 +3,7 @@
  * Drag the header grip to reposition when the keyboard covers the card.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
   View,
@@ -16,9 +16,13 @@ import {
   Pressable,
   Keyboard,
   useWindowDimensions,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -26,7 +30,7 @@ import Animated, {
   withSequence,
   withSpring,
   withTiming,
-} from 'react-native-reanimated';
+} from "react-native-reanimated";
 
 const CARD_MAX_WIDTH = 440;
 const SCREEN_PADDING = 20;
@@ -41,7 +45,7 @@ export interface ConnectPasswordModalProps {
   isConnecting: boolean;
   error: string | null;
   onClose: () => void;
-  onConnect: (password: string) => void;
+  onConnect: (username: string, password: string) => void;
 }
 
 export default function ConnectPasswordModal({
@@ -49,17 +53,19 @@ export default function ConnectPasswordModal({
   roverName,
   roverId,
   host,
-  accentColor = '#4ade80',
+  accentColor = "#4ade80",
   isConnecting,
   error,
   onClose,
   onConnect,
 }: ConnectPasswordModalProps): React.ReactElement {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const inputRef = useRef<TextInput>(null);
+  const usernameInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
   const cardHeightRef = useRef(400);
 
   const cardWidth = Math.min(CARD_MAX_WIDTH, screenWidth - SCREEN_PADDING * 2);
@@ -104,7 +110,10 @@ export default function ConnectPasswordModal({
       const safeBottom = screenHeight - keyboardHeight - SCREEN_PADDING;
       if (bottom > safeBottom) {
         const delta = bottom - safeBottom;
-        const nextY = Math.min(Math.max(translateY.value - delta, b.minY), b.maxY);
+        const nextY = Math.min(
+          Math.max(translateY.value - delta, b.minY),
+          b.maxY,
+        );
         translateY.value = withSpring(nextY, { damping: 18, stiffness: 220 });
       }
     },
@@ -130,12 +139,16 @@ export default function ConnectPasswordModal({
 
   useEffect(() => {
     if (visible) {
-      setPassword('');
+      setUsername("admin");
+      setPassword("");
       setShowPassword(false);
       resetPosition();
       scale.value = withSpring(1, { damping: 14, stiffness: 180 });
       opacity.value = withTiming(1, { duration: 180 });
-      const focusTimer = setTimeout(() => inputRef.current?.focus(), 320);
+      const focusTimer = setTimeout(
+        () => usernameInputRef.current?.focus(),
+        320,
+      );
       return () => clearTimeout(focusTimer);
     }
 
@@ -151,8 +164,10 @@ export default function ConnectPasswordModal({
   useEffect(() => {
     if (!visible) return undefined;
 
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
     const showSub = Keyboard.addListener(showEvent, (e) => {
       nudgeAboveKeyboard(e.endCoordinates.height);
@@ -207,17 +222,22 @@ export default function ConnectPasswordModal({
   }));
 
   const handleConnect = () => {
-    if (!password.trim()) {
+    if (!username.trim() || !password.trim()) {
       shake();
       return;
     }
-    onConnect(password);
+
+    onConnect(username.trim(), password);
   };
 
   const handleClose = () => {
-    if (isConnecting) return;
+    if (isConnecting) {
+      return;
+    }
+
     Keyboard.dismiss();
-    setPassword('');
+    setUsername("admin");
+    setPassword("");
     setShowPassword(false);
     onClose();
   };
@@ -232,7 +252,11 @@ export default function ConnectPasswordModal({
     >
       <GestureHandlerRootView style={styles.root}>
         <View style={styles.overlay}>
-          <Pressable style={styles.backdrop} onPress={handleClose} disabled={isConnecting} />
+          <Pressable
+            style={styles.backdrop}
+            onPress={handleClose}
+            disabled={isConnecting}
+          />
 
           <Animated.View
             onLayout={(e) => {
@@ -246,27 +270,43 @@ export default function ConnectPasswordModal({
                 width: cardWidth,
                 left: initialLeft,
                 top: initialTop,
-                borderColor: accentColor + '33',
+                borderColor: accentColor + "33",
                 shadowOpacity: isDragging ? 0.45 : 0.28,
               },
               cardAnimatedStyle,
             ]}
           >
-            <View style={[styles.accentBar, { backgroundColor: accentColor }]} />
+            <View
+              style={[styles.accentBar, { backgroundColor: accentColor }]}
+            />
 
             <GestureDetector gesture={panGesture}>
-              <Animated.View style={[styles.dragHandle, { borderColor: accentColor + '22' }]}>
-                <Ionicons name="reorder-three" size={22} color="rgba(255,255,255,0.35)" />
+              <Animated.View
+                style={[styles.dragHandle, { borderColor: accentColor + "22" }]}
+              >
+                <Ionicons
+                  name="reorder-three"
+                  size={22}
+                  color="rgba(255,255,255,0.35)"
+                />
               </Animated.View>
             </GestureDetector>
 
             <View style={styles.headerRow}>
-              <View style={[styles.iconWrap, { borderColor: accentColor + '44' }]}>
-                <Ionicons name="shield-checkmark" size={22} color={accentColor} />
+              <View
+                style={[styles.iconWrap, { borderColor: accentColor + "44" }]}
+              >
+                <Ionicons
+                  name="shield-checkmark"
+                  size={22}
+                  color={accentColor}
+                />
               </View>
               <View style={styles.headerText}>
                 <Text style={styles.title}>Operator Authentication</Text>
-                <Text style={styles.subtitle}>Enter password to connect to this rover</Text>
+                <Text style={styles.subtitle}>
+                  Enter username and password to connect to this rover
+                </Text>
               </View>
               <TouchableOpacity
                 style={styles.closeBtn}
@@ -274,30 +314,66 @@ export default function ConnectPasswordModal({
                 disabled={isConnecting}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="close" size={20} color="rgba(255,255,255,0.45)" />
+                <Ionicons
+                  name="close"
+                  size={20}
+                  color="rgba(255,255,255,0.45)"
+                />
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.roverPanel, { borderColor: accentColor + '28' }]}>
+            <View
+              style={[styles.roverPanel, { borderColor: accentColor + "28" }]}
+            >
               <View style={styles.roverPanelRow}>
                 <Ionicons name="hardware-chip" size={16} color={accentColor} />
-                <Text style={styles.roverName} numberOfLines={1}>{roverName}</Text>
+                <Text style={styles.roverName} numberOfLines={1}>
+                  {roverName}
+                </Text>
               </View>
               {roverId ? (
-                <Text style={styles.roverId} numberOfLines={1}>{roverId}</Text>
+                <Text style={styles.roverId} numberOfLines={1}>
+                  {roverId}
+                </Text>
               ) : null}
               <View style={styles.hostRow}>
                 <Ionicons name="globe-outline" size={12} color={accentColor} />
-                <Text style={[styles.hostText, { color: accentColor }]} numberOfLines={1}>
+                <Text
+                  style={[styles.hostText, { color: accentColor }]}
+                  numberOfLines={1}
+                >
                   {host}
                 </Text>
               </View>
             </View>
 
-            <Text style={styles.label}>Password</Text>
-            <View style={[styles.inputRow, error ? styles.inputRowError : null]}>
+            <Text style={styles.label}>Username</Text>
+
+            <View
+              style={[styles.inputRow, error ? styles.inputRowError : null]}
+            >
               <TextInput
-                ref={inputRef}
+                ref={usernameInputRef}
+                style={styles.input}
+                placeholder="Enter operator username"
+                placeholderTextColor="#475569"
+                value={username}
+                onChangeText={setUsername}
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                returnKeyType="next"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isConnecting}
+              />
+            </View>
+
+            <Text style={[styles.label, styles.passwordLabel]}>Password</Text>
+
+            <View
+              style={[styles.inputRow, error ? styles.inputRowError : null]}
+            >
+              <TextInput
+                ref={passwordInputRef}
                 style={styles.input}
                 placeholder="Enter operator password"
                 placeholderTextColor="#475569"
@@ -316,7 +392,7 @@ export default function ConnectPasswordModal({
                 disabled={isConnecting}
               >
                 <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
                   size={20}
                   color="#64748B"
                 />
@@ -325,7 +401,11 @@ export default function ConnectPasswordModal({
 
             {error ? (
               <View style={styles.errorRow}>
-                <Ionicons name="alert-circle-outline" size={14} color="#EF4444" />
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={14}
+                  color="#EF4444"
+                />
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : null}
@@ -343,10 +423,11 @@ export default function ConnectPasswordModal({
                 style={[
                   styles.btnConnect,
                   { backgroundColor: accentColor },
-                  (!password.trim() || isConnecting) && styles.btnConnectDisabled,
+                  (!username.trim() || !password.trim() || isConnecting) &&
+                    styles.btnConnectDisabled,
                 ]}
                 onPress={handleConnect}
-                disabled={!password.trim() || isConnecting}
+                disabled={!username.trim() || !password.trim() || isConnecting}
                 activeOpacity={0.85}
               >
                 {isConnecting ? (
@@ -375,42 +456,42 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.82)',
+    backgroundColor: "rgba(0,0,0,0.82)",
   },
   card: {
-    position: 'absolute',
-    backgroundColor: '#151619',
+    position: "absolute",
+    backgroundColor: "#151619",
     borderRadius: 16,
     paddingHorizontal: 24,
     paddingBottom: 24,
     borderWidth: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
     zIndex: 1,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
     shadowRadius: 24,
     elevation: 14,
   },
   accentBar: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     height: 3,
   },
   dragHandle: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginHorizontal: -24,
     marginBottom: 12,
     paddingTop: 12,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: "rgba(255,255,255,0.02)",
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 12,
     marginBottom: 18,
   },
@@ -419,9 +500,9 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     borderWidth: 1,
-    backgroundColor: 'rgba(74,222,128,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(74,222,128,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerText: {
     flex: 1,
@@ -429,20 +510,20 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.45)',
+    color: "rgba(255,255,255,0.45)",
     lineHeight: 17,
   },
   closeBtn: {
     padding: 4,
   },
   roverPanel: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderRadius: 10,
     borderWidth: 1,
     padding: 12,
@@ -450,77 +531,80 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   roverPanelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   roverName: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
   },
   roverId: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.35)',
+    color: "rgba(255,255,255,0.35)",
     marginLeft: 24,
   },
   hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     marginTop: 4,
     marginLeft: 24,
   },
   hostText: {
     fontSize: 12,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontWeight: "600",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   label: {
     fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.45)',
-    textTransform: 'uppercase',
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.45)",
+    textTransform: "uppercase",
     letterSpacing: 1.2,
     marginBottom: 8,
   },
+  passwordLabel: {
+    marginTop: 12,
+  },
   inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0a0a0b',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0a0a0b",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 10,
     marginBottom: 8,
   },
   inputRowError: {
-    borderColor: 'rgba(239,68,68,0.6)',
+    borderColor: "rgba(239,68,68,0.6)",
   },
   input: {
     flex: 1,
     height: 48,
     paddingHorizontal: 14,
     fontSize: 15,
-    color: '#F1F5F9',
+    color: "#F1F5F9",
   },
   eyeBtn: {
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
   errorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     marginBottom: 12,
   },
   errorText: {
     flex: 1,
     fontSize: 12,
-    color: '#EF4444',
+    color: "#EF4444",
   },
   actions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 8,
   },
@@ -528,19 +612,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 13,
     borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   btnCancelText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.75)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.75)",
   },
   btnConnect: {
     flex: 1.4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingVertical: 13,
     borderRadius: 10,
@@ -550,7 +634,7 @@ const styles = StyleSheet.create({
   },
   btnConnectText: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: "700",
+    color: "#0F172A",
   },
 });

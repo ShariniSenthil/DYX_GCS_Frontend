@@ -23,8 +23,14 @@ import React, {
   useRef,
   ReactNode,
 } from 'react';
-import type { AuthSession, AuthError, AuthRevokedEvent } from '../types/auth';
-import type { LoginRequest, ChangePasswordRequest } from '../types/auth';
+import type {
+  AuthSession,
+  AuthError,
+  AuthRevokedEvent,
+  LoginRequest,
+  LoginResponse,
+  ChangePasswordRequest,
+} from '../types/auth';
 import {
   saveSession,
   loadSession,
@@ -49,8 +55,11 @@ export interface AuthContextValue {
   isExpiringSoon: boolean;
   /** Last auth error. */
   lastError: AuthError | null;
-  /** Login with operator password. */
-  login: (password: string) => Promise<void>;
+  /** Login with operator username and password. */
+login: (
+  username: string,
+  password: string,
+) => Promise<void>;
   /** Logout current session. */
   logout: () => Promise<void>;
   /** Change password; refreshes token on success. */
@@ -104,21 +113,45 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     }
   }, []);
 
-  // ── App launch: require fresh rover connect + password (no session restore) ──
-  useEffect(() => {
-    if (!AUTH_ENABLED) {
+ 
+// ── App launch: restore the saved login session ─────────────────────────────
+useEffect(() => {
+  if (!AUTH_ENABLED) {
+    setIsLoading(false);
+    return;
+  }
+
+  const restoreSavedSession = async () => {
+    try {
+      const savedSession = await loadSession();
+
+      if (savedSession) {
+        setSession(savedSession);
+
+        setExpiringSoon(
+          isExpiringSoon(savedSession),
+        );
+
+        scheduleExpiryWarning(savedSession);
+      }
+    } catch (error) {
+      console.warn(
+        '[AuthContext] Failed to restore saved session:',
+        error,
+      );
+    } finally {
       setIsLoading(false);
-      return;
     }
+  };
 
-    clearSession()
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+  void restoreSavedSession();
 
-    return () => {
-      if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
-    };
-  }, []);
+  return () => {
+    if (expiryTimerRef.current) {
+      clearTimeout(expiryTimerRef.current);
+    }
+  };
+}, [scheduleExpiryWarning]);
 
   // ── auth_revoked socket listener ─────────────────────────────────────────
   useEffect(() => {
@@ -146,34 +179,66 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     await clearSession();
   };
 
-  const login = useCallback(async (password: string): Promise<void> => {
+const login = useCallback(
+  async (
+    username: string,
+    password: string,
+  ): Promise<void> => {
     setLastError(null);
+
     try {
       if (!AUTH_ENABLED) {
-        // Auth disabled — treat as always authenticated
         return;
       }
-      const raw = await apiPost<{
-        token: string;
-        session_id: string;
-        expires_at: string;
-        ttl_s: number;
-      }>(PX4_AUTH.LOGIN, { password } satisfies LoginRequest, { skipAuth: true });
+
+      const request: LoginRequest = {
+        username: username.trim(),
+        password,
+      };
+
+      const raw = await apiPost<LoginResponse>(
+        PX4_AUTH.LOGIN,
+        request,
+        {
+          skipAuth: true,
+        },
+      );
 
       const newSession = await saveSession(raw);
+
       setSession(newSession);
       setExpiringSoon(false);
+
       scheduleExpiryWarning(newSession);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Login failed';
-      const authErr: AuthError = {
-        code: errMsg.includes('401') || errMsg.includes('nvalid') ? 'invalid_password' : 'network_error',
-        message: errMsg,
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : 'Login failed';
+
+      const invalidCredentials =
+        errorMessage.includes('401') ||
+        errorMessage
+          .toLowerCase()
+          .includes('invalid');
+
+      const authError: AuthError = {
+        code: invalidCredentials
+          ? 'invalid_password'
+          : 'network_error',
+
+        message: invalidCredentials
+          ? 'Invalid username or password.'
+          : errorMessage,
       };
-      setLastError(authErr);
-      throw authErr;
+
+      setLastError(authError);
+
+      throw new Error(authError.message);
     }
-  }, [scheduleExpiryWarning]);
+  },
+  [scheduleExpiryWarning],
+);
 
   const logout = useCallback(async (): Promise<void> => {
     if (!AUTH_ENABLED) return;

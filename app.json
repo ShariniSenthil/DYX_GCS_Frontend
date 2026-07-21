@@ -47,7 +47,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "5e4ca5bf-e5a2-402e-ae22-e7e102b59c66"
+        "projectId": "943887ba-55d9-4a13-b186-e5076816a7f6"
       }
     },
     "runtimeVersion": {
@@ -55,11 +55,12 @@
     },
     "updates": {
       "enabled": true,
-      "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/5e4ca5bf-e5a2-402e-ae22-e7e102b59c66"
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "owner": "sharini"
   }
 }

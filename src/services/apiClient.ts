@@ -109,7 +109,7 @@ async function request<T>(
 
   if (!response.ok) {
     const apiErr = classifyHttpError(response.status, rawBody, path);
-    if (apiErr instanceof UnauthorizedError) {
+    if (apiErr instanceof UnauthorizedError && !opts.skipAuth) {
       _onUnauthorized();
     }
     throw apiErr;

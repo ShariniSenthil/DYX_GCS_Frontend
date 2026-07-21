@@ -6,7 +6,7 @@
  * UI ported from NewS/RoverDiscovery web design.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -17,16 +17,19 @@ import {
   Alert,
   TextInput,
   Modal,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { quickScanForJetsonDevices, JetsonDevice } from '../utils/jetsonDiscovery';
-import { saveBackendURL, markSessionSkipped } from '../utils/backendStorage';
-import beaconListener, { DiscoveredRover } from '../services/beaconListener';
-import { setBackendURL } from '../config';
-import { useAuth } from '../hooks/useAuth';
-import { AUTH_ENABLED } from '../config/featureFlags';
-import ConnectPasswordModal from '../components/common/ConnectPasswordModal';
-import axios from 'axios';
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  quickScanForJetsonDevices,
+  JetsonDevice,
+} from "../utils/jetsonDiscovery";
+import { saveBackendURL, markSessionSkipped } from "../utils/backendStorage";
+import beaconListener, { DiscoveredRover } from "../services/beaconListener";
+import { setBackendURL } from "../config";
+import { useAuth } from "../hooks/useAuth";
+import { AUTH_ENABLED } from "../config/featureFlags";
+import ConnectPasswordModal from "../components/common/ConnectPasswordModal";
+import axios from "axios";
 
 interface RoverDiscoveryScreenProps {
   onRoverSelected: (device: JetsonDevice) => void;
@@ -38,18 +41,26 @@ interface PendingConnect {
   accentColor: string;
 }
 
-export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscoveryScreenProps) {
+export default function RoverDiscoveryScreen({
+  onRoverSelected,
+}: RoverDiscoveryScreenProps) {
   const { login } = useAuth();
-  const [discoveredRovers, setDiscoveredRovers] = useState<DiscoveredRover[]>([]);
+  const [discoveredRovers, setDiscoveredRovers] = useState<DiscoveredRover[]>(
+    [],
+  );
   const [networkDevices, setNetworkDevices] = useState<JetsonDevice[]>([]);
   const [scanning, setScanning] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [showManualInput, setShowManualInput] = useState(false);
-  const [manualUrl, setManualUrl] = useState('http://');
+  const [manualUrl, setManualUrl] = useState("http://");
   const [testingManualUrl, setTestingManualUrl] = useState(false);
-  const [connectingRoverId, setConnectingRoverId] = useState<string | null>(null);
+  const [connectingRoverId, setConnectingRoverId] = useState<string | null>(
+    null,
+  );
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [pendingConnect, setPendingConnect] = useState<PendingConnect | null>(null);
+  const [pendingConnect, setPendingConnect] = useState<PendingConnect | null>(
+    null,
+  );
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
@@ -65,7 +76,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         toValue: 1,
         duration: 4000,
         useNativeDriver: true,
-      })
+      }),
     ).start();
   }, []);
 
@@ -83,7 +94,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
           duration: 0,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
   }, []);
 
@@ -94,7 +105,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         toValue: 1,
         duration: 4000,
         useNativeDriver: true,
-      })
+      }),
     ).start();
   }, []);
 
@@ -126,10 +137,16 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
       const found = await quickScanForJetsonDevices();
       setNetworkDevices(found);
       if (found.length === 0) {
-        Alert.alert('No Rovers Found', 'Network scan found no rovers. Try manual entry or continue offline.');
+        Alert.alert(
+          "No Rovers Found",
+          "Network scan found no rovers. Try manual entry or continue offline.",
+        );
       }
     } catch {
-      Alert.alert('Scan Error', 'Failed to scan network. Check WiFi connection.');
+      Alert.alert(
+        "Scan Error",
+        "Failed to scan network. Check WiFi connection.",
+      );
     } finally {
       setScanning(false);
     }
@@ -144,7 +161,11 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
     responseTime: 0,
   });
 
-  const openPasswordModal = (device: JetsonDevice, accentColor: string, roverId?: string) => {
+  const openPasswordModal = (
+    device: JetsonDevice,
+    accentColor: string,
+    roverId?: string,
+  ) => {
     setConnectError(null);
     setPendingConnect({ device, roverId, accentColor });
     setShowPasswordModal(true);
@@ -157,7 +178,11 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
     setConnectingRoverId(null);
   };
 
-  const finishConnect = async (device: JetsonDevice, password: string) => {
+  const finishConnect = async (
+    device: JetsonDevice,
+    username: string,
+    password: string,
+  ) => {
     setConnectingRoverId(device.id);
     setIsConnecting(true);
     setConnectError(null);
@@ -166,7 +191,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
       await saveBackendURL(device.url, device.ip, device.port);
 
       if (AUTH_ENABLED) {
-        await login(password);
+        await login(username, password);
       }
 
       setShowPasswordModal(false);
@@ -175,8 +200,10 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const displayMsg =
-        msg.includes('401') || msg.includes('invalid_password') || msg.includes('nvalid')
-          ? 'Incorrect password. Please try again.'
+        msg.includes("401") ||
+        msg.includes("invalid_password") ||
+        msg.includes("nvalid")
+          ? "Incorrect password. Please try again."
           : `Connection failed: ${msg}`;
       setConnectError(displayMsg);
     } finally {
@@ -188,28 +215,31 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
   const handleSelectBeaconRover = (rover: DiscoveredRover) => {
     const device = roverToDevice(rover);
     if (AUTH_ENABLED) {
-      openPasswordModal(device, '#4ade80', rover.roverId);
+      openPasswordModal(device, "#4ade80", rover.roverId);
       return;
     }
-    void finishConnect(device, '');
+    void finishConnect(device, "", "");
   };
 
   const handleSelectNetworkDevice = (device: JetsonDevice) => {
     if (AUTH_ENABLED) {
-      openPasswordModal(device, '#3b82f6');
+      openPasswordModal(device, "#3b82f6");
       return;
     }
-    void finishConnect(device, '');
+    void finishConnect(device, "", "");
   };
 
-  const handlePasswordConnect = (password: string) => {
-    if (!pendingConnect) return;
-    void finishConnect(pendingConnect.device, password);
+  const handleConnect = async (username: string, password: string) => {
+    if (!pendingConnect) {
+      return;
+    }
+
+    await finishConnect(pendingConnect.device, username, password);
   };
 
   const handleConnectManualUrl = async () => {
-    if (!manualUrl || manualUrl === 'http://') {
-      Alert.alert('Invalid URL', 'Please enter a valid backend URL');
+    if (!manualUrl || manualUrl === "http://") {
+      Alert.alert("Invalid URL", "Please enter a valid backend URL");
       return;
     }
     setTestingManualUrl(true);
@@ -220,19 +250,24 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
       // Use /api/healthz (4WD_SERVER) with fallback to /api/ping for both backends
       let reachable = false;
       // NRP_ROS LEGACY DISABLED — '/api/status' probe removed (use /api/healthz on 4WD_SERVER)
-      for (const probePath of ['/api/healthz', '/api/ping']) {
+      for (const probePath of ["/api/healthz", "/api/ping"]) {
         try {
           const r = await axios.get(`${manualUrl}${probePath}`, {
             timeout: 5000,
             validateStatus: () => true,
           });
-          if (r.status < 500) { reachable = true; break; }
-        } catch { /* try next */ }
+          if (r.status < 500) {
+            reachable = true;
+            break;
+          }
+        } catch {
+          /* try next */
+        }
       }
       const response = { status: reachable ? 200 : 503 };
       if (reachable) {
         const device: JetsonDevice = {
-          id: 'custom-' + ip,
+          id: "custom-" + ip,
           name: `Custom Rover (${ip})`,
           ip,
           port,
@@ -241,27 +276,33 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         };
         setShowManualInput(false);
         if (AUTH_ENABLED) {
-          openPasswordModal(device, '#f59e0b');
+          openPasswordModal(device, "#f59e0b");
           return;
         }
         setBackendURL(manualUrl);
         await saveBackendURL(manualUrl, ip, port);
         onRoverSelected(device);
       } else {
-        Alert.alert('Connection Failed', `Server responded with status ${response.status}`);
+        Alert.alert(
+          "Connection Failed",
+          `Server responded with status ${response.status}`,
+        );
       }
     } catch (error: any) {
-      let msg = 'Could not reach the server.\n\n';
-      if (error.message?.includes('Invalid URL')) {
-        msg += 'Invalid URL format. Use: http://IP:PORT';
-      } else if (error.code === 'ECONNREFUSED') {
-        msg += 'Connection refused. Check backend is running.';
-      } else if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
-        msg += 'Timeout. Check IP address and network.';
+      let msg = "Could not reach the server.\n\n";
+      if (error.message?.includes("Invalid URL")) {
+        msg += "Invalid URL format. Use: http://IP:PORT";
+      } else if (error.code === "ECONNREFUSED") {
+        msg += "Connection refused. Check backend is running.";
+      } else if (
+        error.code === "ETIMEDOUT" ||
+        error.message?.includes("timeout")
+      ) {
+        msg += "Timeout. Check IP address and network.";
       } else {
-        msg += error.message || 'Unknown error';
+        msg += error.message || "Unknown error";
       }
-      Alert.alert('Connection Error', msg);
+      Alert.alert("Connection Error", msg);
     } finally {
       setTestingManualUrl(false);
     }
@@ -269,19 +310,19 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
   const handleSkip = () => {
     Alert.alert(
-      'Continue Offline',
-      'Some features will be limited without a rover connection.',
+      "Continue Offline",
+      "Some features will be limited without a rover connection.",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Continue Offline',
+          text: "Continue Offline",
           onPress: async () => {
             const offline: JetsonDevice = {
-              id: 'offline',
-              name: 'Offline Mode',
-              ip: 'localhost',
+              id: "offline",
+              name: "Offline Mode",
+              ip: "localhost",
               port: 8000,
-              url: 'http://localhost:8000',
+              url: "http://localhost:8000",
               responseTime: 0,
             };
             await saveBackendURL(offline.url, offline.ip, offline.port);
@@ -289,7 +330,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
             onRoverSelected(offline);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -301,7 +342,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
   const spinRotation = spinAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+    outputRange: ["0deg", "360deg"],
   });
 
   const pulseScale = pulseAnim;
@@ -340,7 +381,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
           <View style={styles.statusInfoRow}>
             <Text style={styles.statusLabel}>Status</Text>
             <Text style={styles.statusValue}>
-              {beaconListener.isAvailable ? 'Listening for beacons...' : 'Web mode'}
+              {beaconListener.isAvailable
+                ? "Listening for beacons..."
+                : "Web mode"}
             </Text>
           </View>
           <View style={styles.statusInfoRow}>
@@ -364,7 +407,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
             </View>
             <View style={styles.telemetryBox}>
               <Ionicons name="cellular" size={12} color="#fb923c" />
-              <Text style={styles.telemetryValue}>{totalCount > 0 ? 'Good' : '--'}</Text>
+              <Text style={styles.telemetryValue}>
+                {totalCount > 0 ? "Good" : "--"}
+              </Text>
               <Text style={styles.telemetryLabel}>Signal Strength</Text>
             </View>
           </View>
@@ -373,7 +418,11 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
       {/* Action Buttons */}
       <View style={styles.actionButtonsWrap}>
-        <TouchableOpacity style={styles.btnGreen} onPress={handleRefresh} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.btnGreen}
+          onPress={handleRefresh}
+          activeOpacity={0.8}
+        >
           <Ionicons name="refresh" size={14} color="#000" />
           <Text style={styles.btnGreenText}>REFRESH</Text>
         </TouchableOpacity>
@@ -389,7 +438,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
           ) : (
             <Ionicons name="search" size={14} color="white" />
           )}
-          <Text style={styles.btnBlueText}>{scanning ? 'SCANNING...' : 'NETWORK SCAN'}</Text>
+          <Text style={styles.btnBlueText}>
+            {scanning ? "SCANNING..." : "NETWORK SCAN"}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -401,7 +452,11 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
           <Text style={styles.btnOrangeText}>MANUAL URL</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btnSkip} onPress={handleSkip} activeOpacity={0.6}>
+        <TouchableOpacity
+          style={styles.btnSkip}
+          onPress={handleSkip}
+          activeOpacity={0.6}
+        >
           <Text style={styles.btnSkipText}>Continue Offline</Text>
         </TouchableOpacity>
       </View>
@@ -414,7 +469,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
   const renderRoverCard = (rover: DiscoveredRover) => {
     const isStale = now - rover.lastSeen > 5000;
-    const dotColor = isStale ? '#fb923c' : '#4ade80';
+    const dotColor = isStale ? "#fb923c" : "#4ade80";
     const isConnectingThis = connectingRoverId === rover.roverId;
     const isPending = isRoverPending(rover.roverId);
 
@@ -427,16 +482,21 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         activeOpacity={0.75}
       >
         <View style={[styles.cardAccent, { backgroundColor: dotColor }]} />
-        <View style={[styles.cardIconWrap, { borderColor: dotColor + '40' }]}>
+        <View style={[styles.cardIconWrap, { borderColor: dotColor + "40" }]}>
           <Ionicons name="hardware-chip" size={28} color={dotColor} />
         </View>
         <View style={styles.cardBody}>
           <View style={styles.cardRow}>
             <Text style={styles.cardName}>{rover.roverName}</Text>
-            <View style={[styles.cardBadge, { backgroundColor: dotColor + '22', borderColor: dotColor }]}>
+            <View
+              style={[
+                styles.cardBadge,
+                { backgroundColor: dotColor + "22", borderColor: dotColor },
+              ]}
+            >
               <View style={[styles.badgeDot, { backgroundColor: dotColor }]} />
               <Text style={[styles.cardBadgeText, { color: dotColor }]}>
-                {isStale ? 'STALE' : 'LIVE'}
+                {isStale ? "STALE" : "LIVE"}
               </Text>
             </View>
           </View>
@@ -444,11 +504,15 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
           <View style={styles.cardMeta}>
             <View style={styles.metaItem}>
               <Ionicons name="globe-outline" size={11} color="#4ade80" />
-              <Text style={styles.metaTextGreen}>{rover.ip}:{rover.port}</Text>
+              <Text style={styles.metaTextGreen}>
+                {rover.ip}:{rover.port}
+              </Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={11} color="#666" />
-              <Text style={styles.metaTextGray}>Up {formatUptime(rover.uptime)}</Text>
+              <Text style={styles.metaTextGray}>
+                Up {formatUptime(rover.uptime)}
+              </Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="code-slash-outline" size={11} color="#666" />
@@ -481,21 +545,30 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         disabled={isConnectingThis || isConnecting}
         activeOpacity={0.75}
       >
-        <View style={[styles.cardAccent, { backgroundColor: '#3b82f6' }]} />
-        <View style={[styles.cardIconWrap, { borderColor: '#3b82f640' }]}>
+        <View style={[styles.cardAccent, { backgroundColor: "#3b82f6" }]} />
+        <View style={[styles.cardIconWrap, { borderColor: "#3b82f640" }]}>
           <Ionicons name="wifi" size={28} color="#3b82f6" />
         </View>
         <View style={styles.cardBody}>
           <View style={styles.cardRow}>
             <Text style={styles.cardName}>{device.name}</Text>
-            <View style={[styles.cardBadge, { backgroundColor: '#3b82f622', borderColor: '#3b82f6' }]}>
-              <Text style={[styles.cardBadgeText, { color: '#3b82f6' }]}>SCAN</Text>
+            <View
+              style={[
+                styles.cardBadge,
+                { backgroundColor: "#3b82f622", borderColor: "#3b82f6" },
+              ]}
+            >
+              <Text style={[styles.cardBadgeText, { color: "#3b82f6" }]}>
+                SCAN
+              </Text>
             </View>
           </View>
           <View style={styles.cardMeta}>
             <View style={styles.metaItem}>
               <Ionicons name="globe-outline" size={11} color="#3b82f6" />
-              <Text style={[styles.metaTextGreen, { color: '#3b82f6' }]}>{device.ip}:{device.port}</Text>
+              <Text style={[styles.metaTextGreen, { color: "#3b82f6" }]}>
+                {device.ip}:{device.port}
+              </Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="speedometer-outline" size={11} color="#666" />
@@ -508,7 +581,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
             <ActivityIndicator size="small" color="#3b82f6" />
           ) : (
             <>
-              <Text style={[styles.connectLabel, { color: '#3b82f6' }]}>CONNECT</Text>
+              <Text style={[styles.connectLabel, { color: "#3b82f6" }]}>
+                CONNECT
+              </Text>
               <Ionicons name="chevron-forward" size={18} color="#3b82f6" />
             </>
           )}
@@ -525,17 +600,25 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         <View style={styles.headerLeft}>
           <View style={styles.headerStatusDot} />
           <Text style={styles.headerScanText}>
-            {totalCount > 0 ? 'CONNECTED' : 'SCANNING...'}
+            {totalCount > 0 ? "CONNECTED" : "SCANNING..."}
           </Text>
           <View style={styles.headerDivider} />
           <Text style={styles.headerCoords}>LAT: 0.000000 | LNG: 0.000000</Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.6}>
-            <Ionicons name="settings-outline" size={16} color="rgba(255,255,255,0.4)" />
+            <Ionicons
+              name="settings-outline"
+              size={16}
+              color="rgba(255,255,255,0.4)"
+            />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.6}>
-            <Ionicons name="hardware-chip-outline" size={16} color="rgba(255,255,255,0.4)" />
+            <Ionicons
+              name="hardware-chip-outline"
+              size={16}
+              color="rgba(255,255,255,0.4)"
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -566,7 +649,7 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
         />
 
         {/* Rover List or Empty State */}
-        {(hasBeacons || hasNetwork) ? (
+        {hasBeacons || hasNetwork ? (
           <View style={styles.roverListArea}>
             {hasBeacons && (
               <>
@@ -585,7 +668,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
             {scanning && (
               <View style={styles.scanningRow}>
                 <ActivityIndicator size="small" color="#3b82f6" />
-                <Text style={styles.scanningText}>Scanning network for rovers...</Text>
+                <Text style={styles.scanningText}>
+                  Scanning network for rovers...
+                </Text>
               </View>
             )}
           </View>
@@ -617,7 +702,8 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
             <Text style={styles.emptyTitle}>Waiting for rovers...</Text>
             <Text style={styles.emptyDesc}>
-              Ensure the rover is powered on and connected to the same network.{'\n'}
+              Ensure the rover is powered on and connected to the same network.
+              {"\n"}
               The system is currently listening for broadcast beacons.
             </Text>
 
@@ -628,8 +714,10 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
                   <View style={styles.tipDot} />
                 </View>
                 <Text style={styles.tipText}>
-                  Beacon on <Text style={styles.tipHighlightGreen}>UDP 5002</Text>
-                  {' · '}API on <Text style={styles.tipHighlightGreen}>HTTP 5001</Text>
+                  Beacon on{" "}
+                  <Text style={styles.tipHighlightGreen}>UDP 5002</Text>
+                  {" · "}API on{" "}
+                  <Text style={styles.tipHighlightGreen}>HTTP 5001</Text>
                 </Text>
               </View>
               <View style={styles.tipRow}>
@@ -637,7 +725,8 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
                   <View style={styles.tipDot} />
                 </View>
                 <Text style={styles.tipText}>
-                  Beacon interval: <Text style={styles.tipHighlightWhite}>every 2 seconds</Text>
+                  Beacon interval:{" "}
+                  <Text style={styles.tipHighlightWhite}>every 2 seconds</Text>
                 </Text>
               </View>
               <View style={styles.tipRow}>
@@ -645,8 +734,9 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
                   <View style={styles.tipDot} />
                 </View>
                 <Text style={styles.tipText}>
-                  Use <Text style={styles.tipHighlightBlue}>Network Scan</Text> or{' '}
-                  <Text style={styles.tipHighlightOrange}>Manual URL</Text> as fallback
+                  Use <Text style={styles.tipHighlightBlue}>Network Scan</Text>{" "}
+                  or <Text style={styles.tipHighlightOrange}>Manual URL</Text>{" "}
+                  as fallback
                 </Text>
               </View>
             </View>
@@ -684,14 +774,14 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 
       <ConnectPasswordModal
         visible={showPasswordModal && pendingConnect !== null}
-        roverName={pendingConnect?.device.name ?? ''}
+        roverName={pendingConnect?.device.name ?? ""}
         roverId={pendingConnect?.roverId}
-        host={`${pendingConnect?.device.ip ?? ''}:${pendingConnect?.device.port ?? 5001}`}
-        accentColor={pendingConnect?.accentColor ?? '#4ade80'}
+        host={`${pendingConnect?.device.ip ?? ""}:${pendingConnect?.device.port ?? 5001}`}
+        accentColor={pendingConnect?.accentColor ?? "#4ade80"}
         isConnecting={isConnecting}
         error={connectError}
         onClose={closePasswordModal}
-        onConnect={handlePasswordConnect}
+        onConnect={handleConnect}
       />
 
       {/* Manual URL Modal */}
@@ -708,7 +798,8 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
               <Text style={styles.modalTitle}>Manual Backend URL</Text>
             </View>
             <Text style={styles.modalHint}>
-              Probes /api/healthz (4WD_SERVER){'\n'}Example: http://192.168.1.101:5001
+              Probes /api/healthz (4WD_SERVER){"\n"}Example:
+              http://192.168.1.101:5001
             </Text>
             <TextInput
               style={styles.urlInput}
@@ -754,20 +845,20 @@ export default function RoverDiscoveryScreen({ onRoverSelected }: RoverDiscovery
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#0a0a0b',
+    flexDirection: "row",
+    backgroundColor: "#0a0a0b",
   },
 
   // ── SIDEBAR ─────────────────────────────────────────────────────────────
   sidebar: {
     width: 288,
-    backgroundColor: '#0d0d0f',
+    backgroundColor: "#0d0d0f",
     borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.05)',
-    flexDirection: 'column',
+    borderRightColor: "rgba(255,255,255,0.05)",
+    flexDirection: "column",
   },
   brandingSection: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: 32,
     paddingBottom: 16,
     paddingHorizontal: 24,
@@ -776,25 +867,25 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: 'rgba(74,222,128,0.1)',
+    backgroundColor: "rgba(74,222,128,0.1)",
     borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "rgba(74,222,128,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
   },
   appTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     letterSpacing: 4,
   },
   appSubtitle: {
     fontSize: 9,
-    color: 'rgba(74,222,128,0.6)',
+    color: "rgba(74,222,128,0.6)",
     letterSpacing: 3,
-    textTransform: 'uppercase',
-    fontWeight: '500',
+    textTransform: "uppercase",
+    fontWeight: "500",
     marginTop: 4,
   },
 
@@ -805,52 +896,52 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   statusCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: "rgba(255,255,255,0.05)",
     marginBottom: 16,
   },
   statusCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     marginBottom: 12,
   },
   statusDotWrap: {
-    position: 'relative',
+    position: "relative",
   },
   statusDotGreen: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4ade80',
+    backgroundColor: "#4ade80",
   },
   systemActiveText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#4ade80',
-    textTransform: 'uppercase',
+    fontWeight: "600",
+    color: "#4ade80",
+    textTransform: "uppercase",
     letterSpacing: 1.5,
   },
   statusInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 6,
   },
   statusLabel: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.4)',
+    color: "rgba(255,255,255,0.4)",
   },
   statusValue: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.8)',
+    color: "rgba(255,255,255,0.8)",
   },
   udpPortValue: {
     fontSize: 11,
-    color: '#4ade80',
-    fontVariant: ['tabular-nums'],
+    color: "#4ade80",
+    fontVariant: ["tabular-nums"],
   },
 
   // Telemetry
@@ -859,36 +950,36 @@ const styles = StyleSheet.create({
   },
   telemetrySectionTitle: {
     fontSize: 9,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 3,
-    color: 'rgba(255,255,255,0.3)',
-    fontWeight: '700',
+    color: "rgba(255,255,255,0.3)",
+    fontWeight: "700",
     paddingHorizontal: 4,
     marginBottom: 10,
   },
   telemetryGrid: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
   telemetryBox: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: "rgba(255,255,255,0.05)",
   },
   telemetryValue: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#ffffff',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "700",
+    color: "#ffffff",
+    fontVariant: ["tabular-nums"],
     marginTop: 4,
   },
   telemetryLabel: {
     fontSize: 8,
-    color: 'rgba(255,255,255,0.3)',
-    textTransform: 'uppercase',
+    color: "rgba(255,255,255,0.3)",
+    textTransform: "uppercase",
     marginTop: 2,
   },
 
@@ -897,115 +988,115 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderTopColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(0,0,0,0.2)",
   },
   btnGreen: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    backgroundColor: '#4ade80',
+    backgroundColor: "#4ade80",
     paddingVertical: 12,
     borderRadius: 12,
   },
   btnGreenText: {
-    color: '#000',
+    color: "#000",
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   btnBlue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
     paddingVertical: 12,
     borderRadius: 12,
   },
   btnBlueText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   btnOrange: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    backgroundColor: '#f59e0b',
+    backgroundColor: "#f59e0b",
     paddingVertical: 12,
     borderRadius: 12,
   },
   btnOrangeText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   btnSkip: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: 8,
   },
   btnSkipText: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.2)',
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    color: "rgba(255,255,255,0.2)",
+    fontWeight: "700",
+    textTransform: "uppercase",
     letterSpacing: 3,
   },
 
   // ── MAIN CONTENT ────────────────────────────────────────────────────────
   mainContent: {
     flex: 1,
-    flexDirection: 'column',
-    backgroundColor: '#0a0a0b',
+    flexDirection: "column",
+    backgroundColor: "#0a0a0b",
   },
 
   // Header Bar
   headerBar: {
     height: 56,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    borderBottomColor: "rgba(255,255,255,0.05)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 28,
-    backgroundColor: 'rgba(13,13,15,0.5)',
+    backgroundColor: "rgba(13,13,15,0.5)",
   },
   headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   headerStatusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4ade80',
+    backgroundColor: "#4ade80",
   },
   headerScanText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 2,
-    color: 'rgba(255,255,255,0.8)',
-    textTransform: 'uppercase',
+    color: "rgba(255,255,255,0.8)",
+    textTransform: "uppercase",
   },
   headerDivider: {
     width: 1,
     height: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: "rgba(255,255,255,0.1)",
   },
   headerCoords: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
-    fontVariant: ['tabular-nums'],
+    color: "rgba(255,255,255,0.3)",
+    fontVariant: ["tabular-nums"],
   },
   headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   headerIconBtn: {
@@ -1016,22 +1107,22 @@ const styles = StyleSheet.create({
   // Viewport
   viewport: {
     flex: 1,
-    position: 'relative',
-    overflow: 'hidden',
+    position: "relative",
+    overflow: "hidden",
   },
   scanLine: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: 'rgba(74,222,128,0.3)',
+    backgroundColor: "rgba(74,222,128,0.3)",
     zIndex: 1,
   },
 
   // Corner decorations
   corner: {
-    position: 'absolute',
+    position: "absolute",
     width: 40,
     height: 40,
     zIndex: 2,
@@ -1041,7 +1132,7 @@ const styles = StyleSheet.create({
     left: 24,
     borderTopWidth: 2,
     borderLeftWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderTopLeftRadius: 8,
   },
   cornerTR: {
@@ -1049,7 +1140,7 @@ const styles = StyleSheet.create({
     right: 24,
     borderTopWidth: 2,
     borderRightWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderTopRightRadius: 8,
   },
   cornerBL: {
@@ -1057,7 +1148,7 @@ const styles = StyleSheet.create({
     left: 24,
     borderBottomWidth: 2,
     borderLeftWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderBottomLeftRadius: 8,
   },
   cornerBR: {
@@ -1065,7 +1156,7 @@ const styles = StyleSheet.create({
     right: 24,
     borderBottomWidth: 2,
     borderRightWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderBottomRightRadius: 8,
   },
 
@@ -1077,40 +1168,40 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.3)',
+    color: "rgba(255,255,255,0.3)",
     letterSpacing: 2,
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    fontWeight: "700",
+    textTransform: "uppercase",
     marginBottom: 10,
     marginTop: 4,
   },
 
   // Rover Card
   roverCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 12,
     marginBottom: 10,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: "rgba(255,255,255,0.05)",
   },
   roverCardSelected: {
-    borderColor: 'rgba(74,222,128,0.5)',
-    backgroundColor: 'rgba(74,222,128,0.08)',
+    borderColor: "rgba(74,222,128,0.5)",
+    backgroundColor: "rgba(74,222,128,0.08)",
   },
   cardAccent: {
     width: 3,
-    alignSelf: 'stretch',
+    alignSelf: "stretch",
   },
   cardIconWrap: {
     width: 48,
     height: 48,
     borderRadius: 24,
     borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginHorizontal: 14,
   },
   cardBody: {
@@ -1119,18 +1210,18 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   cardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   cardName: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
   },
   cardBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     borderWidth: 1,
     borderRadius: 6,
@@ -1144,69 +1235,69 @@ const styles = StyleSheet.create({
   },
   cardBadgeText: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
   },
   cardId: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
+    color: "rgba(255,255,255,0.3)",
   },
   cardMeta: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 14,
     marginTop: 2,
   },
   metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
   metaTextGreen: {
     fontSize: 11,
-    color: '#4ade80',
-    fontWeight: '500',
+    color: "#4ade80",
+    fontWeight: "500",
   },
   metaTextGray: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.35)',
+    color: "rgba(255,255,255,0.35)",
   },
   cardArrow: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 16,
     gap: 2,
   },
   connectLabel: {
     fontSize: 8,
-    color: '#4ade80',
+    color: "#4ade80",
     letterSpacing: 1,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 
   // Scanning row
   scanningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     paddingVertical: 12,
   },
   scanningText: {
     fontSize: 13,
-    color: '#3b82f6',
-    fontWeight: '500',
+    color: "#3b82f6",
+    fontWeight: "500",
   },
 
   // ── EMPTY STATE ─────────────────────────────────────────────────────────
   emptyState: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 40,
   },
   spinnerWrap: {
     width: 128,
     height: 128,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 28,
   },
   spinnerOuter: {
@@ -1214,183 +1305,183 @@ const styles = StyleSheet.create({
     height: 128,
     borderRadius: 64,
     borderWidth: 2,
-    borderColor: 'rgba(74,222,128,0.2)',
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "rgba(74,222,128,0.2)",
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
   },
   spinnerInner: {
     width: 96,
     height: 96,
     borderRadius: 48,
     borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "rgba(74,222,128,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   radarPulse: {
-    position: 'absolute',
+    position: "absolute",
     width: 128,
     height: 128,
     borderRadius: 64,
     borderWidth: 1,
-    borderColor: '#4ade80',
+    borderColor: "#4ade80",
   },
   emptyTitle: {
     fontSize: 22,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 8,
   },
   emptyDesc: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.4)',
-    textAlign: 'center',
+    color: "rgba(255,255,255,0.4)",
+    textAlign: "center",
     lineHeight: 20,
     marginBottom: 28,
   },
   tipsCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    width: '100%',
+    borderColor: "rgba(255,255,255,0.05)",
+    width: "100%",
     maxWidth: 420,
     gap: 12,
   },
   tipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   tipDotWrap: {
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: 'rgba(74,222,128,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(74,222,128,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   tipDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#4ade80',
+    backgroundColor: "#4ade80",
   },
   tipText: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
   },
   tipHighlightGreen: {
-    color: '#4ade80',
-    fontVariant: ['tabular-nums'],
+    color: "#4ade80",
+    fontVariant: ["tabular-nums"],
   },
   tipHighlightWhite: {
-    color: '#ffffff',
-    fontWeight: '500',
+    color: "#ffffff",
+    fontWeight: "500",
   },
   tipHighlightBlue: {
-    color: '#60a5fa',
-    fontWeight: '500',
+    color: "#60a5fa",
+    fontWeight: "500",
   },
   tipHighlightOrange: {
-    color: '#fb923c',
-    fontWeight: '500',
+    color: "#fb923c",
+    fontWeight: "500",
   },
 
   // ── FOOTER BAR ──────────────────────────────────────────────────────────
   footerBar: {
     height: 44,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    borderTopColor: "rgba(255,255,255,0.05)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 28,
-    backgroundColor: 'rgba(13,13,15,0.5)',
+    backgroundColor: "rgba(13,13,15,0.5)",
   },
   footerLeft: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 20,
   },
   footerRight: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 16,
   },
   footerText: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.2)',
-    fontVariant: ['tabular-nums'],
+    color: "rgba(255,255,255,0.2)",
+    fontVariant: ["tabular-nums"],
   },
   footerTextGreen: {
     fontSize: 9,
-    color: 'rgba(74,222,128,0.5)',
-    fontVariant: ['tabular-nums'],
+    color: "rgba(74,222,128,0.5)",
+    fontVariant: ["tabular-nums"],
   },
 
   // ── MODAL ───────────────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalCard: {
-    backgroundColor: '#151619',
+    backgroundColor: "#151619",
     borderRadius: 16,
     padding: 28,
     width: 420,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
   },
   modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     marginBottom: 8,
   },
   modalTitle: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
   },
   modalHint: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
+    color: "rgba(255,255,255,0.4)",
     marginBottom: 18,
     lineHeight: 20,
   },
   urlInput: {
-    backgroundColor: '#0a0a0b',
+    backgroundColor: "#0a0a0b",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
     marginBottom: 20,
   },
   modalButtons: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   modalBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: 'center',
+    alignItems: "center",
   },
   modalBtnCancel: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: "rgba(255,255,255,0.1)",
   },
   modalBtnConnect: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: "#f59e0b",
   },
   modalBtnText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });

@@ -23,6 +23,7 @@ export interface AuthSession {
 // ── Request / Response shapes ─────────────────────────────────────────────────
 
 export interface LoginRequest {
+  username: string;
   password: string;
 }
 
@@ -32,10 +33,14 @@ export interface LoginResponse {
   /** ISO-8601 UTC string from 4WD_SERVER (e.g. "2026-06-30T12:00:00Z") */
   expires_at: string;
   ttl_s: number;
+  username?: string;
+  rover_id?: string;
 }
 
 export interface LogoutResponse {
-  logged_out: boolean;
+    success: boolean;
+    message: string;
+
 }
 
 export interface ChangePasswordRequest {
