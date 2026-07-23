@@ -8,8 +8,8 @@
  * - Wi-Fi loss must not remove the session.
  * - Jetson restart must not remove the session.
  * - HTTP 401 must not automatically erase the local session.
- * - Explicit Logout removes the session.
- * - A confirmed auth_revoked security event may remove the session.
+ * - Only explicit Logout removes the session.
+ * - auth_revoked retains the locally saved session.
  */
 
 import React, {
@@ -136,7 +136,7 @@ export function AuthProvider({
         );
 
         setLastError({
-          code: "session_unavailable",
+          code: "session_revoked",
           message:
             "The rover could not verify the saved session. " +
             "The app will keep the login and retry after reconnection.",
@@ -198,6 +198,8 @@ export function AuthProvider({
 
   // ── Confirmed security revocation ─────────────────────────────────────────
 
+  // ── Backend authentication notification ──────────────────────────────────
+
   useEffect(() => {
     if (!AUTH_ENABLED) {
       return;
@@ -209,19 +211,30 @@ export function AuthProvider({
       (event: unknown) => {
         const revokedEvent = event as AuthRevokedEvent;
 
+        /*
+         * Retain the locally saved login.
+         *
+         * Jetson restart, backend restart, socket reconnection or temporary
+         * token rejection must not return the operator to the Login screen.
+         */
         console.warn(
-          "[AuthContext] Backend revoked the session:",
+          "[AuthContext] auth_revoked received. Saved login retained:",
           revokedEvent.reason,
         );
 
-        void clearLocalSession();
+        setLastError({
+          code: "session_revoked",
+          message:
+            "The backend rejected the current token. " +
+            "Your saved login has been retained.",
+        });
       },
 
       "auth-context-revoked",
     );
 
     return unsubscribe;
-  }, [clearLocalSession]);
+  }, []);
 
   // ── Login ─────────────────────────────────────────────────────────────────
 

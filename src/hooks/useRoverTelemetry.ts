@@ -41,6 +41,16 @@ import { PX4_SYSTEM, PX4_TELEMETRY, PX4_RTK } from '../config/px4Endpoints';
 import type { Px4HealthzResponse } from '../types/px4/telemetry';
 import type { RtkStatusResponse } from '../services/rtkService';
 import { apiGet, apiPost } from '../services/apiClient';
+import {
+  clearMission as clearBackendMission,
+  getMissionStatus as getBackendMissionStatus,
+  nextMissionPoint,
+  pauseMission as pauseBackendMission,
+  resumeMission as resumeBackendMission,
+  skipMissionPoint,
+  startMission as startBackendMission,
+  stopMission as stopBackendMission,
+} from '../services/missionApi';
 import { loadSession } from '../services/authStorage';
 import {
   isRobotStatusDebugEnabled,
@@ -1814,23 +1824,101 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         }
         return postService(API_ENDPOINTS.SET_MODE, { mode });
       },
-      // NRP_ROS LEGACY DISABLED — client-side waypoint upload/load/download
-      uploadMission: () => nrpRosLegacyDisabled('uploadMission'),
-      loadMissionToController: () => nrpRosLegacyDisabled('loadMissionToController'),
-      downloadMission: () => nrpRosLegacyDisabled('downloadMission'),
-      clearMission: () => postService(API_ENDPOINTS.MISSION_CLEAR),
-      setCurrentWaypoint: () => nrpRosLegacyDisabled('setCurrentWaypoint'),
-      startMission: () => postService(API_ENDPOINTS.MISSION_START),
-      stopMission: () => postService(API_ENDPOINTS.MISSION_STOP),
-      restartMission: () => postService(API_ENDPOINTS.MISSION_RESTART),
-      // NRP_ROS LEGACY DISABLED — next/skip/bulk_skip (use pointMissionService on PX4)
-      nextMission: () => nrpRosLegacyDisabled('nextMission'),
-      skipMission: () => nrpRosLegacyDisabled('skipMission'),
-      bulkSkipRange: () => nrpRosLegacyDisabled('bulkSkipRange'),
+      
+            // Mission CSV upload is handled directly by missionApi.ts.
+      uploadMission: () =>
+        nrpRosLegacyDisabled(
+          'uploadMission: use uploadMissionCsv',
+        ),
 
-      pauseMission: () => postService(API_ENDPOINTS.MISSION_PAUSE),
-      resumeMission: () => postService(API_ENDPOINTS.MISSION_RESUME),
-      getMissionStatus: () => getService(API_ENDPOINTS.MISSION_STATUS),
+      loadMissionToController: () =>
+        nrpRosLegacyDisabled(
+          'loadMissionToController: CSV upload prepares automatically',
+        ),
+
+      downloadMission: () =>
+        nrpRosLegacyDisabled(
+          'downloadMission: use active mission.csv endpoint',
+        ),
+
+      clearMission: async () => {
+        const response =
+          await clearBackendMission();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      setCurrentWaypoint: () =>
+        nrpRosLegacyDisabled(
+          'setCurrentWaypoint',
+        ),
+
+      startMission: async () => {
+        const response =
+          await startBackendMission();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      pauseMission: async () => {
+        const response =
+          await pauseBackendMission();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      resumeMission: async () => {
+        const response =
+          await resumeBackendMission();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      nextMission: async () => {
+        const response =
+          await nextMissionPoint();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      skipMission: async () => {
+        const response =
+          await skipMissionPoint();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      stopMission: async () => {
+        const response =
+          await stopBackendMission();
+
+        return response as unknown as ServiceResponse;
+      },
+
+      /*
+       * Restart is intentionally disabled.
+       *
+       * Production flow:
+       * Stop → Start
+       */
+      restartMission: () =>
+        nrpRosLegacyDisabled(
+          'restartMission: use Stop followed by Start',
+        ),
+
+      bulkSkipRange: () =>
+        nrpRosLegacyDisabled(
+          'bulkSkipRange',
+        ),
+
+      getMissionStatus: async () => {
+        const response =
+          await getBackendMissionStatus();
+
+        return response as unknown as ServiceResponse;
+      },
+
+
       // NRP_ROS LEGACY DISABLED — socket mission logs + failsafe emits + RTK inject URL
       requestMissionLogs: () => nrpRosLegacyDisabled('requestMissionLogs'),
       resumeFailsafeMission: () => nrpRosLegacyDisabled('resumeFailsafeMission'),
