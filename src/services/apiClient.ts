@@ -1,167 +1,360 @@
 /**
- * apiClient — Central authenticated REST transport layer.
+ * Central authenticated REST transport for the DYX 4WD Rover Backend.
  *
- * Features:
- * - Injects X-Rover-Token on all protected calls
- * - Resolves base URL from getBackendURL() at call time (dynamic URL)
- * - Maps HTTP error codes to typed ApiError subclasses
- * - Triggers onUnauthorized callback (→ logout) on 401
- * - skipAuth: true for public routes (login, ping, healthz)
- *
- * Usage:
- *   import { apiPost } from './apiClient';
- *   const result = await apiPost<MissionStartResponse>(PX4_MISSION.START);
+ * Supports:
+ * - Authenticated JSON requests
+ * - Authenticated multipart file uploads
+ * - Dynamic rover backend URL
+ * - Request timeouts
+ * - Central HTTP error handling
  */
 
-import { getBackendURL } from '../config';
 import {
-  ApiError,
+  getBackendURL,
+} from "../config";
+
+import {
   NetworkError,
   UnauthorizedError,
   classifyHttpError,
-} from './apiError';
+} from "./apiError";
 
-// ── Token provider injection ──────────────────────────────────────────────────
+// ── Authentication configuration ─────────────────────────────────────────────
 
-/** Callback signature to obtain the current auth token. */
-type GetTokenFn = () => string | null;
+type GetTokenFn =
+  () => string | null;
 
-/** Called when any response returns 401. Implement to trigger logout. */
-type OnUnauthorizedFn = () => void;
+type OnUnauthorizedFn =
+  () => void;
 
-let _getToken: GetTokenFn = () => null;
-let _onUnauthorized: OnUnauthorizedFn = () => {};
+let getToken: GetTokenFn =
+  () => null;
 
-/**
- * Configure token injection. Call once at app startup from AuthContext.
- * This breaks the circular dependency: apiClient doesn't import AuthContext.
- */
+let onUnauthorized: OnUnauthorizedFn =
+  () => {};
+
 export function configureApiClient(
-  getToken: GetTokenFn,
-  onUnauthorized: OnUnauthorizedFn,
+  tokenProvider: GetTokenFn,
+  unauthorizedHandler: OnUnauthorizedFn,
 ): void {
-  _getToken = getToken;
-  _onUnauthorized = onUnauthorized;
+  getToken =
+    tokenProvider;
+
+  onUnauthorized =
+    unauthorizedHandler;
 }
 
 // ── Request options ───────────────────────────────────────────────────────────
 
 export interface ApiRequestOptions {
   /**
-   * Skip injecting X-Rover-Token header.
-   * Use for: /api/ping, /api/healthz, /api/auth/login.
+   * Public endpoints such as login, ping and health checks do not require
+   * X-Rover-Token.
    */
   skipAuth?: boolean;
-  /** Additional headers merged on top of defaults. */
+
+  /**
+   * Additional request headers.
+   */
   headers?: Record<string, string>;
-  /** Fetch timeout in milliseconds. Default: 15 000. */
+
+  /**
+   * Request timeout in milliseconds.
+   */
   timeoutMs?: number;
 }
 
-// ── Internal fetch ────────────────────────────────────────────────────────────
+const DEFAULT_TIMEOUT_MS =
+  15_000;
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_UPLOAD_TIMEOUT_MS =
+  60_000;
+
+// ── Request helpers ───────────────────────────────────────────────────────────
+
+function isMultipartFormData(
+  body: unknown,
+): body is FormData {
+  return (
+    typeof FormData !== "undefined" &&
+    body instanceof FormData
+  );
+}
+
+function createHeaders(
+  body: unknown,
+  options: ApiRequestOptions,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...(options.headers ?? {}),
+  };
+
+  if (isMultipartFormData(body)) {
+    /*
+     * Do not manually set Content-Type for FormData.
+     *
+     * React Native fetch automatically generates:
+     * multipart/form-data; boundary=...
+     */
+    delete headers["Content-Type"];
+    delete headers["content-type"];
+  } else {
+    const hasContentType =
+      Boolean(
+        headers["Content-Type"] ??
+        headers["content-type"],
+      );
+
+    if (!hasContentType) {
+      headers["Content-Type"] =
+        "application/json";
+    }
+  }
+
+  if (!options.skipAuth) {
+    const token =
+      getToken();
+
+    if (token) {
+      headers["X-Rover-Token"] =
+        token;
+    }
+  }
+
+  return headers;
+}
+
+function createRequestBody(
+  body: unknown,
+): FormData | string | undefined {
+  if (body === undefined) {
+    return undefined;
+  }
+
+  if (isMultipartFormData(body)) {
+    return body;
+  }
+
+  return JSON.stringify(body);
+}
+
+// ── Internal request function ─────────────────────────────────────────────────
 
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts: ApiRequestOptions = {},
+  options: ApiRequestOptions = {},
 ): Promise<T> {
-  const base = getBackendURL().replace(/\/$/, '');
-  const url = `${base}${path}`;
+  const backendURL =
+    getBackendURL()
+      .replace(/\/+$/, "");
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(opts.headers ?? {}),
-  };
+  const normalizedPath =
+    path.startsWith("/")
+      ? path
+      : `/${path}`;
 
-  if (!opts.skipAuth) {
-    const token = _getToken();
-    if (token) {
-      headers['X-Rover-Token'] = token;
-    }
-  }
+  const url =
+    `${backendURL}${normalizedPath}`;
 
-  const controller = new AbortController();
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const controller =
+    new AbortController();
 
-  let response: Response;
+  const timeoutMs =
+    options.timeoutMs ??
+    DEFAULT_TIMEOUT_MS;
+
+  const timeoutId =
+    setTimeout(
+      () => {
+        controller.abort();
+      },
+      timeoutMs,
+    );
+
   try {
-    response = await fetch(url, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new NetworkError(new Error(`Request timed out after ${timeoutMs}ms: ${path}`));
+    const response =
+      await fetch(
+        url,
+        {
+          method,
+          headers:
+            createHeaders(
+              body,
+              options,
+            ),
+          body:
+            createRequestBody(
+              body,
+            ),
+          signal:
+            controller.signal,
+        },
+      );
+
+    const rawResponseBody =
+      await response
+        .text()
+        .catch(
+          () => "",
+        );
+
+    if (!response.ok) {
+      const apiError =
+        classifyHttpError(
+          response.status,
+          rawResponseBody,
+          normalizedPath,
+        );
+
+      if (
+        apiError instanceof UnauthorizedError &&
+        !options.skipAuth
+      ) {
+        /*
+         * AuthContext decides whether the session should actually be cleared.
+         * Temporary Wi-Fi or Jetson availability problems must not log out
+         * the operator automatically.
+         */
+        onUnauthorized();
+      }
+
+      throw apiError;
     }
-    throw new NetworkError(err);
+
+    if (!rawResponseBody) {
+      return undefined as T;
+    }
+
+    try {
+      return JSON.parse(
+        rawResponseBody,
+      ) as T;
+    } catch {
+      return rawResponseBody as T;
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.name === "AbortError"
+    ) {
+      throw new NetworkError(
+        new Error(
+          `Request timed out after ${timeoutMs} ms: ${normalizedPath}`,
+        ),
+      );
+    }
+
+    /*
+     * Preserve errors already created by classifyHttpError.
+     */
+    if (
+      error instanceof Error &&
+      (
+        "status" in error ||
+        error instanceof UnauthorizedError ||
+        error instanceof NetworkError
+      )
+    ) {
+      throw error;
+    }
+
+    throw new NetworkError(
+      error,
+    );
   } finally {
-    clearTimeout(timeoutId);
-  }
-
-  const rawBody = await response.text().catch(() => '');
-
-  if (!response.ok) {
-    const apiErr = classifyHttpError(response.status, rawBody, path);
-    if (apiErr instanceof UnauthorizedError && !opts.skipAuth) {
-      _onUnauthorized();
-    }
-    throw apiErr;
-  }
-
-  if (!rawBody) {
-    return undefined as unknown as T;
-  }
-
-  try {
-    return JSON.parse(rawBody) as T;
-  } catch {
-    // Non-JSON success response — return raw string cast
-    return rawBody as unknown as T;
+    clearTimeout(
+      timeoutId,
+    );
   }
 }
 
-// ── Public helpers ────────────────────────────────────────────────────────────
+// ── JSON request functions ────────────────────────────────────────────────────
 
-/** GET request. Returns parsed JSON body. */
 export async function apiGet<T>(
   path: string,
-  opts?: ApiRequestOptions,
+  options?: ApiRequestOptions,
 ): Promise<T> {
-  return request<T>('GET', path, undefined, opts);
+  return request<T>(
+    "GET",
+    path,
+    undefined,
+    options,
+  );
 }
 
-/** POST request with optional JSON body. */
 export async function apiPost<T>(
   path: string,
   body?: unknown,
-  opts?: ApiRequestOptions,
+  options?: ApiRequestOptions,
 ): Promise<T> {
-  return request<T>('POST', path, body, opts);
+  return request<T>(
+    "POST",
+    path,
+    body,
+    options,
+  );
 }
 
-/** PUT request with optional JSON body. */
 export async function apiPut<T>(
   path: string,
   body?: unknown,
-  opts?: ApiRequestOptions,
+  options?: ApiRequestOptions,
 ): Promise<T> {
-  return request<T>('PUT', path, body, opts);
+  return request<T>(
+    "PUT",
+    path,
+    body,
+    options,
+  );
 }
 
-/** DELETE request. */
 export async function apiDelete<T>(
   path: string,
-  opts?: ApiRequestOptions,
+  options?: ApiRequestOptions,
 ): Promise<T> {
-  return request<T>('DELETE', path, undefined, opts);
+  return request<T>(
+    "DELETE",
+    path,
+    undefined,
+    options,
+  );
 }
 
-export const apiClient = { apiGet, apiPost, apiPut, apiDelete, configureApiClient };
+// ── Multipart upload ──────────────────────────────────────────────────────────
+
+/**
+ * Upload multipart FormData with the saved X-Rover-Token.
+ *
+ * Never manually set the multipart Content-Type header. React Native creates
+ * the correct boundary automatically.
+ */
+export async function apiPostMultipart<T>(
+  path: string,
+  formData: FormData,
+  options?: ApiRequestOptions,
+): Promise<T> {
+  return request<T>(
+    "POST",
+    path,
+    formData,
+    {
+      ...options,
+      timeoutMs:
+        options?.timeoutMs ??
+        DEFAULT_UPLOAD_TIMEOUT_MS,
+    },
+  );
+}
+
+export const apiClient = {
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  apiPostMultipart,
+  configureApiClient,
+};
+
 export default apiClient;

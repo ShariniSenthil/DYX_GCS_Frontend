@@ -1,0 +1,412 @@
+/**
+ * DYX 4WD Rover mission API.
+ *
+ * Backend responsibilities:
+ * - Validate and store one active mission.csv
+ * - Prepare the trajectory automatically after upload
+ * - Control Start, Pause, Resume, Next, Skip, Stop and Clear
+ *
+ * The frontend never calculates dummy points or interpolation points.
+ */
+
+import type {
+  DocumentPickerAsset,
+} from "expo-document-picker";
+
+import {
+  PX4_MISSION,
+} from "../config/px4Endpoints";
+
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiPostMultipart,
+} from "./apiClient";
+
+// ── Extension settings ────────────────────────────────────────────────────────
+
+export type MissionExtensionMode =
+  | "ENABLE"
+  | "DISABLE";
+
+export interface MissionUploadOptions {
+  file: DocumentPickerAsset;
+
+  extensionMode:
+    MissionExtensionMode;
+
+  /**
+   * Used only when extensionMode is ENABLE.
+   *
+   * When omitted, the backend uses its configured production default,
+   * currently 3.5 metres.
+   */
+  dummyPointDistanceM?: number;
+}
+
+// ── Backend response types ────────────────────────────────────────────────────
+
+export interface MissionUploadMetadata {
+  schema_version: number;
+  mission_id: string;
+  active_filename: string;
+  original_filename: string;
+  checksum_sha256: string;
+
+  coordinate_mode:
+    | "gps"
+    | "local"
+    | string;
+
+  extension_mode:
+    MissionExtensionMode;
+
+  dummy_point_distance_m:
+    number | null;
+
+  row_transition_threshold_m:
+    number;
+
+  total_points:
+    number;
+
+  uploaded_at:
+    string;
+}
+
+export interface MissionRuntimeState {
+  state?: string;
+  message?: string;
+  error?: string | null;
+
+  mission_id?: string;
+  filename?: string;
+
+  coordinate_mode?: string;
+
+  extension_mode?:
+    MissionExtensionMode;
+
+  dummy_point_distance_m?:
+    number | null;
+
+  total_points?: number;
+
+  completed_points?: number;
+  skipped_points?: number;
+  remaining_points?: number;
+
+  current_point_index?: number;
+  next_point_index?: number;
+
+  progress_pct?: number;
+
+  navigation_point_count?: number;
+  path_frame_id?: string;
+
+  [key: string]: unknown;
+}
+
+export interface MissionUploadResponse {
+  success: boolean;
+  message: string;
+
+  upload:
+    MissionUploadMetadata;
+
+  mission:
+    MissionRuntimeState;
+}
+
+export interface MissionControlResponse {
+  success: boolean;
+
+  operation:
+    | "prepare"
+    | "start"
+    | "pause"
+    | "resume"
+    | "next-point"
+    | "skip-point"
+    | "stop"
+    | "clear"
+    | string;
+
+  mission:
+    MissionRuntimeState;
+}
+
+export interface MissionStatusResponse {
+  success: boolean;
+  mission: MissionRuntimeState;
+}
+
+export interface LoadedPathPoint {
+  x?: number;
+  y?: number;
+  latitude?: number;
+  longitude?: number;
+
+  [key: string]: unknown;
+}
+
+export interface LoadedPathResponse {
+  success: boolean;
+
+  frame_id:
+    string | null;
+
+  navigation_point_count:
+    number;
+
+  preview_truncated:
+    boolean;
+
+  points:
+    LoadedPathPoint[];
+}
+
+export interface DeleteMissionResponse {
+  success: boolean;
+  deleted: boolean;
+  message: string;
+  mission: MissionRuntimeState;
+}
+
+// ── Validation ────────────────────────────────────────────────────────────────
+
+function validateCsvFile(
+  file: DocumentPickerAsset,
+): void {
+  const filename =
+    file.name?.trim() ?? "";
+
+  if (!file.uri) {
+    throw new Error(
+      "The selected CSV file has no readable URI.",
+    );
+  }
+
+  if (
+    !filename ||
+    !filename
+      .toLowerCase()
+      .endsWith(".csv")
+  ) {
+    throw new Error(
+      "Please select a valid CSV mission file.",
+    );
+  }
+}
+
+function validateDummyDistance(
+  value: number,
+): void {
+  if (!Number.isFinite(value)) {
+    throw new Error(
+      "Dummy-point distance must be a valid number.",
+    );
+  }
+
+  if (
+    value < 0.1 ||
+    value > 20
+  ) {
+    throw new Error(
+      "Dummy-point distance must be between 0.10 m and 20.00 m.",
+    );
+  }
+}
+
+// ── Mission upload ────────────────────────────────────────────────────────────
+
+export async function uploadMissionCsv(
+  options: MissionUploadOptions,
+): Promise<MissionUploadResponse> {
+  const {
+    file,
+    extensionMode,
+    dummyPointDistanceM,
+  } = options;
+
+  validateCsvFile(file);
+
+  if (
+    extensionMode !== "ENABLE" &&
+    extensionMode !== "DISABLE"
+  ) {
+    throw new Error(
+      "Extension mode must be ENABLE or DISABLE.",
+    );
+  }
+
+  if (
+    extensionMode === "ENABLE" &&
+    dummyPointDistanceM !== undefined
+  ) {
+    validateDummyDistance(
+      dummyPointDistanceM,
+    );
+  }
+
+  const formData =
+    new FormData();
+
+  /**
+   * React Native fetch accepts this URI-based file object.
+   * The `any` cast is required because browser FormData typings expect Blob,
+   * while React Native accepts uri/name/type.
+   */
+  formData.append(
+    "file",
+    {
+      uri: file.uri,
+      name:
+        file.name ||
+        "mission.csv",
+      type:
+        file.mimeType ||
+        "text/csv",
+    } as any,
+  );
+
+  formData.append(
+    "extension_mode",
+    extensionMode,
+  );
+
+  if (
+    extensionMode === "ENABLE" &&
+    dummyPointDistanceM !== undefined
+  ) {
+    formData.append(
+      "dummy_point_distance_m",
+      String(
+        dummyPointDistanceM,
+      ),
+    );
+  }
+
+  return apiPostMultipart<MissionUploadResponse>(
+    PX4_MISSION.UPLOAD,
+    formData,
+    {
+      timeoutMs: 60_000,
+    },
+  );
+}
+
+// ── Mission information ───────────────────────────────────────────────────────
+
+export async function getMissionStatus():
+Promise<MissionStatusResponse> {
+  return apiGet<MissionStatusResponse>(
+    PX4_MISSION.STATUS,
+  );
+}
+
+export async function getLoadedMissionPath():
+Promise<LoadedPathResponse> {
+  return apiGet<LoadedPathResponse>(
+    PX4_MISSION.LOADED_PATH,
+  );
+}
+
+export function getMissionDownloadUrl(
+  backendURL: string,
+): string {
+  return (
+    `${backendURL.replace(/\/+$/, "")}` +
+    PX4_MISSION.FILE
+  );
+}
+
+// ── Mission controls ──────────────────────────────────────────────────────────
+
+export async function prepareMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.PREPARE,
+  );
+}
+
+export async function startMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.START,
+  );
+}
+
+export async function pauseMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.PAUSE,
+  );
+}
+
+export async function resumeMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.RESUME,
+  );
+}
+
+export async function nextMissionPoint():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.NEXT_POINT,
+  );
+}
+
+export async function skipMissionPoint():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.SKIP_POINT,
+  );
+}
+
+export async function stopMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.STOP,
+  );
+}
+
+/**
+ * Clears generated path and runtime mission progress.
+ * The active mission.csv remains stored.
+ */
+export async function clearMission():
+Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.CLEAR,
+  );
+}
+
+/**
+ * Deletes the active mission.csv completely.
+ * This is different from Clear.
+ */
+export async function deleteMissionCsv():
+Promise<DeleteMissionResponse> {
+  return apiDelete<DeleteMissionResponse>(
+    PX4_MISSION.FILE,
+  );
+}
+
+export default {
+  uploadMissionCsv,
+  getMissionStatus,
+  getLoadedMissionPath,
+  getMissionDownloadUrl,
+  prepareMission,
+  startMission,
+  pauseMission,
+  resumeMission,
+  nextMissionPoint,
+  skipMissionPoint,
+  stopMission,
+  clearMission,
+  deleteMissionCsv,
+};

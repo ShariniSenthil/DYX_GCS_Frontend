@@ -1,69 +1,89 @@
 /**
- * AuthContext — Operator session state for 4WD_SERVER.
+ * Persistent authentication context for the DYX 4WD Rover Backend.
  *
- * Responsibilities:
- * - Loads persisted session on mount (token + expiry)
- * - Provides login/logout/changePassword actions
- * - Injects token into apiClient and socketClient on auth
- * - Handles `auth_revoked` socket event → force logout
- * - Shows expiry warning banner at T-5min
- *
- * Provider tree placement: wrap the entire app root (above RoverProvider).
- *
- * When ROVER_ENABLED=false, context is mounted but auth is skipped —
- * isAuthenticated is always true and login/logout are no-ops.
+ * Login contract:
+ * - A successful login is stored in AsyncStorage.
+ * - App closure must not remove the session.
+ * - Tablet restart must not remove the session.
+ * - Wi-Fi loss must not remove the session.
+ * - Jetson restart must not remove the session.
+ * - HTTP 401 must not automatically erase the local session.
+ * - Explicit Logout removes the session.
+ * - A confirmed auth_revoked security event may remove the session.
  */
 
 import React, {
   createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
   ReactNode,
-} from 'react';
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import type {
-  AuthSession,
   AuthError,
   AuthRevokedEvent,
+  AuthSession,
+  ChangePasswordRequest,
+  ChangePasswordResponse,
   LoginRequest,
   LoginResponse,
-  ChangePasswordRequest,
-} from '../types/auth';
-import {
-  saveSession,
-  loadSession,
-  clearSession,
-  isExpiringSoon,
-} from '../services/authStorage';
-import { configureApiClient, apiPost } from '../services/apiClient';
-import { configure as configureSocket, on as socketOn } from '../services/socketClient';
-import { PX4_AUTH } from '../config/px4Endpoints';
-import { AUTH_ENABLED } from '../config/featureFlags';
+} from "../types/auth";
 
-// ── Context value ─────────────────────────────────────────────────────────────
+import {
+  clearSession,
+  loadSession,
+  saveSession,
+} from "../services/authStorage";
+
+import { apiPost, configureApiClient } from "../services/apiClient";
+
+import {
+  configure as configureSocket,
+  on as socketOn,
+} from "../services/socketClient";
+
+import { PX4_AUTH } from "../config/px4Endpoints";
+import { AUTH_ENABLED } from "../config/featureFlags";
+
+// ── Context type ──────────────────────────────────────────────────────────────
 
 export interface AuthContextValue {
-  /** True when a valid, non-expired session is held (or auth is disabled). */
+  /**
+   * True when a locally stored login session exists.
+   *
+   * Connectivity problems do not change this value.
+   */
   isAuthenticated: boolean;
-  /** Current session — null if not authenticated. */
+
+  /** Current persisted operator session. */
   session: AuthSession | null;
-  /** True while the initial session load from storage is in progress. */
+
+  /** True while AsyncStorage is being checked during app startup. */
   isLoading: boolean;
-  /** Set when a warning should be shown (session expiring soon). */
+
+  /**
+   * Retained for UI compatibility.
+   * Persistent sessions do not display automatic expiry warnings.
+   */
   isExpiringSoon: boolean;
-  /** Last auth error. */
+
+  /** Most recent authentication-related error. */
   lastError: AuthError | null;
-  /** Login with operator username and password. */
-login: (
-  username: string,
-  password: string,
-) => Promise<void>;
-  /** Logout current session. */
+
+  /** Login using the static backend username and password. */
+  login: (username: string, password: string) => Promise<void>;
+
+  /** Explicitly end the current operator session. */
   logout: () => Promise<void>;
-  /** Change password; refreshes token on success. */
-  changePassword: (current: string, next: string) => Promise<void>;
+
+  /** Retained for future password-change support. */
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -74,245 +94,366 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-export function AuthProvider({ children }: AuthProviderProps): React.ReactElement {
+export function AuthProvider({
+  children,
+}: AuthProviderProps): React.ReactElement {
   const [session, setSession] = useState<AuthSession | null>(null);
+
   const [isLoading, setIsLoading] = useState(true);
-  const [expiringSoon, setExpiringSoon] = useState(false);
+
   const [lastError, setLastError] = useState<AuthError | null>(null);
 
-  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Clear the local session.
+   *
+   * This is used only for:
+   * - Explicit Logout
+   * - Confirmed auth_revoked security event
+   */
+  const clearLocalSession = useCallback(async (): Promise<void> => {
+    setSession(null);
+    setLastError(null);
 
-  // ── Token getter for apiClient / socketClient ─────────────────────────────
-  const getToken = useCallback((): string | null => session?.token ?? null, [session]);
+    await clearSession();
+  }, []);
 
-  // Configure apiClient once (callback-based injection avoids circular imports)
+  // ── REST token injection ──────────────────────────────────────────────────
+
   useEffect(() => {
     configureApiClient(
       () => session?.token ?? null,
+
+      /**
+       * Do not automatically log out on HTTP 401.
+       *
+       * A temporary backend restart, delayed service startup or connection
+       * issue must not delete the locally saved operator login.
+       */
       () => {
-        // 401 received — force logout
-        console.warn('[AuthContext] 401 received — forcing logout');
-        void _clearSessionState();
+        console.warn(
+          "[AuthContext] Authenticated request returned 401. " +
+            "The stored login session has been retained.",
+        );
+
+        setLastError({
+          code: "session_unavailable",
+          message:
+            "The rover could not verify the saved session. " +
+            "The app will keep the login and retry after reconnection.",
+        });
       },
     );
   }, [session]);
 
-  // Configure socketClient token getter
+  // ── Socket token injection ────────────────────────────────────────────────
+
   useEffect(() => {
     configureSocket(() => session?.token ?? null);
   }, [session]);
 
-  // ── Expiry warning timer ──────────────────────────────────────────────────
-  const scheduleExpiryWarning = useCallback((s: AuthSession) => {
-    if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
-    const warningMs = s.expiresAt - Date.now() - 5 * 60 * 1000; // 5 min before expiry
-    if (warningMs > 0) {
-      expiryTimerRef.current = setTimeout(() => setExpiringSoon(true), warningMs);
-    } else {
-      setExpiringSoon(true);
-    }
+  // ── Restore saved login on application startup ────────────────────────────
+
+  useEffect(() => {
+    let mounted = true;
+
+    const restoreSavedSession = async (): Promise<void> => {
+      if (!AUTH_ENABLED) {
+        if (mounted) {
+          setIsLoading(false);
+        }
+
+        return;
+      }
+
+      try {
+        const savedSession = await loadSession();
+
+        if (mounted && savedSession) {
+          setSession(savedSession);
+          setLastError(null);
+
+          console.log("[AuthContext] Restored saved operator session.");
+        }
+      } catch (error) {
+        console.warn("[AuthContext] Could not restore saved session:", error);
+
+        /*
+         * Do not clear AsyncStorage here.
+         * A temporary storage/read issue must not intentionally log out
+         * the operator.
+         */
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void restoreSavedSession();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
- 
-// ── App launch: restore the saved login session ─────────────────────────────
-useEffect(() => {
-  if (!AUTH_ENABLED) {
-    setIsLoading(false);
-    return;
-  }
+  // ── Confirmed security revocation ─────────────────────────────────────────
 
-  const restoreSavedSession = async () => {
-    try {
-      const savedSession = await loadSession();
+  useEffect(() => {
+    if (!AUTH_ENABLED) {
+      return;
+    }
 
-      if (savedSession) {
-        setSession(savedSession);
+    const unsubscribe = socketOn(
+      "auth_revoked",
 
-        setExpiringSoon(
-          isExpiringSoon(savedSession),
+      (event: unknown) => {
+        const revokedEvent = event as AuthRevokedEvent;
+
+        console.warn(
+          "[AuthContext] Backend revoked the session:",
+          revokedEvent.reason,
         );
 
-        scheduleExpiryWarning(savedSession);
-      }
-    } catch (error) {
-      console.warn(
-        '[AuthContext] Failed to restore saved session:',
-        error,
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  void restoreSavedSession();
-
-  return () => {
-    if (expiryTimerRef.current) {
-      clearTimeout(expiryTimerRef.current);
-    }
-  };
-}, [scheduleExpiryWarning]);
-
-  // ── auth_revoked socket listener ─────────────────────────────────────────
-  useEffect(() => {
-    if (!AUTH_ENABLED) return;
-
-    const off = socketOn(
-      'auth_revoked',
-      (event: unknown) => {
-        const e = event as AuthRevokedEvent;
-        console.warn('[AuthContext] auth_revoked received:', e.reason);
-        void _clearSessionState();
+        void clearLocalSession();
       },
-      'auth-context-revoked',
+
+      "auth-context-revoked",
     );
 
-    return off;
-  }, []);
+    return unsubscribe;
+  }, [clearLocalSession]);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Login ─────────────────────────────────────────────────────────────────
 
-  const _clearSessionState = async () => {
-    if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
-    setSession(null);
-    setExpiringSoon(false);
-    await clearSession();
-  };
+  const login = useCallback(
+    async (username: string, password: string): Promise<void> => {
+      setLastError(null);
 
-const login = useCallback(
-  async (
-    username: string,
-    password: string,
-  ): Promise<void> => {
-    setLastError(null);
-
-    try {
       if (!AUTH_ENABLED) {
         return;
       }
 
-      const request: LoginRequest = {
-        username: username.trim(),
-        password,
-      };
+      const trimmedUsername = username.trim();
 
-      const raw = await apiPost<LoginResponse>(
-        PX4_AUTH.LOGIN,
-        request,
-        {
+      if (!trimmedUsername) {
+        const error: AuthError = {
+          code: "invalid_password",
+          message: "Username is required.",
+        };
+
+        setLastError(error);
+        throw new Error(error.message);
+      }
+
+      if (!password) {
+        const error: AuthError = {
+          code: "invalid_password",
+          message: "Password is required.",
+        };
+
+        setLastError(error);
+        throw new Error(error.message);
+      }
+
+      try {
+        const request: LoginRequest = {
+          username: trimmedUsername,
+          password,
+        };
+
+        const response = await apiPost<LoginResponse>(PX4_AUTH.LOGIN, request, {
           skipAuth: true,
-        },
-      );
+          timeoutMs: 15_000,
+        });
 
-      const newSession = await saveSession(raw);
+        if (response.success === false) {
+          throw new Error("Backend rejected the login request.");
+        }
 
-      setSession(newSession);
-      setExpiringSoon(false);
+        const savedSession = await saveSession(response);
 
-      scheduleExpiryWarning(newSession);
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error
-          ? err.message
-          : 'Login failed';
+        setSession(savedSession);
+        setLastError(null);
 
-      const invalidCredentials =
-        errorMessage.includes('401') ||
-        errorMessage
-          .toLowerCase()
-          .includes('invalid');
+        console.log("[AuthContext] Operator login saved successfully.");
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Login failed.";
 
-      const authError: AuthError = {
-        code: invalidCredentials
-          ? 'invalid_password'
-          : 'network_error',
+        const normalizedMessage = message.toLowerCase();
 
-        message: invalidCredentials
-          ? 'Invalid username or password.'
-          : errorMessage,
-      };
+        const invalidCredentials =
+          normalizedMessage.includes("401") ||
+          normalizedMessage.includes("invalid") ||
+          normalizedMessage.includes("unauthorized");
 
-      setLastError(authError);
+        const authError: AuthError = {
+          code: invalidCredentials ? "invalid_password" : "network_error",
 
-      throw new Error(authError.message);
-    }
-  },
-  [scheduleExpiryWarning],
-);
+          message: invalidCredentials
+            ? "Invalid username or password."
+            : message,
+        };
+
+        setLastError(authError);
+
+        throw new Error(authError.message);
+      }
+    },
+    [],
+  );
+
+  // ── Logout ────────────────────────────────────────────────────────────────
 
   const logout = useCallback(async (): Promise<void> => {
-    if (!AUTH_ENABLED) return;
+    if (!AUTH_ENABLED) {
+      return;
+    }
+
     try {
       if (session?.token) {
-        await apiPost(PX4_AUTH.LOGOUT, undefined).catch(() => {
-          // Best-effort: clear locally even if server fails
+        /*
+         * Best-effort backend logout.
+         *
+         * Even when Wi-Fi is unavailable, pressing Logout must remove the
+         * locally persisted session.
+         */
+        await apiPost(PX4_AUTH.LOGOUT, undefined, {
+          timeoutMs: 8_000,
+        }).catch((error) => {
+          console.warn(
+            "[AuthContext] Backend logout request failed. " +
+              "Local logout will continue:",
+            error,
+          );
         });
       }
     } finally {
-      await _clearSessionState();
+      await clearLocalSession();
+
+      console.log("[AuthContext] Operator logged out explicitly.");
     }
-  }, [session]);
+  }, [session, clearLocalSession]);
+
+  // ── Password change compatibility ─────────────────────────────────────────
 
   const changePassword = useCallback(
-    async (current: string, next: string): Promise<void> => {
-      if (!AUTH_ENABLED) return;
-      setLastError(null);
-      try {
-        const raw = await apiPost<{
-          token: string;
-          session_id: string;
-          expires_at: string;
-          ttl_s: number;
-          revoked_sessions: number;
-        }>(PX4_AUTH.CHANGE_PASSWORD, {
-          current_password: current,
-          new_password: next,
-        } satisfies ChangePasswordRequest);
+    async (currentPassword: string, newPassword: string): Promise<void> => {
+      if (!AUTH_ENABLED) {
+        return;
+      }
 
-        const newSession = await saveSession(raw);
-        setSession(newSession);
-        setExpiringSoon(false);
-        scheduleExpiryWarning(newSession);
-      } catch (err) {
-        const authErr: AuthError = {
-          code: 'unknown',
-          message: err instanceof Error ? err.message : 'Password change failed',
+      setLastError(null);
+
+      try {
+        const request: ChangePasswordRequest = {
+          current_password: currentPassword,
+
+          new_password: newPassword,
         };
-        setLastError(authErr);
-        throw authErr;
+
+        const response = await apiPost<ChangePasswordResponse>(
+          PX4_AUTH.CHANGE_PASSWORD,
+          request,
+        );
+
+        /*
+         * Normalize the password-change response so it can use the same
+         * persistent storage function as login.
+         */
+        const normalizedResponse: LoginResponse = {
+          success: true,
+
+          token: response.token,
+
+          token_type: "X-Rover-Token",
+
+          expires_at: response.expires_at,
+
+          session_id: response.session_id,
+
+          user: {
+            username: session?.username ?? "admin",
+          },
+
+          rover: {
+            id: session?.roverId ?? "dyx-4wd-001",
+
+            name: session?.roverName ?? "DYX 4WD Rover",
+          },
+        };
+
+        const savedSession = await saveSession(normalizedResponse);
+
+        setSession(savedSession);
+        setLastError(null);
+      } catch (error) {
+        const authError: AuthError = {
+          code: "unknown",
+
+          message:
+            error instanceof Error ? error.message : "Password change failed.",
+        };
+
+        setLastError(authError);
+
+        throw new Error(authError.message);
       }
     },
-    [scheduleExpiryWarning],
+    [session],
   );
 
   // ── Context value ─────────────────────────────────────────────────────────
 
-  const isAuthenticated = !AUTH_ENABLED || (session !== null && Date.now() < session.expiresAt);
+  /**
+   * Persistent-login contract:
+   *
+   * Authentication depends only on whether a locally stored session exists.
+   * We deliberately do not compare Date.now() against expiresAt here.
+   */
+  const isAuthenticated = !AUTH_ENABLED || session !== null;
 
-  const contextValue = React.useMemo<AuthContextValue>(
+  const contextValue = useMemo<AuthContextValue>(
     () => ({
       isAuthenticated,
       session,
       isLoading,
-      isExpiringSoon: expiringSoon,
+
+      // Persistent sessions do not show expiry warnings.
+      isExpiringSoon: false,
+
       lastError,
       login,
       logout,
       changePassword,
     }),
-    [isAuthenticated, session, isLoading, expiringSoon, lastError, login, logout, changePassword],
+
+    [
+      isAuthenticated,
+      session,
+      isLoading,
+      lastError,
+      login,
+      logout,
+      changePassword,
+    ],
   );
 
-  return React.createElement(AuthContext.Provider, { value: contextValue }, children);
+  return (
+    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
+  );
 }
 
-// ── Hooks ─────────────────────────────────────────────────────────────────────
+// ── Consumer hook ─────────────────────────────────────────────────────────────
 
-/** Access auth state and actions. Must be used within <AuthProvider>. */
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error("useAuth must be used inside AuthProvider.");
+  }
+
+  return context;
 }
 
 export default AuthContext;

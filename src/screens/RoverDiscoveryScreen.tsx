@@ -32,7 +32,7 @@ import ConnectPasswordModal from "../components/common/ConnectPasswordModal";
 import axios from "axios";
 
 interface RoverDiscoveryScreenProps {
-  onRoverSelected: (device: JetsonDevice) => void;
+  onRoverSelected: (device: JetsonDevice) => void | Promise<void>;
 }
 
 interface PendingConnect {
@@ -182,30 +182,48 @@ export default function RoverDiscoveryScreen({
     device: JetsonDevice,
     username: string,
     password: string,
-  ) => {
+  ): Promise<void> => {
     setConnectingRoverId(device.id);
     setIsConnecting(true);
     setConnectError(null);
+
     try {
+      /*
+       * The API must use the selected rover URL before sending login.
+       *
+       * Do not save the URL yet. A wrong password or unreachable backend
+       * must not become the permanently selected rover.
+       */
       setBackendURL(device.url);
-      await saveBackendURL(device.url, device.ip, device.port);
 
       if (AUTH_ENABLED) {
         await login(username, password);
       }
 
+      /*
+       * App.tsx saves the backend URL only after authentication succeeds.
+       */
+      await onRoverSelected(device);
+
       setShowPasswordModal(false);
       setPendingConnect(null);
-      onRoverSelected(device);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const displayMsg =
-        msg.includes("401") ||
-        msg.includes("invalid_password") ||
-        msg.includes("nvalid")
-          ? "Incorrect password. Please try again."
-          : `Connection failed: ${msg}`;
-      setConnectError(displayMsg);
+      setConnectError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      const normalizedMessage = message.toLowerCase();
+
+      const invalidCredentials =
+        normalizedMessage.includes("401") ||
+        normalizedMessage.includes("invalid_password") ||
+        normalizedMessage.includes("invalid") ||
+        normalizedMessage.includes("unauthorized");
+
+      setConnectError(
+        invalidCredentials
+          ? "Incorrect username or password. Please try again."
+          : `Connection failed: ${message}`,
+      );
     } finally {
       setConnectingRoverId(null);
       setIsConnecting(false);

@@ -1,84 +1,116 @@
 /**
- * LoginScreen — Operator password entry for 4WD_SERVER authentication.
+ * Login screen for the DYX 4WD Rover Backend.
  *
- * Displayed before the tab navigator whenever `isAuthenticated` is false.
- * Dismissed automatically when login succeeds (AuthContext updates).
- *
- * Design:
- * - Full-screen dark overlay matching the GCS theme
- * - Single password field (backend is password-only, no username)
- * - Shows backend URL so operator knows which rover they are connecting to
- * - Expiry warning banner re-prompts before token expires mid-mission
+ * Behaviour:
+ * - Uses POST /api/auth/login.
+ * - Stores the returned X-Rover-Token through AuthContext.
+ * - The login remains stored until the operator explicitly logs out.
+ * - Wi-Fi loss or Jetson restart does not clear the login.
  */
 
-import React, { useState, useRef, useCallback } from "react";
+import React, { useCallback, useRef, useState } from "react";
+
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Animated,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+
 import { Ionicons } from "@expo/vector-icons";
+
 import { useAuth } from "../hooks/useAuth";
+
 import { getBackendURL } from "../config";
 
 interface LoginScreenProps {
-  /** If true, shown as re-auth overlay (expiry) instead of initial gate. */
+  /**
+   * Retained for compatibility when the login screen is used as a
+   * re-authentication overlay.
+   */
   isReAuth?: boolean;
 }
 
 export default function LoginScreen({
   isReAuth = false,
 }: LoginScreenProps): React.ReactElement {
-  const { login, lastError, isLoading: authLoading } = useAuth();
+  const { login, lastError } = useAuth();
+
+  const [username, setUsername] = useState("admin");
+
   const [password, setPassword] = useState("");
+
   const [showPassword, setShowPassword] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-  const backendUrl = getBackendURL();
+  const passwordInputRef = useRef<TextInput>(null);
 
-  const shake = useCallback(() => {
+  const shakeAnimation = useRef(new Animated.Value(0)).current;
+
+  const backendURL = getBackendURL();
+
+  // ── Error animation ──────────────────────────────────────────────────────
+
+  const shake = useCallback((): void => {
     Animated.sequence([
-      Animated.timing(shakeAnim, {
+      Animated.timing(shakeAnimation, {
         toValue: 8,
         duration: 60,
         useNativeDriver: true,
       }),
-      Animated.timing(shakeAnim, {
+
+      Animated.timing(shakeAnimation, {
         toValue: -8,
         duration: 60,
         useNativeDriver: true,
       }),
-      Animated.timing(shakeAnim, {
+
+      Animated.timing(shakeAnimation, {
         toValue: 6,
         duration: 60,
         useNativeDriver: true,
       }),
-      Animated.timing(shakeAnim, {
+
+      Animated.timing(shakeAnimation, {
         toValue: -6,
         duration: 60,
         useNativeDriver: true,
       }),
-      Animated.timing(shakeAnim, {
+
+      Animated.timing(shakeAnimation, {
         toValue: 0,
         duration: 60,
         useNativeDriver: true,
       }),
     ]).start();
-  }, [shakeAnim]);
+  }, [shakeAnimation]);
 
-  const handleLogin = useCallback(async () => {
-    if (!password.trim()) {
-      setLocalError("Password is required.");
+  // ── Login ────────────────────────────────────────────────────────────────
+
+  const handleLogin = useCallback(async (): Promise<void> => {
+    const trimmedUsername = username.trim();
+
+    if (!trimmedUsername) {
+      setLocalError("Username is required.");
+
       shake();
+      return;
+    }
+
+    if (!password) {
+      setLocalError("Password is required.");
+
+      shake();
+      passwordInputRef.current?.focus();
       return;
     }
 
@@ -86,22 +118,33 @@ export default function LoginScreen({
     setIsSubmitting(true);
 
     try {
-      await login("admin", password);
-      // AuthContext updates isAuthenticated → parent re-renders to main UI
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const displayMsg =
-        msg.includes("401") ||
-        msg.includes("invalid_password") ||
-        msg.includes("nvalid")
-          ? "Incorrect password. Please try again."
-          : `Connection failed: ${msg}`;
-      setLocalError(displayMsg);
+      await login(trimmedUsername, password);
+
+      /*
+       * AuthContext saves the session and changes isAuthenticated to true.
+       * AuthGate then automatically opens the main application.
+       */
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Login failed.";
+
+      const normalizedMessage = message.toLowerCase();
+
+      const invalidCredentials =
+        normalizedMessage.includes("401") ||
+        normalizedMessage.includes("invalid") ||
+        normalizedMessage.includes("unauthorized");
+
+      setLocalError(
+        invalidCredentials
+          ? "Incorrect username or password."
+          : `Could not connect to the rover: ${message}`,
+      );
+
       shake();
     } finally {
       setIsSubmitting(false);
     }
-  }, [password, login, shake]);
+  }, [username, password, login, shake]);
 
   const errorMessage = localError ?? lastError?.message ?? null;
 
@@ -114,55 +157,122 @@ export default function LoginScreen({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Logo / header */}
+        {/* Header */}
+
         <View style={styles.header}>
           <View style={styles.logoCircle}>
             <Ionicons name="shield-checkmark" size={36} color="#4ADE80" />
           </View>
+
           <Text style={styles.title}>
-            {isReAuth ? "Session Expired" : "GCS Authentication"}
+            {isReAuth ? "Operator Login" : "DYX Rover Login"}
           </Text>
+
           <Text style={styles.subtitle}>
-            {isReAuth
-              ? "Your session has expired. Re-enter your password to continue."
-              : "Enter operator password to access the Ground Control Station."}
+            Sign in to access the DYX 4WD Rover Ground Control Station.
           </Text>
         </View>
 
-        {/* Backend info */}
+        {/* Selected backend */}
+
         <View style={styles.serverInfo}>
-          <Ionicons name="server-outline" size={13} color="#64748B" />
+          <Ionicons name="server-outline" size={14} color="#64748B" />
+
           <Text style={styles.serverText} numberOfLines={1}>
-            {backendUrl}
+            {backendURL}
           </Text>
         </View>
 
-        {/* Form */}
+        {/* Login form */}
+
         <Animated.View
-          style={[styles.form, { transform: [{ translateX: shakeAnim }] }]}
+          style={[
+            styles.form,
+            {
+              transform: [
+                {
+                  translateX: shakeAnimation,
+                },
+              ],
+            },
+          ]}
         >
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputRow}>
+          <Text style={styles.label}>Username</Text>
+
+          <View
+            style={[
+              styles.inputRow,
+              errorMessage ? styles.inputRowError : null,
+            ]}
+          >
+            <Ionicons
+              name="person-outline"
+              size={19}
+              color="#64748B"
+              style={styles.inputIcon}
+            />
+
             <TextInput
-              style={[styles.input, errorMessage ? styles.inputError : null]}
-              placeholder="Enter operator password"
+              style={styles.input}
+              placeholder="Enter username"
               placeholderTextColor="#475569"
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
+              value={username}
+              onChangeText={(value) => {
+                setUsername(value);
                 setLocalError(null);
               }}
-              onSubmitEditing={handleLogin}
-              returnKeyType="done"
-              autoFocus
+              onSubmitEditing={() => {
+                passwordInputRef.current?.focus();
+              }}
+              returnKeyType="next"
               autoCapitalize="none"
               autoCorrect={false}
               editable={!isSubmitting}
             />
+          </View>
+
+          <Text style={[styles.label, styles.passwordLabel]}>Password</Text>
+
+          <View
+            style={[
+              styles.inputRow,
+              errorMessage ? styles.inputRowError : null,
+            ]}
+          >
+            <Ionicons
+              name="lock-closed-outline"
+              size={19}
+              color="#64748B"
+              style={styles.inputIcon}
+            />
+
+            <TextInput
+              ref={passwordInputRef}
+              style={styles.input}
+              placeholder="Enter password"
+              placeholderTextColor="#475569"
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                setLocalError(null);
+              }}
+              onSubmitEditing={() => {
+                void handleLogin();
+              }}
+              returnKeyType="done"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isSubmitting}
+            />
+
             <TouchableOpacity
-              style={styles.eyeBtn}
-              onPress={() => setShowPassword((v) => !v)}
+              style={styles.eyeButton}
+              onPress={() => {
+                setShowPassword((currentValue) => !currentValue);
+              }}
+              disabled={isSubmitting}
+              accessibilityRole="button"
               accessibilityLabel={
                 showPassword ? "Hide password" : "Show password"
               }
@@ -177,59 +287,75 @@ export default function LoginScreen({
 
           {errorMessage ? (
             <View style={styles.errorRow}>
-              <Ionicons name="alert-circle-outline" size={14} color="#EF4444" />
+              <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+
               <Text style={styles.errorText}>{errorMessage}</Text>
             </View>
           ) : null}
 
           <TouchableOpacity
-            style={[styles.loginBtn, isSubmitting && styles.loginBtnDisabled]}
-            onPress={handleLogin}
-            disabled={isSubmitting || !password.trim()}
-            accessibilityLabel="Login"
+            style={[
+              styles.loginButton,
+              isSubmitting || !username.trim() || !password
+                ? styles.loginButtonDisabled
+                : null,
+            ]}
+            onPress={() => {
+              void handleLogin();
+            }}
+            disabled={isSubmitting || !username.trim() || !password}
             accessibilityRole="button"
+            accessibilityLabel="Login to rover"
           >
             {isSubmitting ? (
               <ActivityIndicator size="small" color="#0F172A" />
             ) : (
               <>
-                <Ionicons name="log-in-outline" size={18} color="#0F172A" />
-                <Text style={styles.loginBtnText}>
-                  {isReAuth ? "Re-authenticate" : "Login"}
-                </Text>
+                <Ionicons name="log-in-outline" size={19} color="#0F172A" />
+
+                <Text style={styles.loginButtonText}>Login</Text>
               </>
             )}
           </TouchableOpacity>
         </Animated.View>
 
-        {/* Hint */}
-        <Text style={styles.hint}>
-          Contact your system administrator if you have forgotten your password.
-          Operator accounts are managed via rover_auth_cli on the Jetson.
-        </Text>
+        {/* Persistent-login information */}
+
+        <View style={styles.persistenceInfo}>
+          <Ionicons
+            name="information-circle-outline"
+            size={15}
+            color="#64748B"
+          />
+
+          <Text style={styles.persistenceText}>
+            You will remain logged in until you explicitly select Logout.
+          </Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
-
-// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#0A1628",
   },
+
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 40,
+    paddingHorizontal: 28,
+    paddingVertical: 36,
   },
+
   header: {
     alignItems: "center",
-    marginBottom: 32,
+    marginBottom: 26,
   },
+
   logoCircle: {
     width: 72,
     height: 72,
@@ -237,113 +363,146 @@ const styles = StyleSheet.create({
     backgroundColor: "#0F2942",
     borderWidth: 2,
     borderColor: "#1E3A5F",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
   },
+
   title: {
-    fontSize: 22,
-    fontWeight: "700",
     color: "#F1F5F9",
-    letterSpacing: 0.5,
+    fontSize: 23,
+    fontWeight: "700",
+    letterSpacing: 0.4,
     marginBottom: 8,
   },
+
   subtitle: {
-    fontSize: 13,
     color: "#94A3B8",
-    textAlign: "center",
+    fontSize: 13,
     lineHeight: 19,
-    maxWidth: 320,
+    textAlign: "center",
+    maxWidth: 380,
   },
+
   serverInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#0F1C2E",
+    gap: 7,
+    maxWidth: 390,
+    marginBottom: 24,
+    borderRadius: 7,
     borderWidth: 1,
     borderColor: "#1E3A5F",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 28,
-    maxWidth: 340,
+    backgroundColor: "#0F1C2E",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
+
   serverText: {
-    fontSize: 11,
-    color: "#64748B",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
     flexShrink: 1,
+    color: "#64748B",
+    fontSize: 11,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
+
   form: {
     width: "100%",
-    maxWidth: 360,
+    maxWidth: 390,
   },
+
   label: {
+    color: "#94A3B8",
     fontSize: 12,
     fontWeight: "600",
-    color: "#94A3B8",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 6,
   },
+
+  passwordLabel: {
+    marginTop: 16,
+  },
+
   inputRow: {
+    minHeight: 50,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#0F1C2E",
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "#1E3A5F",
-    borderRadius: 8,
-    marginBottom: 8,
+    backgroundColor: "#0F1C2E",
   },
-  input: {
-    flex: 1,
-    height: 48,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: "#F1F5F9",
-  },
-  inputError: {
+
+  inputRowError: {
     borderColor: "#EF4444",
   },
-  eyeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+
+  inputIcon: {
+    marginLeft: 13,
   },
+
+  input: {
+    flex: 1,
+    minHeight: 48,
+    color: "#F1F5F9",
+    fontSize: 15,
+    paddingHorizontal: 11,
+  },
+
+  eyeButton: {
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+  },
+
   errorRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginBottom: 12,
+    alignItems: "flex-start",
+    gap: 6,
+    marginTop: 10,
   },
+
   errorText: {
-    fontSize: 12,
-    color: "#EF4444",
     flex: 1,
+    color: "#EF4444",
+    fontSize: 12,
+    lineHeight: 17,
   },
-  loginBtn: {
+
+  loginButton: {
+    height: 50,
+    marginTop: 20,
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     gap: 8,
-    backgroundColor: "#4ADE80",
     borderRadius: 8,
-    height: 48,
-    marginTop: 8,
+    backgroundColor: "#4ADE80",
   },
-  loginBtnDisabled: {
-    opacity: 0.5,
+
+  loginButtonDisabled: {
+    opacity: 0.45,
   },
-  loginBtnText: {
+
+  loginButtonText: {
+    color: "#0F172A",
     fontSize: 15,
     fontWeight: "700",
-    color: "#0F172A",
   },
-  hint: {
+
+  persistenceInfo: {
+    maxWidth: 390,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 25,
+    paddingHorizontal: 12,
+  },
+
+  persistenceText: {
+    flex: 1,
+    color: "#64748B",
     fontSize: 11,
-    color: "#334155",
-    textAlign: "center",
     lineHeight: 16,
-    maxWidth: 320,
-    marginTop: 32,
+    textAlign: "center",
   },
 });

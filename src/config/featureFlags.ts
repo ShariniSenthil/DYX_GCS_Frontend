@@ -1,75 +1,139 @@
 /**
- * Feature Flags — 4WD_SERVER Migration
+ * Feature flags for the DYX 4WD Rover frontend.
  *
- * Controls which backend contract the app uses at runtime.
- * Set EXPO_PUBLIC_ROVER_ENABLED=true in your .env to activate PX4 mode.
- *
- * Usage:
- *   import { isPx4DxpEnabled } from './featureFlags';
- *   if (isPx4DxpEnabled()) { ... }
+ * The PX4/ROS 2 rover backend is the default backend for this application.
+ * Authentication is enabled unless it is explicitly disabled through an
+ * environment variable.
  */
 
-const boolEnv = (key: string): boolean => {
-  const val = process.env[key];
-  if (val === undefined || val === null) return false;
-  return val.toLowerCase() === 'true' || val === '1';
-};
+function isTrue(
+  value: string | undefined,
+): boolean {
+  if (!value) {
+    return false;
+  }
 
-// ── Primary gate ─────────────────────────────────────────────────────────────
-/** True when the 4WD_SERVER backend contract is active. */
-export const ROVER_ENABLED: boolean = boolEnv('EXPO_PUBLIC_ROVER_ENABLED');
+  const normalized =
+    value.trim().toLowerCase();
 
-/** True when legacy ArduRover paths should be used (mutually exclusive with PX4). */
-export const LEGACY_ARDUROVER_ENABLED: boolean = !ROVER_ENABLED;
+  return (
+    normalized === "true" ||
+    normalized === "1"
+  );
+}
 
-// ── Per-feature gates (all follow ROVER_ENABLED by default) ───────────────
+function isFalse(
+  value: string | undefined,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized =
+    value.trim().toLowerCase();
+
+  return (
+    normalized === "false" ||
+    normalized === "0"
+  );
+}
+
+// ── Main rover backend ────────────────────────────────────────────────────────
 
 /**
- * Auth gate — show password on connect + inject X-Rover-Token.
- * Only active when ROVER_ENABLED=true or EXPO_PUBLIC_AUTH_ENABLED=true.
- * In 4WD_CLIENT (ROVER_ENABLED=false) auth is skipped — no auth backend available.
+ * The DYX ROS 2/PX4 rover backend is enabled by default.
+ *
+ * It can be disabled only by explicitly setting:
+ * EXPO_PUBLIC_ROVER_ENABLED=false
+ */
+export const ROVER_ENABLED: boolean =
+  !isFalse(
+    process.env
+      .EXPO_PUBLIC_ROVER_ENABLED,
+  );
+
+/**
+ * Legacy ArduRover mode is disabled whenever the current rover backend is active.
+ */
+export const LEGACY_ARDUROVER_ENABLED: boolean =
+  !ROVER_ENABLED;
+
+// ── Authentication ────────────────────────────────────────────────────────────
+
+/**
+ * Authentication is enabled by default with the DYX rover backend.
+ *
+ * It can be disabled only by explicitly setting:
+ * EXPO_PUBLIC_AUTH_DISABLED=true
  */
 export const AUTH_ENABLED: boolean =
-  process.env.EXPO_PUBLIC_AUTH_DISABLED?.toLowerCase() !== 'true' &&
-  (ROVER_ENABLED || boolEnv('EXPO_PUBLIC_AUTH_ENABLED'));
+  !isTrue(
+    process.env
+      .EXPO_PUBLIC_AUTH_DISABLED,
+  ) &&
+  (
+    ROVER_ENABLED ||
+    isTrue(
+      process.env
+        .EXPO_PUBLIC_AUTH_ENABLED,
+    )
+  );
 
-/** Server-side mission staging pipeline (plan → stage → load). */
+// ── Mission features ──────────────────────────────────────────────────────────
+
 export const MISSION_STAGING_ENABLED: boolean =
-  ROVER_ENABLED || boolEnv('EXPO_PUBLIC_MISSION_STAGING_ENABLED');
+  ROVER_ENABLED ||
+  isTrue(
+    process.env
+      .EXPO_PUBLIC_MISSION_STAGING_ENABLED,
+  );
 
-/** Spray-mode sidecar API (continuous / dash / point via path name). */
 export const SPRAY_MODE_SIDECAR_ENABLED: boolean =
-  ROVER_ENABLED || boolEnv('EXPO_PUBLIC_SPRAY_MODE_SIDECAR_ENABLED');
+  ROVER_ENABLED ||
+  isTrue(
+    process.env
+      .EXPO_PUBLIC_SPRAY_MODE_SIDECAR_ENABLED,
+  );
 
-/**
- * Point lifecycle API (continue / skip / event journal).
- * Default ON on this branch (NRP handlers disabled); set EXPO_PUBLIC_POINT_MISSION_DISABLED=true to off.
- */
 export const POINT_MISSION_ENABLED: boolean =
-  process.env.EXPO_PUBLIC_POINT_MISSION_DISABLED?.toLowerCase() !== 'true';
+  !isTrue(
+    process.env
+      .EXPO_PUBLIC_POINT_MISSION_DISABLED,
+  );
 
-/** Joystick V2 lease protocol (acquire → command → release). */
+export const MISSION_ABORT_ENABLED: boolean =
+  ROVER_ENABLED ||
+  isTrue(
+    process.env
+      .EXPO_PUBLIC_MISSION_ABORT_ENABLED,
+  );
+
+// ── Joystick ──────────────────────────────────────────────────────────────────
+
 export const JOYSTICK_V2_ENABLED: boolean =
-  ROVER_ENABLED || boolEnv('EXPO_PUBLIC_JOYSTICK_V2_ENABLED');
+  ROVER_ENABLED ||
+  isTrue(
+    process.env
+      .EXPO_PUBLIC_JOYSTICK_V2_ENABLED,
+  );
 
 /**
- * TEMP — offline joystick UI preview bypass.
- * When true + isOfflineMode(), manual drive opens without backend arm/lease.
- * Remove or set false after UI verification.
+ * Existing offline joystick-preview setting retained for now.
  */
-export const JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS = true;
+export const JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS =
+  true;
 
-/** Hard mission abort endpoint. */
-export const MISSION_ABORT_ENABLED: boolean =
-  ROVER_ENABLED || boolEnv('EXPO_PUBLIC_MISSION_ABORT_ENABLED');
+// ── RTK ───────────────────────────────────────────────────────────────────────
 
-/** RTK path fixes (slash-separated URL segments). */
 export const RTK_PX4_PATHS_ENABLED: boolean =
-  ROVER_ENABLED || boolEnv('EXPO_PUBLIC_RTK_PX4_PATHS_ENABLED');
+  ROVER_ENABLED ||
+  isTrue(
+    process.env
+      .EXPO_PUBLIC_RTK_PX4_PATHS_ENABLED,
+  );
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helper functions ──────────────────────────────────────────────────────────
 
-/** Convenience accessor (for callers that prefer function call syntax). */
 export function isPx4DxpEnabled(): boolean {
   return ROVER_ENABLED;
 }
@@ -106,6 +170,7 @@ export default {
   SPRAY_MODE_SIDECAR_ENABLED,
   POINT_MISSION_ENABLED,
   JOYSTICK_V2_ENABLED,
+  JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS,
   MISSION_ABORT_ENABLED,
   RTK_PX4_PATHS_ENABLED,
   isPx4DxpEnabled,

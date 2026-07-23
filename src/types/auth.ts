@@ -1,47 +1,111 @@
 /**
- * Authentication types — 4WD_SERVER operator session model.
+ * Authentication types for the DYX 4WD Rover Backend.
  *
- * Backend: 4WD_SERVER/server/routes/auth.py
- * Contract: password-only login, single operator role, machine-token read-only scopes.
+ * Backend endpoints:
+ * POST /api/auth/login
+ * GET  /api/auth/session
+ * POST /api/auth/logout
  */
 
-// ── Session model ─────────────────────────────────────────────────────────────
+// ── Stored session ────────────────────────────────────────────────────────────
 
-/** Persisted in AsyncStorage after successful login. */
+/**
+ * Persisted in AsyncStorage.
+ *
+ * The frontend keeps this session until the operator explicitly presses Logout.
+ * Temporary Wi-Fi loss, app closure or Jetson restart must not remove it.
+ */
 export interface AuthSession {
-  /** Bearer token — injected as X-Rover-Token header on all protected REST calls.
-   *  Also passed as `auth: { token }` on Socket.IO connect. */
+  /** Injected as X-Rover-Token on authenticated requests. */
   token: string;
-  /** Server-assigned session identifier. */
+
+  /** Backend-generated session identifier. */
   sessionId: string;
-  /** Unix epoch milliseconds — token expiry time. */
+
+  /** Login details returned by the backend. */
+  username?: string;
+
+  /** Rover identity returned by the backend. */
+  roverId?: string;
+  roverName?: string;
+
+  /**
+   * Backend expiration converted to epoch milliseconds.
+   * Stored for information only; frontend login is not cleared automatically.
+   */
   expiresAt: number;
-  /** Server-reported TTL in seconds (informational). */
-  ttlS: number;
+
+  /** Optional compatibility value calculated from expiresAt. */
+  ttlS?: number;
 }
 
-// ── Request / Response shapes ─────────────────────────────────────────────────
+// ── Login ─────────────────────────────────────────────────────────────────────
 
 export interface LoginRequest {
   username: string;
   password: string;
 }
 
+/**
+ * Exact response from:
+ * POST /api/auth/login
+ */
 export interface LoginResponse {
+  success: boolean;
+
   token: string;
-  session_id: string;
-  /** ISO-8601 UTC string from 4WD_SERVER (e.g. "2026-06-30T12:00:00Z") */
+  token_type: string;
   expires_at: string;
-  ttl_s: number;
+  session_id: string;
+
+  user: {
+    username: string;
+  };
+
+  rover: {
+    id: string;
+    name: string;
+  };
+
+  /*
+   * Optional compatibility fields for any older backend response.
+   * These can be removed after the frontend migration is complete.
+   */
+  ttl_s?: number;
   username?: string;
   rover_id?: string;
 }
 
-export interface LogoutResponse {
-    success: boolean;
-    message: string;
+// ── Session verification ──────────────────────────────────────────────────────
 
+/**
+ * Exact response from:
+ * GET /api/auth/session
+ */
+export interface SessionResponse {
+  authenticated: boolean;
+
+  session: {
+    session_id: string;
+    username: string;
+    created_at: string;
+    expires_at: string;
+  };
+
+  rover: {
+    id: string;
+    name: string;
+  };
 }
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+
+export interface LogoutResponse {
+  success: boolean;
+  message: string;
+}
+
+// ── Future password-change support ────────────────────────────────────────────
 
 export interface ChangePasswordRequest {
   current_password: string;
@@ -52,28 +116,26 @@ export interface ChangePasswordResponse {
   token: string;
   session_id: string;
   expires_at: string;
-  ttl_s: number;
   revoked_sessions: number;
 }
 
-// ── Error types ───────────────────────────────────────────────────────────────
+// ── Authentication errors ─────────────────────────────────────────────────────
 
 export type AuthErrorCode =
-  | 'invalid_password'
-  | 'session_expired'
-  | 'session_revoked'
-  | 'network_error'
-  | 'unknown';
+  | "invalid_password"
+  | "session_unavailable"
+  | "session_revoked"
+  | "network_error"
+  | "unknown";
 
 export interface AuthError {
   code: AuthErrorCode;
   message: string;
 }
 
-// ── Socket.IO events ──────────────────────────────────────────────────────────
+// ── Socket.IO authentication events ───────────────────────────────────────────
 
-/** Emitted by server when operator changes password — all other sessions revoked. */
 export interface AuthRevokedEvent {
-  reason: 'password_changed' | string;
+  reason: string;
   session_id?: string;
 }

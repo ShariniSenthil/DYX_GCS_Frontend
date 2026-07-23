@@ -17,66 +17,154 @@ import { getSavedBackendURL } from './utils/backendStorage';
 // The hardcoded IP is a last-resort development fallback only — in production
 // the URL is always set via env vars or runtime setBackendURL().
 // Do NOT rely on this value in production builds.
+// Default DYX rover backend address.
+// A rover selected through discovery or manual entry overrides this value.
 const DEFAULT_BACKEND_URL =
   process.env.REACT_APP_ROS_HTTP_BASE ||
   process.env.EXPO_PUBLIC_ROS_HTTP_BASE ||
   process.env.VITE_ROS_HTTP_BASE ||
-  'http://192.168.1.101:5001'; // dev fallback — override via EXPO_PUBLIC_ROS_HTTP_BASE
+  "http://192.168.3.101:5001";
 
 const DEFAULT_WS_URL =
   process.env.REACT_APP_ROS_WS_URL ||
   process.env.EXPO_PUBLIC_ROS_WS_URL ||
   process.env.VITE_ROS_WS_URL ||
-  'ws://192.168.1.101:5001/socket.io'; // dev fallback — override via EXPO_PUBLIC_ROS_WS_URL
+  "ws://192.168.3.101:5001";
 
-// Dynamic backend URL (can be changed at runtime)
+// Runtime-selected backend address.
 let dynamicBackendURL: string | null = null;
 let dynamicWsURL: string | null = null;
 let _offlineMode = false;
 
 /**
- * Initialize backend URL from storage
- * Should be called on app startup
+ * Remove trailing slashes so endpoint construction remains consistent.
+ */
+function normalizeBackendURL(
+  url: string,
+): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+/**
+ * Convert an HTTP backend address into a WebSocket address.
+ */
+function createWebSocketURL(
+  backendURL: string,
+): string {
+  return normalizeBackendURL(backendURL)
+    .replace(/^http:\/\//i, "ws://")
+    .replace(/^https:\/\//i, "wss://");
+}
+
+/**
+ * Restore the previously selected rover address from AsyncStorage.
+ *
+ * Failure to read storage does not clear the saved authentication session.
  */
 export async function initializeBackendURL(): Promise<void> {
-  const savedURL = await getSavedBackendURL();
-  if (savedURL) {
-    dynamicBackendURL = savedURL;
-    dynamicWsURL = savedURL.replace('http://', 'ws://').replace('https://', 'wss://') + '/socket.io';
+  try {
+    const savedURL =
+      await getSavedBackendURL();
+
+    if (savedURL) {
+      const normalizedURL =
+        normalizeBackendURL(savedURL);
+
+      dynamicBackendURL =
+        normalizedURL;
+
+      dynamicWsURL =
+        createWebSocketURL(
+          normalizedURL,
+        );
+
+      _offlineMode =
+        normalizedURL.includes(
+          "localhost",
+        ) ||
+        normalizedURL.includes(
+          "127.0.0.1",
+        );
+
+      return;
+    }
+  } catch (error) {
+    console.warn(
+      "[config] Could not restore saved backend URL:",
+      error,
+    );
   }
+
+  dynamicBackendURL =
+    normalizeBackendURL(
+      DEFAULT_BACKEND_URL,
+    );
+
+  dynamicWsURL =
+    createWebSocketURL(
+      DEFAULT_WS_URL,
+    );
+
+  _offlineMode = false;
 }
 
 /**
- * Set backend URL dynamically (runtime configuration)
- * @param url - The backend URL (e.g., "http://192.168.1.100:5001")
+ * Set the active rover backend address.
  */
-export function setBackendURL(url: string): void {
-  dynamicBackendURL = url;
-  dynamicWsURL = url.replace('http://', 'ws://').replace('https://', 'wss://') + '/socket.io';
-  _offlineMode = url.includes('localhost') || url.includes('127.0.0.1');
+export function setBackendURL(
+  url: string,
+): void {
+  const normalizedURL =
+    normalizeBackendURL(url);
+
+  dynamicBackendURL =
+    normalizedURL;
+
+  dynamicWsURL =
+    createWebSocketURL(
+      normalizedURL,
+    );
+
+  _offlineMode =
+    normalizedURL.includes(
+      "localhost",
+    ) ||
+    normalizedURL.includes(
+      "127.0.0.1",
+    );
 }
 
 /**
- * Check if the app is running in offline mode (no real backend)
+ * Check whether the application is using offline preview mode.
  */
 export function isOfflineMode(): boolean {
   return _offlineMode;
 }
 
 /**
- * Get the current backend URL
- * Priority: Dynamic URL > Environment > Default
+ * Return the currently selected backend HTTP address.
  */
 export function getBackendURL(): string {
-  return dynamicBackendURL || DEFAULT_BACKEND_URL;
+  return (
+    dynamicBackendURL ||
+    normalizeBackendURL(
+      DEFAULT_BACKEND_URL,
+    )
+  );
 }
 
 /**
- * Get the current WebSocket URL
- * Priority: Dynamic URL > Environment > Default
+ * Return the currently selected backend WebSocket address.
+ *
+ * Socket.IO still uses the configured `/socket.io/` path separately.
  */
 export function getWsURL(): string {
-  return dynamicWsURL || DEFAULT_WS_URL;
+  return (
+    dynamicWsURL ||
+    createWebSocketURL(
+      DEFAULT_WS_URL,
+    )
+  );
 }
 
 /**
