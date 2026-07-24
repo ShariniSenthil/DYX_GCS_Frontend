@@ -85,12 +85,10 @@ import { parseCSVChunked } from "../utils/chunkedParser";
 import { parseKML as coreParseKML } from "../core/parsers/kmlParser";
 import { convertToPathPlanWaypoints } from "../core/parsers/adapter";
 import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
-import { useVerifiedMissionUpload } from "../hooks/useVerifiedMissionUpload";
 import {
   uploadMissionCsv,
   type MissionExtensionMode,
 } from "../services/missionApi";
-import { buildValidationErrorMessage } from "../utils/pathplanToVerifiedWaypoints";
 import {
   importDXFAsEntities,
   importDXFAsWaypoints,
@@ -216,6 +214,51 @@ const BottomTableHeader = memo(
 // Toggle debug logging for this screen
 const DEBUG_LOG = true;
 
+const escapeMissionCsvCell = (value: unknown): string => {
+  const text = value === null || value === undefined ? "" : String(value);
+
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+};
+
+const buildMissionCsvFromWaypoints = (
+  waypoints: PathPlanWaypoint[],
+): string => {
+  const header = ["latitude", "longitude", "altitude", "block", "row", "pile"];
+
+  const rows = waypoints.map((waypoint, index) => {
+    if (!Number.isFinite(waypoint.lat) || !Number.isFinite(waypoint.lon)) {
+      throw new Error(`Point ${index + 1} has invalid coordinates.`);
+    }
+
+    if (waypoint.lat < -90 || waypoint.lat > 90) {
+      throw new Error(`Point ${index + 1} has an invalid latitude.`);
+    }
+
+    if (waypoint.lon < -180 || waypoint.lon > 180) {
+      throw new Error(`Point ${index + 1} has an invalid longitude.`);
+    }
+
+    return [
+      waypoint.lat.toFixed(9),
+      waypoint.lon.toFixed(9),
+
+      Number.isFinite(waypoint.alt) ? waypoint.alt : 0,
+
+      waypoint.block ?? "",
+      waypoint.row ?? "",
+      waypoint.pile ?? String(index + 1),
+    ]
+      .map(escapeMissionCsvCell)
+      .join(",");
+  });
+
+  return [header.join(","), ...rows].join("\n") + "\n";
+};
+
 interface PathPlanScreenProps {
   isVisible?: boolean;
   isDrawingToolsVisible?: boolean;
@@ -244,7 +287,6 @@ export default function PathPlanScreen({
     roverPosition,
     missionWaypoints,
     setMissionWaypoints,
-    missionMode,
     gpsFailsafeMode,
     setGpsFailsafeMode,
     gpsFailsafeStatus,
@@ -260,10 +302,6 @@ export default function PathPlanScreen({
   } = useRover();
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
-
-  // Verified mission upload hook — replaces the legacy loadMissionToController path
-  const { upload: uploadVerifiedMission, progress: verifiedUploadProgress } =
-    useVerifiedMissionUpload();
 
   // Component mounted flag to prevent state updates after unmount
   const mountedRef = useRef(true);
@@ -517,7 +555,6 @@ export default function PathPlanScreen({
 
   // Sync waypoints to context only when explicitly needed (e.g., on upload)
   // Removed automatic sync to prevent infinite loop
-  const [missionName, setMissionName] = useState("DRAWN MISSION - 4:15:34");
   const [uploadPreviewWaypoints, setUploadPreviewWaypoints] = useState<
     PathPlanWaypoint[] | null
   >(null);
@@ -991,6 +1028,7 @@ export default function PathPlanScreen({
   const handleManualConnectionsComplete = useCallback(
     (connectedWaypointIds: number[]) => {
       const orderedIds = Array.from(new Set(connectedWaypointIds));
+
       const orderedWaypoints = orderedIds
         .map((id) => waypoints.find((wp) => wp.id === id))
         .filter(Boolean) as PathPlanWaypoint[];
@@ -1001,6 +1039,7 @@ export default function PathPlanScreen({
           "Connection Required",
           "Please connect at least 2 marking points.",
         );
+
         return;
       }
 
@@ -1013,14 +1052,22 @@ export default function PathPlanScreen({
       );
 
       recordAndApply(reordered);
+
       setManualPathConnections([]);
       setIsConnectingPath(false);
       setShowManualConnectionCanvas(false);
+
       showPathPlanToast(
         "success",
         "Manual Connect Complete",
         `Connected ${reordered.length} marking points.`,
       );
+
+      const uploadTimer = setTimeout(() => {
+        askExtensionAndUpload(reordered);
+      }, 150);
+
+      addTimer(uploadTimer);
     },
     [recordAndApply, setShowManualConnectionCanvas, waypoints],
   );
@@ -2187,239 +2234,170 @@ export default function PathPlanScreen({
     }
   };
 
-  // Load mission waypoints TO the controller (upload current waypoints to mission controller)
-  const handleLoadMissionToController = async () => {
-    // Check if component is mounted
-    if (!mountedRef.current) {
-      console.warn("[PathPlan] Component unmounted, aborting mission upload");
+  async function uploadWaypointsToBackend(
+    waypointsToUpload: PathPlanWaypoint[],
+    extensionMode: MissionExtensionMode,
+  ): Promise<void> {
+    if (isUploadingRef.current) {
+      showPathPlanToast(
+        "info",
+        "Upload Running",
+        "A mission upload is already in progress.",
+      );
+
       return;
     }
 
+    if (waypointsToUpload.length < 2) {
+      showPathPlanToast(
+        "error",
+        "Not Enough Points",
+        "The mission requires at least two marking points.",
+        5000,
+      );
+
+      return;
+    }
+
+    let temporaryFileUri: string | null = null;
+
+    isUploadingRef.current = true;
+
+    setUploadProgress(0);
+    setShowUploadProgress(true);
+
     try {
-      if (waypoints.length === 0) {
-        showPathPlanToast(
-          "error",
-          "No Marking Points",
-          "Add marking points first by clicking the map, importing a file, or using drawing tools.",
-          5000,
+      const cacheDirectory = FileSystem.cacheDirectory;
+
+      if (!cacheDirectory) {
+        throw new Error("The application cache directory is unavailable.");
+      }
+
+      /*
+       * Use the exact waypoint array passed to this function.
+       * This prevents an older React state value from being uploaded.
+       */
+      const csvText = buildMissionCsvFromWaypoints(waypointsToUpload);
+
+      temporaryFileUri =
+        `${cacheDirectory}` + `mission-upload-${Date.now()}.csv`;
+
+      await FileSystem.writeAsStringAsync(temporaryFileUri, csvText, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      setUploadProgress(25);
+
+      const response = await uploadMissionCsv({
+        file: {
+          uri: temporaryFileUri,
+          name: "mission.csv",
+          mimeType: "text/csv",
+        } as any,
+
+        extensionMode,
+
+        dummyPointDistanceM: extensionMode === "ENABLE" ? 3.5 : undefined,
+      });
+
+      setUploadProgress(90);
+
+      if (!response.success) {
+        throw new Error(
+          response.message || "The backend rejected the mission.",
         );
+      }
+
+      if (!mountedRef.current) {
         return;
       }
 
-      console.log(
-        `[PathPlan] Uploading ${waypoints.length} verified waypoints to controller...`,
+      setUploadProgress(100);
+
+      const totalPoints =
+        response.upload?.total_points ?? waypointsToUpload.length;
+
+      const navigationPoints = response.mission?.navigation_point_count;
+
+      const dummyDistance = response.upload?.dummy_point_distance_m ?? null;
+
+      showPathPlanToast(
+        "success",
+        "Mission Ready",
+        `${totalPoints} marking points uploaded successfully.`,
+        5000,
       );
-
-      // Show progress bar before the async operation.
-      setUploadProgress(0);
-      setShowUploadProgress(true);
-
-      try {
-        // uploadVerifiedMission validates, uploads, and confirms in one call.
-        // Validation errors are returned as result.message (not thrown) so the
-        // user sees them in an Alert rather than hitting the outer catch block.
-        const result = await uploadVerifiedMission(waypoints, {
-          missionName,
-          requireMark: globalServoEnabled,
-          settings: { mode: missionMode },
-        });
-
-        // Sync hook progress to local state for the progress bar.
-        setUploadProgress(result.success ? 100 : 0);
-
-        if (!mountedRef.current) {
-          console.warn("[PathPlan] Component unmounted during upload");
-          return;
-        }
-
-        if (result.success) {
-          console.log(
-            `[PathPlan] Mission uploaded (${result.total_targets} targets)`,
-          );
-
-          // Update WaypointContext so MissionReportScreen can render the table.
-          try {
-            const contextWaypoints = waypoints.map((wp, idx) => ({
-              sn: idx + 1,
-              block: wp.block || "",
-              row: wp.row || "",
-              pile: wp.pile || String(idx + 1),
-              lat: wp.lat,
-              lon: wp.lon,
-              distance: wp.distance ?? 0,
-              alt: wp.alt,
-              mark: wp.mark,
-              status: "Pending" as const,
-              time: new Date().toISOString(),
-              remark: "",
-            }));
-            setMissionWaypoints(contextWaypoints);
-          } catch (contextError) {
-            console.error("[PathPlan] Failed to update context:", contextError);
-          }
-
-          // PersistentStorage clearing is handled inside useVerifiedMissionUpload.
-          showPathPlanToast(
-            "success",
-            "Upload Successful",
-            `${result.total_targets} marking points sent to controller.`,
-          );
-        } else {
-          // Validation or server rejection — show the specific error message.
-          throw new Error(result.message ?? "Upload failed");
-        }
-      } catch (uploadError) {
-        console.error("[PathPlan] verifiedMissionUpload error:", uploadError);
-        throw uploadError;
-      } finally {
-        setShowUploadProgress(false);
-        setUploadProgress(0);
-      }
-    } catch (err) {
-      console.error("[PathPlan] handleLoadMissionToController error:", err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
 
       Alert.alert(
-        "Upload Failed",
-        `Could not load mission to controller:\n\n${errorMessage}\n\nPlease check your connection and try again.`,
+        "Mission Ready",
         [
-          { text: "OK", style: "default" },
-          {
-            text: "Retry",
-            onPress: () => {
-              const timer = setTimeout(() => {
-                if (mountedRef.current) {
-                  handleLoadMissionToController();
-                }
-              }, 100);
-              addTimer(timer);
-            },
-            style: "cancel",
-          },
-        ],
-      );
-    }
-  };
+          `Marking points: ${totalPoints}`,
+          `Extension: ${extensionMode}`,
 
-  const uploadCsvToBackend = useCallback(
-    async (extensionMode: MissionExtensionMode): Promise<void> => {
-      if (isUploadingRef.current) {
-        showPathPlanToast(
-          "info",
-          "Upload Running",
-          "A mission upload is already in progress.",
-        );
-        return;
+          dummyDistance !== null
+            ? `Dummy-point distance: ${dummyDistance} m`
+            : null,
+
+          navigationPoints !== undefined
+            ? `Navigation points: ${navigationPoints}`
+            : null,
+
+          "",
+          "The backend validated, stored and prepared the mission.",
+          "The rover has not started moving.",
+        ]
+          .filter((line): line is string => typeof line === "string")
+          .join("\n"),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      console.error("[PathPlan] Mission upload failed:", error);
+
+      showPathPlanToast("error", "Mission Upload Failed", message, 5000);
+
+      Alert.alert("Mission Upload Failed", message);
+    } finally {
+      if (temporaryFileUri) {
+        await FileSystem.deleteAsync(temporaryFileUri, {
+          idempotent: true,
+        }).catch((error) => {
+          console.warn("[PathPlan] Temporary CSV cleanup failed:", error);
+        });
       }
 
-      isUploadingRef.current = true;
-      setUploadProgress(0);
-      setShowUploadProgress(true);
-
-      try {
-        const pickerResult = await DocumentPicker.getDocumentAsync({
-          type: [
-            "text/csv",
-            "text/comma-separated-values",
-            "application/csv",
-            "application/vnd.ms-excel",
-            "application/octet-stream",
-          ],
-          copyToCacheDirectory: true,
-          multiple: false,
-        });
-
-        if (pickerResult.canceled) {
-          return;
-        }
-
-        const file = pickerResult.assets?.[0];
-
-        if (!file) {
-          throw new Error("No CSV file was selected.");
-        }
-
-        if (!file.name.toLowerCase().endsWith(".csv")) {
-          throw new Error("Only CSV mission files are supported.");
-        }
-
-        setUploadProgress(20);
-
-        const response = await uploadMissionCsv({
-          file,
-          extensionMode,
-
-          /*
-           * ENABLE uses the backend production default of 3.5 m.
-           * DISABLE sends no dummy-point distance.
-           */
-          dummyPointDistanceM: extensionMode === "ENABLE" ? 3.5 : undefined,
-        });
-
-        setUploadProgress(90);
-
-        if (!response.success) {
-          throw new Error(
-            response.message || "Backend rejected the mission CSV.",
-          );
-        }
-
-        const totalPoints =
-          response.upload?.total_points ?? response.mission?.total_points ?? 0;
-
-        const navigationPoints = response.mission?.navigation_point_count;
-
-        setUploadProgress(100);
-
-        showPathPlanToast(
-          "success",
-          "Mission Uploaded",
-          extensionMode === "ENABLE"
-            ? `${totalPoints} marking points uploaded with extension enabled.${navigationPoints !== undefined ? ` Navigation path: ${navigationPoints} points.` : ""}`
-            : `${totalPoints} marking points uploaded with extension disabled.`,
-          5000,
-        );
-
-        Alert.alert(
-          "Mission Ready",
-          [
-            `File: ${file.name}`,
-            `Marking points: ${totalPoints}`,
-            `Extension: ${extensionMode}`,
-            extensionMode === "ENABLE" ? "Dummy-point distance: 3.5 m" : null,
-            navigationPoints !== undefined
-              ? `Navigation points: ${navigationPoints}`
-              : null,
-            "",
-            "The backend validated, stored and prepared the mission. The rover has not started moving.",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          [
-            {
-              text: "OK",
-            },
-          ],
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        console.error("[PathPlan] Backend CSV upload failed:", error);
-
-        Alert.alert("Mission Upload Failed", message);
-      } finally {
+      if (mountedRef.current) {
         setShowUploadProgress(false);
         setUploadProgress(0);
-        isUploadingRef.current = false;
       }
-    },
-    [showPathPlanToast],
-  );
 
-  const handleBackendCsvUpload = useCallback((): void => {
+      isUploadingRef.current = false;
+    }
+  }
+
+  function askExtensionAndUpload(waypointsToUpload: PathPlanWaypoint[]): void {
+    if (waypointsToUpload.length < 2) {
+      showPathPlanToast(
+        "error",
+        "Not Enough Points",
+        "Add at least two marking points before uploading the mission.",
+        5000,
+      );
+
+      return;
+    }
+
+    /*
+     * Take a snapshot so the exact displayed order
+     * is sent after the operator selects an option.
+     */
+    const waypointSnapshot = waypointsToUpload.map((waypoint) => ({
+      ...waypoint,
+    }));
+
     Alert.alert(
       "Mission Extension",
-      "Choose whether the backend should generate extension dummy points for short row transitions.",
+      "Choose whether the backend should generate extension points for short row transitions.",
       [
         {
           text: "Cancel",
@@ -2428,18 +2406,22 @@ export default function PathPlanScreen({
         {
           text: "DISABLE",
           onPress: () => {
-            void uploadCsvToBackend("DISABLE");
+            void uploadWaypointsToBackend(waypointSnapshot, "DISABLE");
           },
         },
         {
           text: "ENABLE",
           onPress: () => {
-            void uploadCsvToBackend("ENABLE");
+            void uploadWaypointsToBackend(waypointSnapshot, "ENABLE");
           },
         },
       ],
     );
-  }, [uploadCsvToBackend]);
+  }
+
+  function handleLoadMissionToController(): void {
+    askExtensionAndUpload(waypoints);
+  }
 
   const handleRequestUpload = async () => {
     if (isUploadingRef.current) {
@@ -3271,8 +3253,11 @@ export default function PathPlanScreen({
               }
               roverPosition={
                 roverPosition
-                  ? { lat: roverPosition.lat, lon: roverPosition.lng }
-                  : { lat: 0, lon: 0 }
+                  ? {
+                      lat: roverPosition.lat,
+                      lon: roverPosition.lng,
+                    }
+                  : undefined
               }
               heading={telemetry.attitude?.yaw_deg ?? null}
               activeDrawingTool={
@@ -3460,7 +3445,7 @@ export default function PathPlanScreen({
                         }
                       : { lat: 0, lon: 0, alt: 0 }
                   }
-                  onRequestUpload={handleBackendCsvUpload}
+                  onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
@@ -4014,6 +3999,7 @@ export default function PathPlanScreen({
                                   setManualPathConnections([]);
                                   setShowManualConnectionCanvas(true);
                                 });
+
                                 showPathPlanToast(
                                   "info",
                                   "✏️ Manual Path Mode",
@@ -4030,6 +4016,12 @@ export default function PathPlanScreen({
                                   );
                                 requestAnimationFrame(() => {
                                   recordAndApply(sanitized);
+
+                                  const uploadTimer = setTimeout(() => {
+                                    askExtensionAndUpload(sanitized);
+                                  }, 150);
+
+                                  addTimer(uploadTimer);
                                 });
                                 showPathPlanToast(
                                   "success",
@@ -4080,6 +4072,12 @@ export default function PathPlanScreen({
                           );
                         requestAnimationFrame(() => {
                           recordAndApply(sanitized);
+
+                          const uploadTimer = setTimeout(() => {
+                            askExtensionAndUpload(sanitized);
+                          }, 150);
+
+                          addTimer(uploadTimer);
                         });
                         showPathPlanToast(
                           "success",

@@ -106,9 +106,7 @@ export function AuthProvider({
   /**
    * Clear the local session.
    *
-   * This is used only for:
-   * - Explicit Logout
-   * - Confirmed auth_revoked security event
+   * This is called only after the operator explicitly presses Logout.
    */
   const clearLocalSession = useCallback(async (): Promise<void> => {
     setSession(null);
@@ -195,8 +193,6 @@ export function AuthProvider({
       mounted = false;
     };
   }, []);
-
-  // ── Confirmed security revocation ─────────────────────────────────────────
 
   // ── Backend authentication notification ──────────────────────────────────
 

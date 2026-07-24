@@ -1,18 +1,37 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Alert, PanResponder, Animated } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WebView } from 'react-native-webview';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
-import { DxfMapEntity, PathPlanWaypoint, DrawingMode } from '../../types/pathplan';
-import { MAPBOX_JS_URL, MAPBOX_CSS_URL, MAPBOX_ACCESS_TOKEN, MAPBOX_STYLE_SATELLITE, MAPBOX_STYLE_STREETS, MAPBOX_STYLE_DARK } from '../../config/mapboxConfig';
+import React, { useState, useRef, useMemo, useEffect } from "react";
+import {
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  Text,
+  Alert,
+  PanResponder,
+  Animated,
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { WebView } from "react-native-webview";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { colors } from "../../theme/colors";
+import {
+  DxfMapEntity,
+  PathPlanWaypoint,
+  DrawingMode,
+} from "../../types/pathplan";
+import {
+  MAPBOX_JS_URL,
+  MAPBOX_CSS_URL,
+  MAPBOX_ACCESS_TOKEN,
+  MAPBOX_STYLE_SATELLITE,
+  MAPBOX_STYLE_STREETS,
+  MAPBOX_STYLE_DARK,
+} from "../../config/mapboxConfig";
 
 type VisualizationKey =
-  | 'distanceLabel'
-  | 'angleLabel'
-  | 'snapFeature'
-  | 'roverIcon'
-  | 'waypointPreview';
+  | "distanceLabel"
+  | "angleLabel"
+  | "snapFeature"
+  | "roverIcon"
+  | "waypointPreview";
 
 type VisualizationState = Record<VisualizationKey, boolean>;
 
@@ -23,11 +42,11 @@ type ToggleMenuItem<Key extends string> = {
 };
 
 const MAP_SETTINGS_ITEMS: ToggleMenuItem<VisualizationKey>[] = [
-  { key: 'distanceLabel', label: 'Distance Label', icon: 'ruler' },
-  { key: 'angleLabel', label: 'Angle Label', icon: 'angle-acute' },
-  { key: 'snapFeature', label: 'Snap Feature', icon: 'magnet' },
-  { key: 'roverIcon', label: 'Rover Icon', icon: 'robot' },
-  { key: 'waypointPreview', label: 'Waypoint Preview', icon: 'map-marker' },
+  { key: "distanceLabel", label: "Distance Label", icon: "ruler" },
+  { key: "angleLabel", label: "Angle Label", icon: "angle-acute" },
+  { key: "snapFeature", label: "Snap Feature", icon: "magnet" },
+  { key: "roverIcon", label: "Rover Icon", icon: "robot" },
+  { key: "waypointPreview", label: "Waypoint Preview", icon: "map-marker" },
 ];
 
 const PATH_PLAN_WIDGET_MENU_LEFT = 80;
@@ -39,17 +58,27 @@ interface Props {
   waypoints: PathPlanWaypoint[];
   dxfEntities?: DxfMapEntity[];
   onMapPress?: (coordinate: { latitude: number; longitude: number }) => void;
-  onWaypointDrag?: (id: number, coordinate: { latitude: number; longitude: number }) => void;
+  onWaypointDrag?: (
+    id: number,
+    coordinate: { latitude: number; longitude: number },
+  ) => void;
   onWaypointClick?: (id: number) => void;
-  onAddWaypoints?: (coordinates: { latitude: number; longitude: number }[]) => void;
+  onAddWaypoints?: (
+    coordinates: { latitude: number; longitude: number }[],
+  ) => void;
   onDeleteWaypoint?: (id: number) => void;
-  onInsertWaypoint?: (afterId: number, coordinate: { latitude: number; longitude: number }) => void;
+  onInsertWaypoint?: (
+    afterId: number,
+    coordinate: { latitude: number; longitude: number },
+  ) => void;
   onWaypointConnect?: (fromId: number, toId: number) => void;
   roverPosition?: { lat: number; lon: number };
   selectedWaypoint?: number | null;
   heading?: number | null;
   activeDrawingTool?: string | null;
-  onDrawingComplete?: (points: { latitude: number; longitude: number }[]) => void;
+  onDrawingComplete?: (
+    points: { latitude: number; longitude: number }[],
+  ) => void;
   isDrawingMode?: boolean;
   drawSettings?: {
     startPosition: { lat: number; lng: number };
@@ -69,15 +98,20 @@ interface Props {
   setIsRobotPositionVisible?: (val: boolean) => void;
   isManualConnectionMode?: boolean;
   manualConnections?: number[];
-  manualConnectionMode?: 'tap' | 'drag' | 'pan';
+  manualConnectionMode?: "tap" | "drag" | "pan";
   visualization?: VisualizationState;
   onVisualizationToggle?: (key: VisualizationKey) => void;
-  measurePoints?: { lat: number; lon: number; seq: number; waypointId?: number }[];
+  measurePoints?: {
+    lat: number;
+    lon: number;
+    seq: number;
+    waypointId?: number;
+  }[];
   measureResult?: { distance: number; heading: number } | null;
   onMeasureClear?: () => void;
   onMeasureWaypointSelect?: (id: number) => void;
   isVisible?: boolean;
-  zoomTrigger?: { type: 'in' | 'out'; timestamp: number } | null;
+  zoomTrigger?: { type: "in" | "out"; timestamp: number } | null;
   isVisMenuOpen?: boolean;
   setIsVisMenuOpen?: (val: boolean) => void;
   isWidgetMenuOpen?: boolean;
@@ -114,7 +148,7 @@ export const PathPlanMap: React.FC<Props> = ({
   setIsRobotPositionVisible = () => {},
   isManualConnectionMode = false,
   manualConnections = [],
-  manualConnectionMode = 'tap',
+  manualConnectionMode = "tap",
   visualization = {
     distanceLabel: true,
     angleLabel: true,
@@ -137,36 +171,111 @@ export const PathPlanMap: React.FC<Props> = ({
 }) => {
   const webViewRef = useRef<WebView | null>(null);
   const [mapReady, setMapReady] = useState(false);
-  const [mapStyle, setMapStyle] = useState<'satellite' | 'streets' | 'dark'>('satellite');
+  const [mapStyle, setMapStyle] = useState<"satellite" | "streets" | "dark">(
+    "satellite",
+  );
   const lastUpdateRef = useRef<number>(0);
   const UPDATE_THROTTLE_MS = 100;
 
-  const [drawingMode, setDrawingMode] = useState<DrawingMode>('none');
-  const [tempPoints, setTempPoints] = useState<{ latitude: number; longitude: number }[]>([]);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; waypointId: number } | null>(null);
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
+  const [tempPoints, setTempPoints] = useState<
+    { latitude: number; longitude: number }[]
+  >([]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    waypointId: number;
+  } | null>(null);
   const [measureOverlayPos, setMeasureOverlayPos] = useState({ x: 10, y: 120 });
   const measurePanResponderRef = useRef<any>(null);
   const measureDragStartRef = useRef({ x: 0, y: 0 });
 
   const drawingPointsRef = useRef<{ lat: number; lng: number }[]>([]);
-  const mapInitializedRef = useRef(false);
-  const lastWaypointsRef = useRef<string>('');
-  const lastDxfEntitiesRef = useRef<string>('');
+  const lastWaypointsRef = useRef<string>("");
+  const lastDxfEntitiesRef = useRef<string>("");
   const lastSelectedRef = useRef<number | null>(null);
 
   const measureOverlayPosRef = useRef(measureOverlayPos);
   measureOverlayPosRef.current = measureOverlayPos;
 
   useEffect(() => {
-    if (!zoomTrigger || !webViewRef.current) return;
-    const action = zoomTrigger.type === 'in' ? 'zoomIn' : 'zoomOut';
-    webViewRef.current.injectJavaScript(`
-      if (window.map) {
-        window.map.${action}();
+    if (!isVisible || !mapReady || !webViewRef.current) return;
+
+    const hasValidRover =
+      roverPosition != null &&
+      Number.isFinite(roverPosition.lat) &&
+      Number.isFinite(roverPosition.lon) &&
+      roverPosition.lat >= -90 &&
+      roverPosition.lat <= 90 &&
+      roverPosition.lon >= -180 &&
+      roverPosition.lon <= 180 &&
+      !(roverPosition.lat === 0 && roverPosition.lon === 0);
+
+    if (!hasValidRover || !roverPosition) return;
+
+    const roverLat = roverPosition.lat;
+    const roverLon = roverPosition.lon;
+    const roverHeading =
+      heading != null && Number.isFinite(heading) ? heading : 0;
+
+    const updateScript = `
+    (function() {
+      const lat = ${roverLat};
+      const lon = ${roverLon};
+      const heading = ${roverHeading};
+
+      if (!roverMarker) {
+        const size = 56;
+
+        const roverIconSVG =
+          '<svg width="' + size + '" height="' + size +
+          '" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
+          '<g style="transform:rotate(' + heading +
+          'deg);transform-origin:50px 50px;">' +
+          '<rect x="15" y="15" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
+          '<rect x="73" y="15" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
+          '<rect x="15" y="65" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
+          '<rect x="73" y="65" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
+          '<rect x="30" y="25" width="40" height="50" rx="3" fill="#f4d03f" stroke="#d4af37" stroke-width="2"/>' +
+          '<line x1="50" y1="25" x2="50" y2="5" stroke="#e74c3c" stroke-width="4"/>' +
+          '<polygon points="50,0 43,10 57,10" fill="#e74c3c"/>' +
+          '</g></svg>';
+
+        const roverEl = document.createElement('div');
+        roverEl.style.width = size + 'px';
+        roverEl.style.height = size + 'px';
+        roverEl.innerHTML = roverIconSVG;
+
+        roverMarker = new mapboxgl.Marker({
+          element: roverEl,
+          anchor: 'center'
+        })
+          .setLngLat([lon, lat])
+          .addTo(map);
+      } else {
+        roverMarker.setLngLat([lon, lat]);
+
+        const markerEl = roverMarker.getElement();
+        const svgGroup = markerEl.querySelector('svg g');
+
+        if (svgGroup) {
+          svgGroup.style.transform =
+            'rotate(' + heading + 'deg)';
+          svgGroup.style.transformOrigin = '50px 50px';
+        }
       }
-      true;
-    `);
-  }, [zoomTrigger]);
+
+      roverData.hasPosition = true;
+      roverData.lat = lat;
+      roverData.lon = lon;
+      roverData.heading = heading;
+    })();
+
+    true;
+  `;
+
+    webViewRef.current.injectJavaScript(updateScript);
+  }, [isVisible, mapReady, roverPosition?.lat, roverPosition?.lon, heading]);
 
   useEffect(() => {
     measurePanResponderRef.current = PanResponder.create({
@@ -174,11 +283,20 @@ export const PathPlanMap: React.FC<Props> = ({
       onMoveShouldSetPanResponder: (_, gestureState) =>
         Math.abs(gestureState.dx) > 5 || Math.abs(gestureState.dy) > 5,
       onPanResponderGrant: () => {
-        measureDragStartRef.current = { x: measureOverlayPosRef.current.x, y: measureOverlayPosRef.current.y };
+        measureDragStartRef.current = {
+          x: measureOverlayPosRef.current.x,
+          y: measureOverlayPosRef.current.y,
+        };
       },
       onPanResponderMove: (_, gestureState) => {
-        const newX = Math.max(0, measureDragStartRef.current.x + gestureState.dx);
-        const newY = Math.max(0, measureDragStartRef.current.y + gestureState.dy);
+        const newX = Math.max(
+          0,
+          measureDragStartRef.current.x + gestureState.dx,
+        );
+        const newY = Math.max(
+          0,
+          measureDragStartRef.current.y + gestureState.dy,
+        );
         setMeasureOverlayPos({ x: newX, y: newY });
       },
     });
@@ -186,8 +304,15 @@ export const PathPlanMap: React.FC<Props> = ({
 
   const mapHTML = useMemo(() => {
     const waypointsJSON = JSON.stringify([]);
-    const hasRover = roverPosition != null &&
-      Number.isFinite(roverPosition.lat) && Number.isFinite(roverPosition.lon);
+    const hasRover =
+      roverPosition != null &&
+      Number.isFinite(roverPosition.lat) &&
+      Number.isFinite(roverPosition.lon) &&
+      roverPosition.lat >= -90 &&
+      roverPosition.lat <= 90 &&
+      roverPosition.lon >= -180 &&
+      roverPosition.lon <= 180 &&
+      !(roverPosition.lat === 0 && roverPosition.lon === 0);
     const roverData = JSON.stringify({
       lat: hasRover ? roverPosition.lat : 0,
       lon: hasRover ? roverPosition.lon : 0,
@@ -244,8 +369,17 @@ export const PathPlanMap: React.FC<Props> = ({
     const roverData = ${roverData};
 
     const hasWaypoints = waypoints.length > 0;
-    const centerLon = hasWaypoints ? waypoints[0].lon : (roverData.hasPosition ? roverData.lon : 0);
-    const centerLat = hasWaypoints ? waypoints[0].lat : (roverData.hasPosition ? roverData.lat : 0);
+    const centerLon = hasWaypoints
+      ? waypoints[0].lon
+      : roverData.hasPosition
+      ? roverData.lon
+      : 80.2707;
+
+    const centerLat = hasWaypoints
+      ? waypoints[0].lat
+      : roverData.hasPosition
+      ? roverData.lat
+      : 13.0827;
 
     const map = new mapboxgl.Map({
       container: 'map',
@@ -258,6 +392,20 @@ export const PathPlanMap: React.FC<Props> = ({
       pitchWithRotate: false,
     });
     window.map = map;
+
+    map.on('error', function(event) {
+  const message =
+    event && event.error && event.error.message
+      ? event.error.message
+      : 'Unknown Mapbox error';
+
+  window.ReactNativeWebView.postMessage(
+    JSON.stringify({
+      type: 'mapError',
+      message: message
+    })
+  );
+});
 
     let roverMarker = null;
     const waypointMarkers = [];
@@ -895,97 +1043,11 @@ export const PathPlanMap: React.FC<Props> = ({
         window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'mapReady' }));
       }, 500);
     });
-
-    map.on('style.load', function() {
-      if (!map.getSource('mission-path')) {
-        map.addSource('mission-path', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'mission-glow', type:'line', source:'mission-path',
-          paint:{'line-color':'#f97316','line-width':6,'line-opacity':0.2},
-          layout:{'line-cap':'round','line-join':'round'} });
-        map.addLayer({ id:'mission-line', type:'line', source:'mission-path',
-          paint:{'line-color':'#f97316','line-width':2.5,'line-opacity':0.9},
-          layout:{'line-cap':'round','line-join':'round'} });
-        // Emlid-style black waypoint dots (re-added on style switch)
-        map.addLayer({ id:'mission-points', type:'circle', source:'mission-path',
-          paint:{
-            'circle-radius':['interpolate',['linear'],['zoom'],12,3,18,6],
-            'circle-color':'#000000',
-            'circle-stroke-width':1.5,
-            'circle-stroke-color':'#ffffff'
-          } });
-
-        ensureDxfEntityLayers();
-
-        map.addSource('ortho-guide', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'ortho-guide-line', type:'line', source:'ortho-guide',
-          paint:{'line-color':'#10b981','line-width':3,'line-opacity':0.9,'line-dasharray':[8,4]} });
-
-        map.addSource('drag-prev', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'drag-prev-line', type:'line', source:'drag-prev',
-          paint:{'line-color':'#3B82F6','line-width':3,'line-opacity':0.9,'line-dasharray':[6,4]} });
-        map.addSource('drag-next', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'drag-next-line', type:'line', source:'drag-next',
-          paint:{'line-color':'#3B82F6','line-width':3,'line-opacity':0.9,'line-dasharray':[6,4]} });
-
-        map.addSource('drag-conn', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'drag-conn-line', type:'line', source:'drag-conn',
-          paint:{'line-color':'#60A5FA','line-width':4,'line-opacity':0.8,'line-dasharray':[8,4]} });
-
-        map.addSource('drawing-path', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'drawing-line', type:'line', source:'drawing-path',
-          paint:{'line-color':'#22c55e','line-width':3,'line-opacity':0.8} });
-
-        map.addSource('measure-line', { type:'geojson', data:emptyLine() });
-        map.addLayer({ id:'measure-line-layer', type:'line', source:'measure-line',
-          paint:{'line-color':'#f59e0b','line-width':2,'line-opacity':0.9,'line-dasharray':[6,4]} });
-      }
-
-      window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'mapStyleChanged' }));
-    });
   </script>
 </body>
 </html>
     `;
   }, []);
-
-  useEffect(() => {
-    if (!mapReady || !webViewRef.current || mapInitializedRef.current) return;
-    const hasRover = roverPosition != null &&
-      Number.isFinite(roverPosition.lat) && Number.isFinite(roverPosition.lon);
-    if (hasRover) {
-      const roverLat = roverPosition.lat;
-      const roverLon = roverPosition.lon;
-      const initRoverScript = `
-        (function() {
-          if (!roverMarker && roverData.hasPosition) {
-            const currentZoom = map.getZoom();
-            const zoomScale = Math.max(0.3, Math.min(1.2, (currentZoom - 10) / 12));
-            const size = Math.round(84 * zoomScale);
-            const rotation = ${heading || 0};
-            const roverIconSVG = \`
-              <svg width="\${size}" height="\${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
-                <g id="wheels"><rect x="15" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/><rect x="17" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/><rect x="73" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/><rect x="75" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/><rect x="15" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/><rect x="17" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/><rect x="73" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/><rect x="75" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/></g>
-                <rect x="30" y="25" width="40" height="50" rx="3" fill="#f4d03f" stroke="#d4af37" stroke-width="2"/><rect x="37" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/><rect x="53" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/><rect x="40" y="28" width="5" height="4" fill="#8b7355"/><rect x="55" y="28" width="5" height="4" fill="#8b7355"/><rect x="40" y="68" width="5" height="4" fill="#8b7355"/><rect x="55" y="68" width="5" height="4" fill="#8b7355"/>
-                <g id="heading-arrow"><line x1="50" y1="25" x2="50" y2="5" stroke="#e74c3c" stroke-width="4" stroke-linecap="round"/><polygon points="50,0 43,10 57,10" fill="#e74c3c"/></g>
-              </svg>
-            \`;
-            const roverEl = document.createElement('div');
-            roverEl.style.cssText = \`width:\${size}px;height:\${size}px;\`;
-            roverEl.innerHTML = roverIconSVG;
-            roverMarker = new mapboxgl.Marker({ element: roverEl, anchor: 'center' })
-              .setLngLat([${roverLon}, ${roverLat}])
-              .addTo(map);
-            roverData.hasPosition = true;
-            roverData.lat = ${roverLat};
-            roverData.lon = ${roverLon};
-          }
-        })();
-        true;
-      `;
-      webViewRef.current.injectJavaScript(initRoverScript);
-    }
-    mapInitializedRef.current = true;
-  }, [mapReady]);
 
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
@@ -1025,23 +1087,30 @@ export const PathPlanMap: React.FC<Props> = ({
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
 
-    const waypointsKey = waypoints.map(wp => `${wp.id}-${wp.lat}-${wp.lon}`).join('|') +
-      `|manualMode:${isManualConnectionMode}|manualConns:${manualConnections.join(',')}|connMode:${manualConnectionMode}|pointTool:${activeDrawingTool === 'line'}`;
+    const waypointsKey =
+      waypoints.map((wp) => `${wp.id}-${wp.lat}-${wp.lon}`).join("|") +
+      `|manualMode:${isManualConnectionMode}|manualConns:${manualConnections.join(",")}|connMode:${manualConnectionMode}|pointTool:${activeDrawingTool === "line"}`;
 
-    if (waypointsKey === lastWaypointsRef.current && lastWaypointsRef.current !== '') return;
+    if (
+      waypointsKey === lastWaypointsRef.current &&
+      lastWaypointsRef.current !== ""
+    )
+      return;
     lastWaypointsRef.current = waypointsKey;
 
-    const waypointsData = JSON.stringify(waypoints.map((wp, idx) => ({
-      id: wp.id,
-      lat: wp.lat,
-      lon: wp.lon,
-      alt: wp.alt,
-      block: wp.block,
-      row: wp.row,
-      pile: wp.pile,
-      isSelected: false,
-      isStart: idx === 0,
-    })));
+    const waypointsData = JSON.stringify(
+      waypoints.map((wp, idx) => ({
+        id: wp.id,
+        lat: wp.lat,
+        lon: wp.lon,
+        alt: wp.alt,
+        block: wp.block,
+        row: wp.row,
+        pile: wp.pile,
+        isSelected: false,
+        isStart: idx === 0,
+      })),
+    );
 
     const manualConnectionsData = JSON.stringify(manualConnections);
 
@@ -1049,7 +1118,7 @@ export const PathPlanMap: React.FC<Props> = ({
       (function() {
         const newWaypoints = ${waypointsData};
         const isManualMode = ${isManualConnectionMode};
-        const isPointToolActive = ${activeDrawingTool === 'line'};
+        const isPointToolActive = ${activeDrawingTool === "line"};
         const manualConnections = ${manualConnectionsData};
         const connectionMode = ${JSON.stringify(manualConnectionMode)};
 
@@ -1269,41 +1338,74 @@ export const PathPlanMap: React.FC<Props> = ({
             window.dragConnectionState.isDragging = false;
           }
         }
+          if (newWaypoints.length === 1) {
+  map.flyTo({
+    center: [
+      newWaypoints[0].lon,
+      newWaypoints[0].lat
+    ],
+    zoom: 21,
+    animate: false
+  });
+} else if (newWaypoints.length > 1) {
+  const bounds = new mapboxgl.LngLatBounds();
+
+  newWaypoints.forEach(function(wp) {
+    bounds.extend([wp.lon, wp.lat]);
+  });
+
+  map.fitBounds(bounds, {
+    padding: 80,
+    maxZoom: 22,
+    animate: false
+  });
+}
       })();
       true;
     `;
 
     webViewRef.current.injectJavaScript(updateWaypointsScript);
-  }, [waypoints, mapReady, isManualConnectionMode, manualConnections, manualConnectionMode, activeDrawingTool]);
+  }, [
+    waypoints,
+    mapReady,
+    isManualConnectionMode,
+    manualConnections,
+    manualConnectionMode,
+    activeDrawingTool,
+  ]);
 
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
 
     const featureCollection = {
-      type: 'FeatureCollection',
+      type: "FeatureCollection",
       features: dxfEntities
-        .filter(entity => entity.coordinates.length > 0)
-        .map(entity => {
+        .filter((entity) => entity.coordinates.length > 0)
+        .map((entity) => {
           const first = entity.coordinates[0];
-          const isLine = entity.kind === 'line' && entity.coordinates.length > 1;
+          const isLine =
+            entity.kind === "line" && entity.coordinates.length > 1;
 
           return {
-            type: 'Feature',
+            type: "Feature",
             properties: {
               id: entity.id,
               kind: entity.kind,
-              layer: entity.layer ?? '',
+              layer: entity.layer ?? "",
               label: entity.label,
               dashed: !!entity.dashed,
               closedRing: !!entity.closedRing,
             },
             geometry: isLine
               ? {
-                  type: 'LineString',
-                  coordinates: entity.coordinates.map(coord => [coord.lon, coord.lat]),
+                  type: "LineString",
+                  coordinates: entity.coordinates.map((coord) => [
+                    coord.lon,
+                    coord.lat,
+                  ]),
                 }
               : {
-                  type: 'Point',
+                  type: "Point",
                   coordinates: [first.lon, first.lat],
                 },
           };
@@ -1329,7 +1431,7 @@ export const PathPlanMap: React.FC<Props> = ({
 
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
-    if (lastWaypointsRef.current === '') return;
+    if (lastWaypointsRef.current === "") return;
 
     const prev = lastSelectedRef.current;
     const next = selectedWaypoint ?? null;
@@ -1371,37 +1473,6 @@ export const PathPlanMap: React.FC<Props> = ({
     `;
     webViewRef.current.injectJavaScript(selectionScript);
   }, [selectedWaypoint, mapReady]);
-
-  useEffect(() => {
-    if (!isVisible) return;
-    if (!mapReady || !webViewRef.current) return;
-    if (!roverPosition ||
-      !Number.isFinite(roverPosition.lat) || !Number.isFinite(roverPosition.lon)) return;
-
-    const now = performance.now();
-    if (now - lastUpdateRef.current < UPDATE_THROTTLE_MS) return;
-    lastUpdateRef.current = now;
-
-    const roverLat = roverPosition.lat;
-    const roverLon = roverPosition.lon;
-
-    const updateScript = `
-      if (roverMarker && roverData.hasPosition) {
-        roverMarker.setLngLat([${roverLon}, ${roverLat}]);
-        const markerEl = roverMarker.getElement();
-        if (markerEl && ${heading !== null}) {
-          const svg = markerEl.querySelector('svg');
-          if (svg) {
-            svg.style.transform = 'rotate(${heading || 0}deg)';
-            svg.style.transition = 'none';
-          }
-        }
-      }
-      true;
-    `;
-
-    webViewRef.current.injectJavaScript(updateScript);
-  }, [roverPosition?.lat, roverPosition?.lon, heading, mapReady]);
 
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
@@ -1466,8 +1537,8 @@ export const PathPlanMap: React.FC<Props> = ({
 
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
-    const isMeasureActive = activeDrawingTool === 'measure';
-    const isPointToolActive = activeDrawingTool === 'line';
+    const isMeasureActive = activeDrawingTool === "measure";
+    const isPointToolActive = activeDrawingTool === "line";
     const shouldEnableDrag = isPointToolActive && !isManualConnectionMode;
     const script = `
       window.isMeasureToolActive = ${isMeasureActive};
@@ -1545,7 +1616,7 @@ export const PathPlanMap: React.FC<Props> = ({
   useEffect(() => {
     const loadMeasurePosition = async () => {
       try {
-        const saved = await AsyncStorage.getItem('measureOverlayPos');
+        const saved = await AsyncStorage.getItem("measureOverlayPos");
         if (saved) setMeasureOverlayPos(JSON.parse(saved));
       } catch (e) {}
     };
@@ -1555,7 +1626,10 @@ export const PathPlanMap: React.FC<Props> = ({
   useEffect(() => {
     const saveMeasurePosition = async () => {
       try {
-        await AsyncStorage.setItem('measureOverlayPos', JSON.stringify(measureOverlayPos));
+        await AsyncStorage.setItem(
+          "measureOverlayPos",
+          JSON.stringify(measureOverlayPos),
+        );
       } catch (e) {}
     };
     saveMeasurePosition();
@@ -1563,37 +1637,37 @@ export const PathPlanMap: React.FC<Props> = ({
 
   const widgetMenuItems = [
     {
-      key: 'drawingTools',
-      label: 'Drawing Tools',
-      icon: 'gesture-tap-button' as const,
+      key: "drawingTools",
+      label: "Drawing Tools",
+      icon: "gesture-tap-button" as const,
       selected: isDrawingToolsVisible,
       onToggle: () => setIsDrawingToolsVisible?.(!isDrawingToolsVisible),
     },
     {
-      key: 'missionOps',
-      label: 'Mission Control',
-      icon: 'rocket-launch' as const,
+      key: "missionOps",
+      label: "Mission Control",
+      icon: "rocket-launch" as const,
       selected: isMissionOpsVisible,
       onToggle: () => setIsMissionOpsVisible?.(!isMissionOpsVisible),
     },
     {
-      key: 'statistics',
-      label: 'Mission Stats',
-      icon: 'chart-bar' as const,
+      key: "statistics",
+      label: "Mission Stats",
+      icon: "chart-bar" as const,
       selected: isStatisticsVisible,
       onToggle: () => setIsStatisticsVisible?.(!isStatisticsVisible),
     },
     {
-      key: 'bottomTable',
-      label: 'Waypoints Table',
-      icon: 'table-large' as const,
+      key: "bottomTable",
+      label: "Waypoints Table",
+      icon: "table-large" as const,
       selected: isBottomTableVisible,
       onToggle: () => setIsBottomTableVisible?.(!isBottomTableVisible),
     },
     {
-      key: 'robotPosition',
-      label: 'Robot Position',
-      icon: 'robot' as const,
+      key: "robotPosition",
+      label: "Robot Position",
+      icon: "robot" as const,
       selected: isRobotPositionVisible,
       onToggle: () => setIsRobotPositionVisible?.(!isRobotPositionVisible),
     },
@@ -1604,19 +1678,38 @@ export const PathPlanMap: React.FC<Props> = ({
       <WebView
         ref={webViewRef}
         source={{ html: mapHTML }}
-        style={{ flex: 1, backgroundColor: '#050a12' }}
+        originWhitelist={["*"]}
+        mixedContentMode="always"
+        allowFileAccess={true}
+        style={{ flex: 1, backgroundColor: "#050a12" }}
         androidLayerType="hardware"
+        onError={(event) => {
+          console.error(
+            "[PathPlanMap] WebView error:",
+            event.nativeEvent.description,
+          );
+        }}
+        onHttpError={(event) => {
+          console.error(
+            "[PathPlanMap] WebView HTTP error:",
+            event.nativeEvent.statusCode,
+            event.nativeEvent.url,
+          );
+        }}
         onMessage={(event) => {
           try {
             const message = JSON.parse(event.nativeEvent.data);
-            if (message.type === 'mapReady') {
+            if (message.type === "mapReady") {
+              console.log("[PathPlanMap] Map ready");
               setMapReady(true);
-            } else if (message.type === 'mapClick') {
+            } else if (message.type === "mapError") {
+              console.error("[PathPlanMap] Mapbox error:", message.message);
+            } else if (message.type === "mapClick") {
               onDismissPanel?.();
               onMapPress?.({ latitude: message.lat, longitude: message.lng });
               setContextMenu(null);
-            } else if (message.type === 'waypointClick') {
-              if (activeDrawingTool === 'measure') {
+            } else if (message.type === "waypointClick") {
+              if (activeDrawingTool === "measure") {
                 onMeasureWaypointSelect?.(message.id);
               } else {
                 onWaypointClick?.(message.id);
@@ -1628,26 +1721,33 @@ export const PathPlanMap: React.FC<Props> = ({
                 // rejected the update, leaving the connecting line stale.
               }
               setContextMenu(null);
-            } else if (message.type === 'waypointConnect') {
+            } else if (message.type === "waypointConnect") {
               onWaypointConnect?.(message.fromId, message.toId);
-            } else if (message.type === 'waypointDrag') {
-              onWaypointDrag?.(message.id, { latitude: message.lat, longitude: message.lng });
-            } else if (message.type === 'waypointContextMenu') {
-              if (activeDrawingTool === 'measure') return;
-              if (!isManualConnectionMode || manualConnectionMode === 'pan') {
-                setContextMenu({ x: message.x, y: message.y, waypointId: message.id });
+            } else if (message.type === "waypointDrag") {
+              onWaypointDrag?.(message.id, {
+                latitude: message.lat,
+                longitude: message.lng,
+              });
+            } else if (message.type === "waypointContextMenu") {
+              if (activeDrawingTool === "measure") return;
+              if (!isManualConnectionMode || manualConnectionMode === "pan") {
+                setContextMenu({
+                  x: message.x,
+                  y: message.y,
+                  waypointId: message.id,
+                });
               }
-            } else if (message.type === 'drawingComplete') {
+            } else if (message.type === "drawingComplete") {
               const coords = message.points
                 .filter((p: any) => !isNaN(p.lat) && !isNaN(p.lng))
                 .map((p: any) => ({ latitude: p.lat, longitude: p.lng }));
               if (coords.length > 0) onDrawingComplete?.(coords);
-            } else if (message.type === 'mapStyleChanged') {
-              lastWaypointsRef.current = '';
+            } else if (message.type === "mapStyleChanged") {
+              lastWaypointsRef.current = "";
               setMapReady(true);
             }
           } catch (error) {
-            console.error('WebView message error:', error);
+            console.error("WebView message error:", error);
           }
         }}
         javaScriptEnabled={true}
@@ -1659,19 +1759,32 @@ export const PathPlanMap: React.FC<Props> = ({
       {/* Bottom Horizontal Controls Capsule Bar */}
       <View style={styles.bottomControlsBar}>
         {/* Toggle Map Style */}
-        <TouchableOpacity 
-          style={styles.bottomControlBtn} 
+        <TouchableOpacity
+          style={styles.bottomControlBtn}
           onPress={() => {
             // Cycle: satellite (default) → streets → dark → satellite
-            const order: Array<'satellite' | 'streets' | 'dark'> = ['satellite', 'streets', 'dark'];
-            const newStyle = order[(order.indexOf(mapStyle) + 1) % order.length];
+            const order: Array<"satellite" | "streets" | "dark"> = [
+              "satellite",
+              "streets",
+              "dark",
+            ];
+            const newStyle =
+              order[(order.indexOf(mapStyle) + 1) % order.length];
             setMapStyle(newStyle);
-            webViewRef.current?.injectJavaScript(`window.setMapStyle('${newStyle}'); true;`);
+            webViewRef.current?.injectJavaScript(
+              `window.setMapStyle('${newStyle}'); true;`,
+            );
           }}
           activeOpacity={0.7}
         >
           <MaterialCommunityIcons
-            name={mapStyle === 'satellite' ? "image-filter-hdr" : mapStyle === 'streets' ? "road-variant" : "earth"}
+            name={
+              mapStyle === "satellite"
+                ? "image-filter-hdr"
+                : mapStyle === "streets"
+                  ? "road-variant"
+                  : "earth"
+            }
             size={18}
             color="#E5F1FF"
           />
@@ -1682,10 +1795,16 @@ export const PathPlanMap: React.FC<Props> = ({
         {/* Fit Mission */}
         <TouchableOpacity
           style={styles.bottomControlBtn}
-          onPress={() => webViewRef.current?.injectJavaScript('window.fitToMission(); true;')}
+          onPress={() =>
+            webViewRef.current?.injectJavaScript("window.fitToMission(); true;")
+          }
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="vector-polyline" size={18} color="#E5F1FF" />
+          <MaterialCommunityIcons
+            name="vector-polyline"
+            size={18}
+            color="#E5F1FF"
+          />
         </TouchableOpacity>
 
         <View style={styles.btnDivider} />
@@ -1693,10 +1812,18 @@ export const PathPlanMap: React.FC<Props> = ({
         {/* Center on Rover */}
         <TouchableOpacity
           style={styles.bottomControlBtn}
-          onPress={() => webViewRef.current?.injectJavaScript('window.centerOnRover(); true;')}
+          onPress={() =>
+            webViewRef.current?.injectJavaScript(
+              "window.centerOnRover(); true;",
+            )
+          }
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="crosshairs-gps" size={18} color="#E5F1FF" />
+          <MaterialCommunityIcons
+            name="crosshairs-gps"
+            size={18}
+            color="#E5F1FF"
+          />
         </TouchableOpacity>
 
         <View style={styles.btnDivider} />
@@ -1704,7 +1831,11 @@ export const PathPlanMap: React.FC<Props> = ({
         {/* Zoom In */}
         <TouchableOpacity
           style={styles.bottomControlBtn}
-          onPress={() => webViewRef.current?.injectJavaScript('if (typeof map !== "undefined") { map.zoomIn(); } true;')}
+          onPress={() =>
+            webViewRef.current?.injectJavaScript(
+              'if (typeof map !== "undefined") { map.zoomIn(); } true;',
+            )
+          }
           activeOpacity={0.7}
         >
           <MaterialCommunityIcons name="plus" size={18} color="#E5F1FF" />
@@ -1715,7 +1846,11 @@ export const PathPlanMap: React.FC<Props> = ({
         {/* Zoom Out */}
         <TouchableOpacity
           style={styles.bottomControlBtn}
-          onPress={() => webViewRef.current?.injectJavaScript('if (typeof map !== "undefined") { map.zoomOut(); } true;')}
+          onPress={() =>
+            webViewRef.current?.injectJavaScript(
+              'if (typeof map !== "undefined") { map.zoomOut(); } true;',
+            )
+          }
           activeOpacity={0.7}
         >
           <MaterialCommunityIcons name="minus" size={18} color="#E5F1FF" />
@@ -1742,7 +1877,7 @@ export const PathPlanMap: React.FC<Props> = ({
                   <MaterialCommunityIcons
                     name={option.icon}
                     size={18}
-                    color={isSelected ? '#67E8F9' : '#94A3B8'}
+                    color={isSelected ? "#67E8F9" : "#94A3B8"}
                     style={styles.visMenuItemIcon}
                   />
                   <Text
@@ -1779,7 +1914,7 @@ export const PathPlanMap: React.FC<Props> = ({
                 <MaterialCommunityIcons
                   name={option.icon}
                   size={18}
-                  color={option.selected ? '#67E8F9' : '#94A3B8'}
+                  color={option.selected ? "#67E8F9" : "#94A3B8"}
                   style={styles.visMenuItemIcon}
                 />
                 <Text
@@ -1800,10 +1935,12 @@ export const PathPlanMap: React.FC<Props> = ({
       {/* Sleek Rotating Compass Overlay — fixed N, rotating heading needle */}
       <View style={styles.compassOverlay}>
         <Text style={styles.compassN}>N</Text>
-        <View style={[
-          styles.headingNeedle,
-          { transform: [{ rotate: `${heading ?? 0}deg` }] }
-        ]}>
+        <View
+          style={[
+            styles.headingNeedle,
+            { transform: [{ rotate: `${heading ?? 0}deg` }] },
+          ]}
+        >
           <MaterialCommunityIcons name="navigation" size={26} color="#67E8F9" />
         </View>
         <View style={styles.compassPivot} />
@@ -1812,21 +1949,21 @@ export const PathPlanMap: React.FC<Props> = ({
       {contextMenu && (
         <View
           style={{
-            position: 'absolute',
+            position: "absolute",
             left: contextMenu.x,
             top: contextMenu.y,
-            backgroundColor: 'rgba(13, 42, 75, 0.96)',
+            backgroundColor: "rgba(13, 42, 75, 0.96)",
             borderRadius: 10,
             borderWidth: 1,
-            borderColor: 'rgba(59, 130, 246, 0.3)',
-            shadowColor: '#000',
+            borderColor: "rgba(59, 130, 246, 0.3)",
+            shadowColor: "#000",
             shadowOffset: { width: 0, height: 4 },
             shadowOpacity: 0.4,
             shadowRadius: 8,
             elevation: 8,
             zIndex: 2000,
             minWidth: 180,
-            overflow: 'hidden',
+            overflow: "hidden",
           }}
         >
           {onDeleteWaypoint && (
@@ -1839,53 +1976,63 @@ export const PathPlanMap: React.FC<Props> = ({
                 paddingVertical: 12,
                 paddingHorizontal: 16,
                 borderBottomWidth: 1,
-                borderBottomColor: 'rgba(59, 130, 246, 0.15)',
-                flexDirection: 'row',
-                alignItems: 'center',
+                borderBottomColor: "rgba(59, 130, 246, 0.15)",
+                flexDirection: "row",
+                alignItems: "center",
                 gap: 8,
               }}
             >
-              <Text style={{ color: '#ef4444', fontSize: 14, fontWeight: '600' }}>
+              <Text
+                style={{ color: "#ef4444", fontSize: 14, fontWeight: "600" }}
+              >
                 Delete Waypoint
               </Text>
             </TouchableOpacity>
           )}
-          {onInsertWaypoint && roverPosition &&
-            Number.isFinite(roverPosition.lat) && Number.isFinite(roverPosition.lon) && (
-            <TouchableOpacity
-              onPress={() => {
-                onInsertWaypoint(contextMenu.waypointId, {
-                  latitude: roverPosition.lat,
-                  longitude: roverPosition.lon,
-                });
-                setContextMenu(null);
-              }}
-              style={{
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Text style={{ color: '#22c55e', fontSize: 14, fontWeight: '600' }}>
-                Insert Waypoint After
-              </Text>
-            </TouchableOpacity>
-          )}
+          {onInsertWaypoint &&
+            roverPosition &&
+            Number.isFinite(roverPosition.lat) &&
+            Number.isFinite(roverPosition.lon) && (
+              <TouchableOpacity
+                onPress={() => {
+                  onInsertWaypoint(contextMenu.waypointId, {
+                    latitude: roverPosition.lat,
+                    longitude: roverPosition.lon,
+                  });
+                  setContextMenu(null);
+                }}
+                style={{
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text
+                  style={{ color: "#22c55e", fontSize: 14, fontWeight: "600" }}
+                >
+                  Insert Waypoint After
+                </Text>
+              </TouchableOpacity>
+            )}
         </View>
       )}
 
-
-
       {measurePoints.length > 0 && (
         <View
-          style={[styles.measureOverlay, { left: measureOverlayPos.x, top: measureOverlayPos.y }]}
+          style={[
+            styles.measureOverlay,
+            { left: measureOverlayPos.x, top: measureOverlayPos.y },
+          ]}
           {...measurePanResponderRef.current?.panHandlers}
         >
           <View style={styles.measureHeader}>
             <Text style={styles.measureTitle}>⬡ MEASURE</Text>
-            <TouchableOpacity onPress={onMeasureClear} style={styles.measureClearBtn}>
+            <TouchableOpacity
+              onPress={onMeasureClear}
+              style={styles.measureClearBtn}
+            >
               <Text style={styles.measureClearText}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -1895,7 +2042,8 @@ export const PathPlanMap: React.FC<Props> = ({
                 {pt.waypointId != null ? `WP${pt.waypointId}` : `M${pt.seq}`}
               </Text>
               <Text style={styles.measureCoord}>
-                {pt.lat.toFixed(6)},{'\n'}{pt.lon.toFixed(6)}
+                {pt.lat.toFixed(6)},{"\n"}
+                {pt.lon.toFixed(6)}
               </Text>
             </View>
           ))}
@@ -1914,7 +2062,9 @@ export const PathPlanMap: React.FC<Props> = ({
               </View>
               <View style={styles.measureResultRow}>
                 <Text style={styles.measureResultLabel}>Heading</Text>
-                <Text style={styles.measureResultValue}>{measureResult.heading.toFixed(1)}°</Text>
+                <Text style={styles.measureResultValue}>
+                  {measureResult.heading.toFixed(1)}°
+                </Text>
               </View>
             </View>
           )}
@@ -1927,25 +2077,25 @@ export const PathPlanMap: React.FC<Props> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050a12',
+    backgroundColor: "#050a12",
   },
   bottomControlsBar: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 16,
     right: 16,
     width: 320,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#07111be6',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#07111be6",
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
+    borderColor: "rgba(103, 232, 249, 0.15)",
     borderRadius: 14,
     paddingVertical: 6,
     paddingHorizontal: 10,
     gap: 6,
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.35,
     shadowRadius: 6,
@@ -1954,173 +2104,173 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   btnDivider: {
     width: 1,
     height: 32,
-    backgroundColor: 'rgba(103, 232, 249, 0.12)',
+    backgroundColor: "rgba(103, 232, 249, 0.12)",
   },
   compassOverlay: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 16,
     left: 16,
     width: 60,
     height: 60,
     borderRadius: 14,
-    backgroundColor: '#07111be6',
+    backgroundColor: "#07111be6",
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(103, 232, 249, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.35,
     shadowRadius: 6,
   },
   headingNeedle: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   compassN: {
-    position: 'absolute',
+    position: "absolute",
     top: 4,
     fontSize: 9,
-    fontWeight: '900',
-    color: '#E5F1FF',
+    fontWeight: "900",
+    color: "#E5F1FF",
     letterSpacing: 0.5,
     zIndex: 2,
   },
   compassPivot: {
-    position: 'absolute',
+    position: "absolute",
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#0a1420',
+    backgroundColor: "#0a1420",
     borderWidth: 1,
-    borderColor: '#67E8F9',
+    borderColor: "#67E8F9",
     zIndex: 3,
   },
   measureOverlay: {
-    position: 'absolute',
-    backgroundColor: 'rgba(13, 42, 75, 0.95)',
+    position: "absolute",
+    backgroundColor: "rgba(13, 42, 75, 0.95)",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.4)',
+    borderColor: "rgba(245, 158, 11, 0.4)",
     padding: 0,
     minWidth: 190,
     zIndex: 1000,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 8,
   },
   measureHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 6,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(245, 158, 11, 0.15)',
+    borderBottomColor: "rgba(245, 158, 11, 0.15)",
   },
   measureTitle: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#f59e0b',
+    fontWeight: "700",
+    color: "#f59e0b",
     letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
   },
   measureClearBtn: {
     paddingHorizontal: 6,
     paddingVertical: 2,
-    backgroundColor: 'rgba(239,68,68,0.2)',
+    backgroundColor: "rgba(239,68,68,0.2)",
     borderRadius: 4,
   },
   measureClearText: {
     fontSize: 11,
-    color: '#ef4444',
-    fontWeight: '700',
+    color: "#ef4444",
+    fontWeight: "700",
   },
   measureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     marginBottom: 2,
     paddingHorizontal: 12,
   },
   measureSeq: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#f59e0b',
+    fontWeight: "700",
+    color: "#f59e0b",
     width: 36,
-    fontFamily: 'monospace',
+    fontFamily: "monospace",
   },
   measureCoord: {
     fontSize: 10,
-    color: 'rgba(229, 241, 255, 0.7)',
-    fontFamily: 'monospace',
+    color: "rgba(229, 241, 255, 0.7)",
+    fontFamily: "monospace",
   },
   measureHint: {
     fontSize: 10,
-    color: 'rgba(103,232,249,0.7)',
+    color: "rgba(103,232,249,0.7)",
     marginTop: 4,
     paddingHorizontal: 12,
     paddingBottom: 8,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   measureResultBlock: {
     marginTop: 0,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(245,158,11,0.2)',
+    borderTopColor: "rgba(245,158,11,0.2)",
     paddingTop: 8,
     paddingBottom: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(245, 158, 11, 0.05)',
+    backgroundColor: "rgba(245, 158, 11, 0.05)",
   },
   measureResultRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 3,
   },
   measureResultLabel: {
     fontSize: 10,
-    color: 'rgba(229, 241, 255, 0.6)',
-    fontFamily: 'monospace',
+    color: "rgba(229, 241, 255, 0.6)",
+    fontFamily: "monospace",
   },
   measureResultValue: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#f59e0b',
-    fontFamily: 'monospace',
+    fontWeight: "700",
+    color: "#f59e0b",
+    fontFamily: "monospace",
   },
   visDropdownMenu: {
-    position: 'absolute',
+    position: "absolute",
     left: PATH_PLAN_WIDGET_MENU_LEFT,
     top: PATH_PLAN_WIDGET_MENU_TOP,
     width: PATH_PLAN_WIDGET_MENU_WIDTH,
     height: PATH_PLAN_WIDGET_MENU_HEIGHT,
-    backgroundColor: '#07111be6',
+    backgroundColor: "#07111be6",
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
+    borderColor: "rgba(103, 232, 249, 0.15)",
     borderRadius: 12,
     padding: 16,
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
   },
   visDropdownTitle: {
-    color: '#67E8F9',
+    color: "#67E8F9",
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
     paddingBottom: 10,
   },
@@ -2129,29 +2279,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   visMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     minHeight: 42,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.1)',
-    backgroundColor: 'rgba(8, 16, 26, 0.9)',
+    borderColor: "rgba(103, 232, 249, 0.1)",
+    backgroundColor: "rgba(8, 16, 26, 0.9)",
     paddingHorizontal: 12,
   },
   visMenuItemSelected: {
-    borderColor: 'rgba(103, 232, 249, 0.55)',
-    backgroundColor: 'rgba(103, 232, 249, 0.14)',
+    borderColor: "rgba(103, 232, 249, 0.55)",
+    backgroundColor: "rgba(103, 232, 249, 0.14)",
   },
   visMenuItemIcon: {
     marginRight: 10,
   },
   visMenuItemLabel: {
     flex: 1,
-    color: '#94A3B8',
+    color: "#94A3B8",
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   visMenuItemLabelSelected: {
-    color: '#67E8F9',
+    color: "#67E8F9",
   },
 });

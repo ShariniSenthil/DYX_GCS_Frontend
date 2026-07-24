@@ -2,7 +2,7 @@
 // Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN in your .env file — get a token from https://account.mapbox.com
 export const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN || '';
 
-export const MAPBOX_VERSION = '3.6.0';
+export const MAPBOX_VERSION = '2.15.0';
 
 // Map styles
 export const MAPBOX_STYLE_SATELLITE = 'mapbox://styles/mapbox/satellite-streets-v12';

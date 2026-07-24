@@ -77,6 +77,9 @@ export interface MissionUploadMetadata {
 
 export interface MissionRuntimeState {
   state?: string;
+  loaded?: boolean;
+  ready?: boolean;
+
   message?: string;
   error?: string | null;
 

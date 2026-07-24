@@ -1,89 +1,141 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { TouchableOpacity, View, StyleSheet, StatusBar, Text, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { Toast } from '../components/shared/Toast';
-import { VehicleStatusCard } from '../components/missionreport/VehicleStatusCard';
-import { MissionProgressCard } from '../components/missionreport/MissionProgressCard';
-import { DistanceToTargetCard } from '../components/missionreport/DistanceToTargetCard';
-import { SystemStatusPanel } from '../components/missionreport/SystemStatusPanel';
-import { QuickNtripStartCard } from '../components/missionreport/QuickNtripStartCard';
-import { ManualDrivePanel } from '../components/manual/ManualDrivePanel';
-import MissionControlCard from '../components/missionreport/MissionControlCard';
-import { WaypointsTable } from '../components/missionreport/WaypointsTable';
-import { MissionMap } from '../components/missionreport/MissionMap';
-import { DraggableCard } from '../components/shared/DraggableCard';
-import { MissionTableHeader } from '../components/missionreport/MissionTableHeader';
-import { MissionTableToolbarActions } from '../components/missionreport/MissionTableToolbarActions';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+} from "react";
+import {
+  TouchableOpacity,
+  View,
+  StyleSheet,
+  StatusBar,
+  Text,
+  Alert,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { colors } from "../theme/colors";
+import { Toast } from "../components/shared/Toast";
+import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard";
+import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
+import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
+import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
+import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
+import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
+import MissionControlCard from "../components/missionreport/MissionControlCard";
+import { WaypointsTable } from "../components/missionreport/WaypointsTable";
+import { MissionMap } from "../components/missionreport/MissionMap";
+import { DraggableCard } from "../components/shared/DraggableCard";
+import { MissionTableHeader } from "../components/missionreport/MissionTableHeader";
+import { MissionTableToolbarActions } from "../components/missionreport/MissionTableToolbarActions";
 import {
   useMissionProgressOverlay,
   migrateLegacyPanelVisibility,
-} from '../context/MissionProgressOverlayContext';
+} from "../context/MissionProgressOverlayContext";
 import {
   MISSION_PROGRESS_LAYOUT,
   getMissionProgressBottomTableInsets,
-} from '../constants/missionProgressLayout';
-import { PATH_PLAN_GLASS } from '../constants/pathPlanGlass';
-import { Mode, VehicleStatus, Waypoint } from '../components/missionreport/types';
-import { RTKInjectionScreen } from '../components/missionreport/RTKInjectionScreen';
-import { useTelemetry } from '../context/TelemetryContext';
-import { useConnection } from '../context/ConnectionContext';
-import { useMission } from '../context/MissionContext';
-import { AutoAssignDialog } from '../components/missionreport/AutoAssignDialog';
-import { WaypointPreviewDialog } from '../components/missionreport/WaypointPreviewDialog';
-import { MissionCompletionDialog } from '../components/missionreport/MissionCompletionDialog';
-import { LogClearDialog } from '../components/missionreport/LogClearDialog';
-import { useScreenReadiness } from '../hooks/useComponentReadiness';
-import PersistentStorage from '../services/PersistentStorage';
-import { getAllProfiles } from '../services/ntripProfileStorage';
-import { getRtkStatus, startNtripStream, stopAllRtk } from '../services/rtkService';
-import { armVehicle, setManualMode } from '../services/vehicleControlService';
-import type { NTRIPProfile } from '../types/ntrip';
+} from "../constants/missionProgressLayout";
+import { PATH_PLAN_GLASS } from "../constants/pathPlanGlass";
+import {
+  Mode,
+  VehicleStatus,
+  Waypoint,
+} from "../components/missionreport/types";
+import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
+import { useTelemetry } from "../context/TelemetryContext";
+import { useConnection } from "../context/ConnectionContext";
+import { useMission } from "../context/MissionContext";
+import { AutoAssignDialog } from "../components/missionreport/AutoAssignDialog";
+import { WaypointPreviewDialog } from "../components/missionreport/WaypointPreviewDialog";
+import { MissionCompletionDialog } from "../components/missionreport/MissionCompletionDialog";
+import { LogClearDialog } from "../components/missionreport/LogClearDialog";
+import { useScreenReadiness } from "../hooks/useComponentReadiness";
+import PersistentStorage from "../services/PersistentStorage";
+import { getAllProfiles } from "../services/ntripProfileStorage";
+import {
+  getRtkStatus,
+  startNtripStream,
+  stopAllRtk,
+} from "../services/rtkService";
+import { armVehicle, setManualMode } from "../services/vehicleControlService";
+import type { NTRIPProfile } from "../types/ntrip";
 // NOTE: calculateAccuracy and formatAccuracyDisplay commented out - now using backend wp_dist_cm
 // import { calculateAccuracy, formatAccuracyDisplay } from '../utils/accuracyCalculation';
-import { getAccuracyLevel } from '../utils/accuracyCalculation';
-import { isRobotStatusDebugEnabled, patchRobotStatusDebug } from '../utils/robotStatusDebug';
-import usePointMissionEvents from '../hooks/usePointMissionEvents';
-import { POINT_MISSION_ENABLED, JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS } from '../config/featureFlags';
-import { isOfflineMode } from '../config';
-import { continuePoint, skipPoint, getPointStatus } from '../services/missionLifecycleService';
+import { getAccuracyLevel } from "../utils/accuracyCalculation";
+import {
+  isRobotStatusDebugEnabled,
+  patchRobotStatusDebug,
+} from "../utils/robotStatusDebug";
+import usePointMissionEvents from "../hooks/usePointMissionEvents";
+import {
+  POINT_MISSION_ENABLED,
+  JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS,
+} from "../config/featureFlags";
+import { isOfflineMode } from "../config";
 import {
   buildLegacyStatusMapFromPointMap,
   mergeLegacyStatusMap,
-} from '../adapters/px4PointStatusBridge';
-import { useVerifiedMissionUpload } from '../hooks/useVerifiedMissionUpload';
-import { useVerifiedMissionContext } from '../context/VerifiedMissionContext';
-import { useVerifiedMissionProgress } from '../hooks/useVerifiedMissionProgress';
-import { verifiedProgressToLegacy } from '../adapters/verifiedTargetBridge';
-import { startVerifiedMission, clearVerifiedMission } from '../services/verifiedMissionService';
-import { getMissionProgressRef } from '../utils/missionStatusPresentation';
+} from "../adapters/px4PointStatusBridge";
+import { useVerifiedMissionUpload } from "../hooks/useVerifiedMissionUpload";
+import { useVerifiedMissionContext } from "../context/VerifiedMissionContext";
+import { useVerifiedMissionProgress } from "../hooks/useVerifiedMissionProgress";
+import { verifiedProgressToLegacy } from "../adapters/verifiedTargetBridge";
+import { clearVerifiedMission } from "../services/verifiedMissionService";
+import { getMissionProgressRef } from "../utils/missionStatusPresentation";
+import {
+  getMissionStatus,
+  startMission,
+  pauseMission,
+  resumeMission,
+  nextMissionPoint,
+  skipMissionPoint,
+  stopMission,
+  type MissionRuntimeState,
+} from "../services/missionApi";
 
 // Status map type matching web application
 type WpStatus = {
   reached?: boolean;
   marked?: boolean;
-  status?: 'completed' | 'loading' | 'skipped' | 'reached' | 'marked' | 'pending' | 'spray_on' | 'spray_off' | 'passed' | 'mission_end' | 'failed' | 'aborted' | 'stopped';
+  status?:
+    | "completed"
+    | "loading"
+    | "skipped"
+    | "reached"
+    | "marked"
+    | "pending"
+    | "spray_on"
+    | "spray_off"
+    | "passed"
+    | "mission_end"
+    | "failed"
+    | "aborted"
+    | "stopped";
   timestamp?: string;
   pile?: string | number;
   rowNo?: string | number;
   remark?: string;
   // Accuracy tracking fields
-  hrms?: number;           // Horizontal accuracy (meters)
-  vrms?: number;           // Vertical accuracy (meters)
-  lat_achieved?: number;   // Actual rover lat when reached
-  lon_achieved?: number;   // Actual rover lon when reached
+  hrms?: number; // Horizontal accuracy (meters)
+  vrms?: number; // Vertical accuracy (meters)
+  lat_achieved?: number; // Actual rover lat when reached
+  lon_achieved?: number; // Actual rover lon when reached
   accuracy_level?: string; // 'excellent' | 'good' | 'fair' | 'poor'
   position_error_cm?: number; // Distance error in cm (was position_error_mm)
 };
 
 const getRtkFailureMessage = (err: unknown, fallback: string) => {
   if (err instanceof Error) {
-    const responseBody = 'responseBody' in err ? String((err as { responseBody?: unknown }).responseBody ?? '') : '';
+    const responseBody =
+      "responseBody" in err
+        ? String((err as { responseBody?: unknown }).responseBody ?? "")
+        : "";
     if (responseBody) {
       try {
         const parsed = JSON.parse(responseBody);
         const detail = parsed?.detail;
-        if (typeof detail === 'string') {
+        if (typeof detail === "string") {
           return `${err.message}: ${detail}`;
         }
       } catch {
@@ -99,17 +151,21 @@ interface MissionReportScreenProps {
   isVisible?: boolean;
 }
 
-export default function MissionReportScreen({ isVisible = true }: MissionReportScreenProps) {
+export default function MissionReportScreen({
+  isVisible = true,
+}: MissionReportScreenProps) {
   const DEBUG_MISSION_LOGS = false;
   const missionLog = (...args: any[]) => {
     if (DEBUG_MISSION_LOGS) console.log(...args);
   };
   const mapBackendMissionModeToUiMode = (backendMode: unknown): Mode | null => {
-    const normalized = String(backendMode ?? '').trim().toLowerCase();
-    if (normalized === 'auto') return 'AUTO';
-    if (normalized === 'manual') return 'MANUAL';
-    if (normalized === 'continuous') return 'CONTINUOUS';
-    if (normalized === 'dash') return 'DASH';
+    const normalized = String(backendMode ?? "")
+      .trim()
+      .toLowerCase();
+    if (normalized === "auto") return "AUTO";
+    if (normalized === "manual") return "MANUAL";
+    if (normalized === "continuous") return "CONTINUOUS";
+    if (normalized === "dash") return "DASH";
     return null;
   };
   const { telemetry, roverPosition, onMissionEvent, socket } = useTelemetry();
@@ -125,40 +181,55 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     waitingForContinue: verifiedWaiting,
     resetProgress: resetVerifiedProgress,
     clearMissionTerminal: clearVerifiedTerminal,
-  } = useVerifiedMissionProgress(socket, connectionState, verifiedCtx.missionId, verifiedCtx.totalTargets);
+  } = useVerifiedMissionProgress(
+    socket,
+    connectionState,
+    verifiedCtx.missionId,
+    verifiedCtx.totalTargets,
+  );
 
   const {
     statusMap: pointStatusMap,
     waitingForContinue: px4WaitingForContinue,
     currentPointIndex: px4CurrentPointIndex,
-    expectedGeneration: px4ExpectedGeneration,
     missionTerminal: px4MissionTerminal,
     resetStatusMap: resetPointStatusMap,
-    acknowledgeContinueSuccess,
     clearMissionTerminal,
   } = usePointMissionEvents(socket, connectionState);
-  const { missionWaypoints, setMissionWaypoints, clearMissionWaypoints, missionMode, setMissionMode } = useMission();
-  const [mode, setMode] = useState<Mode>('AUTO');
+  const {
+    missionWaypoints,
+    setMissionWaypoints,
+    clearMissionWaypoints,
+    missionMode,
+    setMissionMode,
+  } = useMission();
+  const [mode, setMode] = useState<Mode>("AUTO");
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [statusMap, setStatusMap] = useState<Record<number, WpStatus>>({});
+
+  const [backendMission, setBackendMission] =
+    useState<MissionRuntimeState | null>(null);
 
   // STATUS DOWNGRADE GUARD: Defines priority order — higher index = more "final"
   // Once a waypoint reaches 'completed' or 'skipped', backend events cannot regress it
   const STATUS_PRIORITY: Record<string, number> = {
-    'pending': 0,
-    'loading': 1,
-    'reached': 2,
-    'passed': 2,
-    'spray_on': 3,
-    'spray_off': 3,
-    'marked': 3,
-    'completed': 4,
-    'skipped': 4,
-    'mission_end': 4,
+    pending: 0,
+    loading: 1,
+    reached: 2,
+    passed: 2,
+    spray_on: 3,
+    spray_off: 3,
+    marked: 3,
+    completed: 4,
+    skipped: 4,
+    mission_end: 4,
   };
 
   /** Returns true if the incoming status would be a downgrade from the existing one */
-  const isStatusDowngrade = (existingStatus: string | undefined, incomingStatus: string | undefined): boolean => {
+  const isStatusDowngrade = (
+    existingStatus: string | undefined,
+    incomingStatus: string | undefined,
+  ): boolean => {
     if (!existingStatus || !incomingStatus) return false;
     const existingPriority = STATUS_PRIORITY[existingStatus] ?? 0;
     const incomingPriority = STATUS_PRIORITY[incomingStatus] ?? 0;
@@ -167,14 +238,14 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
   // Track screen readiness - prevents user actions until all components initialized
   const { isReady: screenReady } = useScreenReadiness(
-    'mission-report-screen',
-    'Mission Report Screen',
+    "mission-report-screen",
+    "Mission Report Screen",
     async (setProgress) => {
       // No artificial delays — screen becomes ready as soon as async init completes
-      setProgress(100, 'Ready');
+      setProgress(100, "Ready");
     },
     true, // critical
-    [] // No dependencies
+    [], // No dependencies
   );
 
   // Mission log persistence states
@@ -186,11 +257,17 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     endTime: Date | null;
   } | null>(null);
   const [hasPendingMissionStart, setHasPendingMissionStart] = useState(false);
-  const [notification, setNotification] = useState<{ visible: boolean; type: 'success' | 'error' | 'info'; title?: string; message?: string }>({ visible: false, type: 'info', title: undefined, message: undefined });
+  const [notification, setNotification] = useState<{
+    visible: boolean;
+    type: "success" | "error" | "info";
+    title?: string;
+    message?: string;
+  }>({ visible: false, type: "info", title: undefined, message: undefined });
 
   // Dialog states for mission upload workflow
   const [showAutoAssignDialog, setShowAutoAssignDialog] = useState(false);
-  const [showWaypointPreviewDialog, setShowWaypointPreviewDialog] = useState(false);
+  const [showWaypointPreviewDialog, setShowWaypointPreviewDialog] =
+    useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [isUploadingMission, setIsUploadingMission] = useState(false);
 
@@ -201,8 +278,6 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   const [missionEndTime, setMissionEndTime] = useState<Date | null>(null);
   const [isMissionActive, setIsMissionActive] = useState(false); // Track if mission is currently running
   const [waitingForManual, setWaitingForManual] = useState(false); // MANUAL mode: waiting for user to press NEXT
-
-
 
   // Skip audit / undo support
   type SkipAuditRecord = {
@@ -216,18 +291,19 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   };
 
   const [skipHistory, setSkipHistory] = useState<SkipAuditRecord[]>([]);
-  const [undoPrompt, setUndoPrompt] = useState<{ visible: boolean; id?: string | null }>({ visible: false, id: null });
+  const [undoPrompt, setUndoPrompt] = useState<{
+    visible: boolean;
+    id?: string | null;
+  }>({ visible: false, id: null });
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isBottomTableExpanded, setIsBottomTableExpanded] = useState(false);
   const [robotPanelHeight, setRobotPanelHeight] = useState(0);
-  const [missionProgressPanelHeight, setMissionProgressPanelHeight] = useState(0);
+  const [missionProgressPanelHeight, setMissionProgressPanelHeight] =
+    useState(0);
   const [systemPanelHeight, setSystemPanelHeight] = useState(0);
-  const {
-    panelVisibility,
-    setPanelVisibility,
-    setPanelVisible,
-  } = useMissionProgressOverlay();
+  const { panelVisibility, setPanelVisibility, setPanelVisible } =
+    useMissionProgressOverlay();
   const {
     robotStatus: isRobotStatusVisible,
     missionProgress: isMissionProgressVisible,
@@ -250,9 +326,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     setPanelVisibility((prev) => {
       missionControlsRestoreRef.current = prev.missionControls;
       joystickSwapActiveRef.current = true;
-      return prev.missionControls
-        ? { ...prev, missionControls: false }
-        : prev;
+      return prev.missionControls ? { ...prev, missionControls: false } : prev;
     });
     setIsManualDriveVisible(true);
   }, [setPanelVisibility]);
@@ -266,14 +340,14 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     if (!joystickSwapActiveRef.current) return;
     joystickSwapActiveRef.current = false;
     if (missionControlsRestoreRef.current) {
-      setPanelVisible('missionControls', true);
+      setPanelVisible("missionControls", true);
     }
     missionControlsRestoreRef.current = false;
   }, [isManualDriveVisible, setPanelVisible]);
 
   useEffect(() => {
     if (isManualDriveVisible && isMissionControlsVisible) {
-      setPanelVisible('missionControls', false);
+      setPanelVisible("missionControls", false);
     }
   }, [isManualDriveVisible, isMissionControlsVisible, setPanelVisible]);
 
@@ -285,7 +359,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // const MAX_TRAIL_POINTS = 500;
 
   // Ref to track notification timeout for cleanup
-  const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const mountedRef = useRef(true);
 
   // Use waypoints from shared context for persistence across screens
@@ -316,11 +392,42 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   }, [statusMap, px4LegacyStatusMap, verifiedLegacyMap, verifiedCtx.isLoaded]);
 
   const telemetryMissionActive = useMemo(() => {
-    const ms = String(telemetry.mission?.status ?? '').toLowerCase();
-    return ['running', 'paused', 'arming', 'switching_offboard', 'loading', 'stopping'].includes(ms);
+    const ms = String(telemetry.mission?.status ?? "").toLowerCase();
+    return [
+      "running",
+      "paused",
+      "arming",
+      "switching_offboard",
+      "loading",
+      "stopping",
+    ].includes(ms);
   }, [telemetry.mission?.status]);
 
   const effectiveMissionActive = isMissionActive || telemetryMissionActive;
+
+  const backendMissionState = String(backendMission?.state ?? "")
+    .trim()
+    .toUpperCase();
+
+  /**
+   * Controls whether the main button displays
+   * NO MISSION or START.
+   */
+  const hasUploadedMission = backendMission?.loaded === true;
+
+  /**
+   * AUTO mode is the only operational mode for now.
+   *
+   * MANUAL remains visible and selectable, but cannot
+   * start until backend manual-mode support is added.
+   */
+  const canStartMission =
+    connectionState === "connected" &&
+    hasUploadedMission &&
+    backendMission?.ready === true &&
+    mode === "AUTO";
+
+  const isBackendMissionPaused = backendMissionState === "PAUSED";
 
   const effectiveCurrentIndex = useMemo(() => {
     if (verifiedCtx.isLoaded && verifiedTargetIndex !== null) {
@@ -330,13 +437,23 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       return px4CurrentPointIndex;
     }
     return currentIndex;
-  }, [verifiedCtx.isLoaded, verifiedTargetIndex, px4CurrentPointIndex, currentIndex]);
+  }, [
+    verifiedCtx.isLoaded,
+    verifiedTargetIndex,
+    px4CurrentPointIndex,
+    currentIndex,
+  ]);
 
   const effectiveWaitingForManual =
-    waitingForManual || px4WaitingForContinue || (verifiedCtx.isLoaded && verifiedWaiting);
+    waitingForManual ||
+    px4WaitingForContinue ||
+    (verifiedCtx.isLoaded && verifiedWaiting);
 
   // Check if showing previous mission data
-  const isShowingPreviousMission = previousMissionData && !isMissionActive && Object.keys(statusMap).length === 0;
+  const isShowingPreviousMission =
+    previousMissionData &&
+    !isMissionActive &&
+    Object.keys(statusMap).length === 0;
 
   // Refs to store latest values for mission event handler (prevents stale closures)
   const waypointsRef = useRef(waypoints);
@@ -381,7 +498,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     telemetryRef.current = telemetry;
   }, [telemetry]);
 
-  const showNotification = (type: 'success' | 'error' | 'info', title: string, message?: string, duration = 3000) => {
+  const showNotification = (
+    type: "success" | "error" | "info",
+    title: string,
+    message?: string,
+    duration = 3000,
+  ) => {
     // Clear any existing notification timeout to prevent memory leaks
     if (notificationTimeoutRef.current) {
       clearTimeout(notificationTimeoutRef.current);
@@ -390,29 +512,78 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     setNotification({ visible: true, type, title, message });
     notificationTimeoutRef.current = setTimeout(() => {
       if (mountedRef.current) {
-        setNotification(prev => ({ ...prev, visible: false }));
+        setNotification((prev) => ({ ...prev, visible: false }));
       }
       notificationTimeoutRef.current = null;
     }, duration);
   };
 
+  const refreshBackendMission = useCallback(async (): Promise<void> => {
+    if (isOfflineMode()) {
+      setBackendMission(null);
+      return;
+    }
+
+    try {
+      console.log("[MissionReportScreen] Fetching backend mission status...");
+
+      const response = await getMissionStatus();
+
+      if (!response.success) {
+        setBackendMission(null);
+        return;
+      }
+
+      setBackendMission(response.mission);
+
+      console.log("[MissionReportScreen] Backend mission status:", {
+        state: response.mission.state,
+        loaded: response.mission.loaded,
+        ready: response.mission.ready,
+        totalPoints: response.mission.total_points,
+      });
+    } catch (error) {
+      setBackendMission(null);
+
+      console.warn(
+        "[MissionReportScreen] Mission status unavailable:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    void refreshBackendMission();
+  }, [isVisible, connectionState, refreshBackendMission]);
+
   const getLatestNtripProfile = async (): Promise<NTRIPProfile | null> => {
     const profiles = await getAllProfiles();
     if (profiles.length === 0) return null;
     return [...profiles].sort((a, b) => {
-      const bTime = Date.parse(b.updatedAt || b.createdAt || '');
-      const aTime = Date.parse(a.updatedAt || a.createdAt || '');
-      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+      const bTime = Date.parse(b.updatedAt || b.createdAt || "");
+      const aTime = Date.parse(a.updatedAt || a.createdAt || "");
+      return (
+        (Number.isFinite(bTime) ? bTime : 0) -
+        (Number.isFinite(aTime) ? aTime : 0)
+      );
     })[0];
   };
 
   const refreshQuickNtripStatus = async () => {
     try {
       const status = await getRtkStatus();
-      const source = String(status.active_source ?? status.desired_source ?? status.mode ?? '').toLowerCase();
-      setIsQuickNtripConnected(Boolean(status.running && source.includes('ntrip')));
+      const source = String(
+        status.active_source ?? status.desired_source ?? status.mode ?? "",
+      ).toLowerCase();
+      setIsQuickNtripConnected(
+        Boolean(status.running && source.includes("ntrip")),
+      );
     } catch (err) {
-      console.warn('[RTK] Quick status check failed', err);
+      console.warn("[RTK] Quick status check failed", err);
       setIsQuickNtripConnected(false);
     }
   };
@@ -431,34 +602,50 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     try {
       const profile = await getLatestNtripProfile();
       if (!profile) {
-        Alert.alert('No NTRIP Profile', 'Create an NTRIP profile in Settings before using quick start.');
+        Alert.alert(
+          "No NTRIP Profile",
+          "Create an NTRIP profile in Settings before using quick start.",
+        );
         return;
       }
 
       const host = profile.casterAddress.trim();
-      const port = Number.parseInt(profile.port || '2101', 10);
+      const port = Number.parseInt(profile.port || "2101", 10);
       const mountpoint = profile.mountpoint.trim();
       const user = profile.username.trim();
       const pass = profile.password.trim();
 
-      if (!host || !mountpoint || !user || !pass || !Number.isFinite(port) || port < 1 || port > 65535) {
-        Alert.alert('Profile Incomplete', 'NTRIP profile requires host, valid port, mountpoint, username, and password.');
+      if (
+        !host ||
+        !mountpoint ||
+        !user ||
+        !pass ||
+        !Number.isFinite(port) ||
+        port < 1 ||
+        port > 65535
+      ) {
+        Alert.alert(
+          "Profile Incomplete",
+          "NTRIP profile requires host, valid port, mountpoint, username, and password.",
+        );
         return;
       }
 
       const currentStatus = await getRtkStatus().catch(() => null);
-      const activeSource = String(currentStatus?.active_source ?? currentStatus?.mode ?? '').toLowerCase();
-      if (currentStatus?.running && activeSource.includes('lora')) {
+      const activeSource = String(
+        currentStatus?.active_source ?? currentStatus?.mode ?? "",
+      ).toLowerCase();
+      if (currentStatus?.running && activeSource.includes("lora")) {
         await stopAllRtk();
       }
 
-      console.log('[RTK] Quick NTRIP start', {
+      console.log("[RTK] Quick NTRIP start", {
         profile: profile.name,
         host,
         port,
         mountpoint,
         user,
-        pass: '<redacted>',
+        pass: "<redacted>",
       });
 
       const status = await startNtripStream({
@@ -469,7 +656,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         pass,
       });
 
-      console.log('[RTK] Quick NTRIP response', {
+      console.log("[RTK] Quick NTRIP response", {
         mode: status.mode,
         running: status.running,
         healthy: status.healthy,
@@ -483,21 +670,27 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       if (status.running) {
         setIsQuickNtripConnected(true);
         showNotification(
-          'success',
-          'NTRIP Started',
-          `${profile.name} • ${status.healthy ? 'healthy' : status.lifecycle_state ?? 'starting'}`,
+          "success",
+          "NTRIP Started",
+          `${profile.name} • ${status.healthy ? "healthy" : (status.lifecycle_state ?? "starting")}`,
         );
       } else {
         setIsQuickNtripConnected(false);
-        const message = status.last_error || status.last_process_error || `NTRIP did not start (${status.lifecycle_state ?? status.source_state ?? 'unknown'})`;
-        showNotification('error', 'NTRIP Failed', message, 5000);
-        Alert.alert('NTRIP Failed', message);
+        const message =
+          status.last_error ||
+          status.last_process_error ||
+          `NTRIP did not start (${status.lifecycle_state ?? status.source_state ?? "unknown"})`;
+        showNotification("error", "NTRIP Failed", message, 5000);
+        Alert.alert("NTRIP Failed", message);
       }
     } catch (err) {
-      console.error('[RTK] Quick NTRIP start failed', err);
-      const message = getRtkFailureMessage(err, 'Failed to start NTRIP stream.');
-      showNotification('error', 'NTRIP Failed', message, 5000);
-      Alert.alert('NTRIP Failed', message);
+      console.error("[RTK] Quick NTRIP start failed", err);
+      const message = getRtkFailureMessage(
+        err,
+        "Failed to start NTRIP stream.",
+      );
+      showNotification("error", "NTRIP Failed", message, 5000);
+      Alert.alert("NTRIP Failed", message);
     } finally {
       setIsQuickNtripStarting(false);
       refreshQuickNtripStatus();
@@ -514,35 +707,42 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
     setIsManualPreparing(true);
     try {
-      const currentMode = String(telemetry.state?.mode || '').toUpperCase();
-      if (currentMode !== 'MANUAL') {
-        console.log('[ManualDrive] Setting mode to MANUAL from', currentMode || 'UNKNOWN');
+      const currentMode = String(telemetry.state?.mode || "").toUpperCase();
+      if (currentMode !== "MANUAL") {
+        console.log(
+          "[ManualDrive] Setting mode to MANUAL from",
+          currentMode || "UNKNOWN",
+        );
         const modeResponse = await setManualMode();
         if (!modeResponse.success) {
-          const message = modeResponse.message || 'Unable to switch vehicle to MANUAL mode.';
-          showNotification('error', 'Manual Mode Failed', message, 5000);
-          Alert.alert('Manual Mode Failed', message);
+          const message =
+            modeResponse.message || "Unable to switch vehicle to MANUAL mode.";
+          showNotification("error", "Manual Mode Failed", message, 5000);
+          Alert.alert("Manual Mode Failed", message);
           return;
         }
       }
 
       if (!telemetry.state?.armed) {
-        console.log('[ManualDrive] Arming vehicle before opening joystick');
+        console.log("[ManualDrive] Arming vehicle before opening joystick");
         const armResponse = await armVehicle();
         if (!armResponse.success) {
-          const message = armResponse.message || 'Unable to arm vehicle.';
-          showNotification('error', 'Arm Failed', message, 5000);
-          Alert.alert('Arm Failed', message);
+          const message = armResponse.message || "Unable to arm vehicle.";
+          showNotification("error", "Arm Failed", message, 5000);
+          Alert.alert("Arm Failed", message);
           return;
         }
       }
 
       openManualDrivePanel();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to prepare manual control.';
-      console.error('[ManualDrive] Prepare failed', err);
-      showNotification('error', 'Manual Control Failed', message, 5000);
-      Alert.alert('Manual Control Failed', message);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Unable to prepare manual control.";
+      console.error("[ManualDrive] Prepare failed", err);
+      showNotification("error", "Manual Control Failed", message, 5000);
+      Alert.alert("Manual Control Failed", message);
     } finally {
       setIsManualPreparing(false);
     }
@@ -555,15 +755,15 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     let hasBlock = false;
     let hasPile = false;
 
-    waypoints.forEach(wp => {
+    waypoints.forEach((wp) => {
       if (wp.row) hasRow = true;
       if (wp.block) hasBlock = true;
       if (wp.pile) hasPile = true;
     });
 
-    if (!hasRow) missing.push('Row');
-    if (!hasBlock) missing.push('Block');
-    if (!hasPile) missing.push('Pile');
+    if (!hasRow) missing.push("Row");
+    if (!hasBlock) missing.push("Block");
+    if (!hasPile) missing.push("Pile");
 
     return missing;
   };
@@ -576,12 +776,16 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       const updatedWaypoints = waypoints.map((wp, idx) => ({
         ...wp,
         row: wp.row || `R${idx + 1}`,
-        block: wp.block || 'B1',
+        block: wp.block || "B1",
         pile: wp.pile || `${idx + 1}`,
       }));
 
       setMissionWaypoints(updatedWaypoints);
-      showNotification('success', 'Success', 'Sequence numbers auto-assigned successfully!');
+      showNotification(
+        "success",
+        "Success",
+        "Sequence numbers auto-assigned successfully!",
+      );
 
       // Show preview dialog after auto-assignment
       const previewTimer = setTimeout(() => {
@@ -593,8 +797,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       // Cleanup timer (though component should be mounted, this is defensive)
       return () => clearTimeout(previewTimer);
     } catch (error) {
-      console.error('[MissionReportScreen] Auto-assign error:', error);
-      showNotification('error', 'Error', 'Failed to auto-assign sequence numbers');
+      console.error("[MissionReportScreen] Auto-assign error:", error);
+      showNotification(
+        "error",
+        "Error",
+        "Failed to auto-assign sequence numbers",
+      );
     }
   };
 
@@ -610,10 +818,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     setIsUploadingMission(true);
 
     try {
-      console.log('[MissionReportScreen] Uploading verified mission...');
+      console.log("[MissionReportScreen] Uploading verified mission...");
 
       // Map Waypoint[] → PathPlanWaypoint[] for the verified upload hook.
-      const pathPlanWps = waypoints.map(wp => ({
+      const pathPlanWps = waypoints.map((wp) => ({
         id: wp.sn,
         lat: wp.lat,
         lon: wp.lon,
@@ -630,7 +838,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       });
 
       if (result.success) {
-        console.log('[MissionReportScreen] Mission uploaded successfully');
+        console.log("[MissionReportScreen] Mission uploaded successfully");
         // PersistentStorage clearing is handled inside useVerifiedMissionUpload.
         setIsMissionActive(false);
         setStatusMap({});
@@ -642,14 +850,22 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         // previous mission's target progress.
         resetVerifiedProgress();
         clearVerifiedTerminal();
-        showNotification('success', 'Success', 'Mission uploaded successfully!');
+        showNotification(
+          "success",
+          "Success",
+          "Mission uploaded successfully!",
+        );
       } else {
-        console.error('[MissionReportScreen] Upload failed:', result.message);
-        showNotification('error', 'Upload Failed', result.message ?? 'Failed to upload mission');
+        console.error("[MissionReportScreen] Upload failed:", result.message);
+        showNotification(
+          "error",
+          "Upload Failed",
+          result.message ?? "Failed to upload mission",
+        );
       }
     } catch (error) {
-      console.error('[MissionReportScreen] Upload Error:', error);
-      showNotification('error', 'Error', 'Failed to upload mission');
+      console.error("[MissionReportScreen] Upload Error:", error);
+      showNotification("error", "Error", "Failed to upload mission");
     } finally {
       setIsUploadingMission(false);
     }
@@ -657,27 +873,32 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
   // Debug waypoints setup
   React.useEffect(() => {
-    missionLog('[MissionReportScreen] Waypoints updated:', {
+    missionLog("[MissionReportScreen] Waypoints updated:", {
       count: waypoints.length,
-      waypoints: waypoints.map(wp => ({ sn: wp.sn, status: wp.status }))
+      waypoints: waypoints.map((wp) => ({ sn: wp.sn, status: wp.status })),
     });
   }, [waypoints]);
 
   // Debug current waypoint tracking
   React.useEffect(() => {
-    const currentWaypointNumber = currentIndex !== null ? currentIndex + 1 : null;
-    missionLog('[MissionReportScreen] Current waypoint tracking:', {
+    const currentWaypointNumber =
+      currentIndex !== null ? currentIndex + 1 : null;
+    missionLog("[MissionReportScreen] Current waypoint tracking:", {
       currentIndex,
       currentWaypointNumber,
       waypoints_count: waypoints.length,
-      target_waypoint: currentWaypointNumber ? waypoints.find(wp => wp.sn === currentWaypointNumber) : null
+      target_waypoint: currentWaypointNumber
+        ? waypoints.find((wp) => wp.sn === currentWaypointNumber)
+        : null,
     });
   }, [currentIndex, waypoints]);
 
   // LIVE UPDATE FIX: Fetch fresh statusMap when component mounts or focus returns (handles tab switching)
   // This ensures table shows live data instead of stale/memorized data
   useEffect(() => {
-    console.log('[MissionReportScreen] 🔄 Component mounted/focused - verifying live data');
+    console.log(
+      "[MissionReportScreen] 🔄 Component mounted/focused - verifying live data",
+    );
     // StatusMap is updated via real-time socket events
     // No explicit fetch needed - socket listener will update it
     // This useEffect serves as a lifecycle marker for debugging
@@ -686,7 +907,8 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // STALE STATUS CLEANUP: Clear old waypoint statuses that are no longer current
   // When rover moves from point 5 to point 9, clear marks from points that won't be revisited
   useEffect(() => {
-    if (!isMissionActive || waypoints.length === 0 || currentIndex === null) return;
+    if (!isMissionActive || waypoints.length === 0 || currentIndex === null)
+      return;
 
     // Only clean up old statuses during active missions
     const currentWaypointSn = currentIndex + 1; // Convert 0-based index to 1-based SN
@@ -696,12 +918,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     const newStatusMap = { ...currentStatusMap };
     let hasChanges = false;
 
-    Object.keys(currentStatusMap).forEach(snStr => {
+    Object.keys(currentStatusMap).forEach((snStr) => {
       const sn = parseInt(snStr, 10);
       const status = currentStatusMap[sn];
 
       // Keep statuses that are completed or skipped (mission history)
-      if (status?.status === 'completed' || status?.status === 'skipped') {
+      if (status?.status === "completed" || status?.status === "skipped") {
         return; // Keep this entry
       }
 
@@ -709,10 +931,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       // IMPORTANT: Never delete 'reached' or 'marked' — waypoint_marked fires AFTER currentIndex
       // advances, so deleting 'reached' before 'waypoint_marked' arrives loses accuracy data
       if (sn !== currentWaypointSn && sn !== currentWaypointSn + 1) {
-        if (status?.status === 'loading') {
+        if (status?.status === "loading") {
           delete newStatusMap[sn];
           hasChanges = true;
-          console.log(`[MissionReportScreen] 🗑️ Cleaned up stale "loading" status for waypoint ${sn}`);
+          console.log(
+            `[MissionReportScreen] 🗑️ Cleaned up stale "loading" status for waypoint ${sn}`,
+          );
         }
       }
     });
@@ -734,10 +958,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     // 3. Mission is uploaded (PathPlanScreen clears it)
   }, []);
 
-  const handleReorder = (fromIndex: number, direction: 'up' | 'down') => {
+  const handleReorder = (fromIndex: number, direction: "up" | "down") => {
     // Only allow reordering of indices >= PINNED_COUNT and keep them >= PINNED_COUNT
     if (fromIndex < PINNED_COUNT) return;
-    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+    const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
     if (toIndex < PINNED_COUNT || toIndex >= waypoints.length) return;
     const next = waypoints.slice();
     const [moved] = next.splice(fromIndex, 1);
@@ -751,12 +975,17 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // so [telemetry] never actually caches. Primitives only change when values change.
   const vehicleStatus = useMemo((): VehicleStatus => {
     // Handle hrms/vrms as strings or numbers (backend sends strings currently)
-    const hrmsValue = typeof telemetry.hrms === 'string' ? parseFloat(telemetry.hrms) : telemetry.hrms;
-    const vrmsValue = typeof telemetry.vrms === 'string' ? parseFloat(telemetry.vrms) : telemetry.vrms;
+    const hrmsValue =
+      typeof telemetry.hrms === "string"
+        ? parseFloat(telemetry.hrms)
+        : telemetry.hrms;
+    const vrmsValue =
+      typeof telemetry.vrms === "string"
+        ? parseFloat(telemetry.vrms)
+        : telemetry.vrms;
 
     const gpsLabel =
-      telemetry.gps_fix_name?.trim() ||
-      getFixTypeLabel(telemetry.rtk.fix_type);
+      telemetry.gps_fix_name?.trim() || getFixTypeLabel(telemetry.rtk.fix_type);
 
     const rppLabel = telemetry.rpp_state_name?.trim();
 
@@ -767,7 +996,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       hrms: `${(hrmsValue || 0).toFixed(3)} m`,
       vrms: `${(vrmsValue || 0).toFixed(3)} m`,
       imu: rppLabel ? `RPP ${rppLabel}` : telemetry.imu_status,
-      mode: telemetry.state?.mode || 'UNKNOWN',
+      mode: telemetry.state?.mode || "UNKNOWN",
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -787,10 +1016,16 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     if (!isRobotStatusDebugEnabled()) return;
     patchRobotStatusDebug({
       uiStatus: vehicleStatus,
-      uiConnected: connectionState === 'connected' && telemetry.fcu_connected !== false,
+      uiConnected:
+        connectionState === "connected" && telemetry.fcu_connected !== false,
       lastMessageTs: telemetry.lastMessageTs,
     });
-  }, [vehicleStatus, connectionState, telemetry.fcu_connected, telemetry.lastMessageTs]);
+  }, [
+    vehicleStatus,
+    connectionState,
+    telemetry.fcu_connected,
+    telemetry.lastMessageTs,
+  ]);
 
   // Depend on individual primitive fields, not the full telemetry/roverPosition objects.
   // These objects are new references every 50ms, so the memo would never cache.
@@ -805,10 +1040,11 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
     // Debug log map props updates (10% sample rate)
     if (DEBUG_MISSION_LOGS && Math.random() < 0.1) {
-      missionLog('[MissionReportScreen] ✦ Map props updated:', {
+      missionLog("[MissionReportScreen] ✦ Map props updated:", {
         lat: props.roverLat.toFixed(7),
         lon: props.roverLon.toFixed(7),
-        heading: props.heading !== null ? props.heading.toFixed(1) + '°' : 'N/A',
+        heading:
+          props.heading !== null ? props.heading.toFixed(1) + "°" : "N/A",
         armed: props.armed,
         rtkFixType: props.rtkFixType,
       });
@@ -827,18 +1063,21 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // Calculate marked waypoints count from real-time statusMap
   const markedCount = useMemo(() => {
     const count = Object.values(effectiveStatusMap).filter(
-      status => status.status === 'completed' || status.status === 'marked'
+      (status) => status.status === "completed" || status.status === "marked",
     ).length;
 
     // Debug logging for statusMap changes
     if (Object.keys(effectiveStatusMap).length > 0) {
-      missionLog('[MissionReportScreen] StatusMap update:', {
+      missionLog("[MissionReportScreen] StatusMap update:", {
         totalStatuses: Object.keys(effectiveStatusMap).length,
         markedCount: count,
-        statusMap: Object.entries(effectiveStatusMap).reduce((acc, [key, status]) => {
-          acc[key] = status.status;
-          return acc;
-        }, {} as Record<string, string | undefined>)
+        statusMap: Object.entries(effectiveStatusMap).reduce(
+          (acc, [key, status]) => {
+            acc[key] = status.status;
+            return acc;
+          },
+          {} as Record<string, string | undefined>,
+        ),
       });
     }
 
@@ -866,7 +1105,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       }
 
       // If status is not completed/skipped, this is the current waypoint
-      if (wpStatus.status !== 'completed' && wpStatus.status !== 'skipped') {
+      if (wpStatus.status !== "completed" && wpStatus.status !== "skipped") {
         derivedIndex = i;
         break;
       }
@@ -874,9 +1113,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
     // If all waypoints are completed/skipped, set to null (mission complete)
     if (derivedIndex === null && waypoints.length > 0) {
-      const allCompleted = waypoints.every(wp => {
+      const allCompleted = waypoints.every((wp) => {
         const wpStatus = statusMap[wp.sn];
-        return wpStatus && (wpStatus.status === 'completed' || wpStatus.status === 'skipped');
+        return (
+          wpStatus &&
+          (wpStatus.status === "completed" || wpStatus.status === "skipped")
+        );
       });
 
       if (!allCompleted) {
@@ -886,7 +1128,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     }
 
     // Only update if the derived index is different from current
-    setCurrentIndex(prev => {
+    setCurrentIndex((prev) => {
       if (prev !== derivedIndex) {
         // Forward-guard: do not advance past a non-terminal waypoint
         // This mirrors the guard in the socket event handler (lines 1828-1837)
@@ -894,13 +1136,19 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           const leavingWp = waypoints[prev];
           if (leavingWp) {
             const leavingStatus = statusMap[leavingWp.sn];
-            if (!leavingStatus || (leavingStatus.status !== 'completed' && leavingStatus.status !== 'skipped')) {
+            if (
+              !leavingStatus ||
+              (leavingStatus.status !== "completed" &&
+                leavingStatus.status !== "skipped")
+            ) {
               // The waypoint we're leaving is not yet terminal — hold position
               return prev;
             }
           }
         }
-        missionLog(`[MissionReportScreen] 🔄 Auto-derived currentIndex from statusMap: ${prev} -> ${derivedIndex} (waypoint #${derivedIndex !== null ? derivedIndex + 1 : 'null'})`);
+        missionLog(
+          `[MissionReportScreen] 🔄 Auto-derived currentIndex from statusMap: ${prev} -> ${derivedIndex} (waypoint #${derivedIndex !== null ? derivedIndex + 1 : "null"})`,
+        );
         return derivedIndex;
       }
       return prev;
@@ -911,18 +1159,29 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // Using refs to avoid infinite loops - only triggers when currentIndex becomes null
   useEffect(() => {
     // Check for mission completion: currentIndex is null, all waypoints completed, and mission is active
-    if (currentIndex === null && waypointsRef.current.length > 0 && isMissionActiveRef.current) {
-      const allCompleted = waypointsRef.current.every(wp => {
+    if (
+      currentIndex === null &&
+      waypointsRef.current.length > 0 &&
+      isMissionActiveRef.current
+    ) {
+      const allCompleted = waypointsRef.current.every((wp) => {
         const wpStatus = statusMapRef.current[wp.sn];
-        return wpStatus && (wpStatus.status === 'completed' || wpStatus.status === 'skipped');
+        return (
+          wpStatus &&
+          (wpStatus.status === "completed" || wpStatus.status === "skipped")
+        );
       });
 
       if (allCompleted && !missionEndTimeRef.current) {
-        console.log('[MissionReportScreen] 🏁 Mission completion detected - all waypoints processed!');
+        console.log(
+          "[MissionReportScreen] 🏁 Mission completion detected - all waypoints processed!",
+        );
 
         // Set mission start time if not set (fallback)
         if (!missionStartTimeRef.current) {
-          console.log('[MissionReportScreen] ⚠️ Mission start time missing, using fallback (1 minute ago)');
+          console.log(
+            "[MissionReportScreen] ⚠️ Mission start time missing, using fallback (1 minute ago)",
+          );
           setMissionStartTime(new Date(Date.now() - 60000));
         }
 
@@ -931,13 +1190,19 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
         // CRITICAL: Mark mission as inactive to reset START/STOP button
         setIsMissionActive(false);
-        console.log('[MissionReportScreen] ✅ isMissionActive set to false - button should reset to START');
+        console.log(
+          "[MissionReportScreen] ✅ isMissionActive set to false - button should reset to START",
+        );
 
         // Preserve mission data for export access
         preserveCurrentMission.current();
 
         // Show completion notification
-        showNotification('success', 'Mission Completed', 'All marking points have been processed!');
+        showNotification(
+          "success",
+          "Mission Completed",
+          "All marking points have been processed!",
+        );
 
         // Show completion dialog after a brief delay to ensure UI updates
         const completionTimer = setTimeout(() => {
@@ -964,7 +1229,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // useEffect(() => {
   //   if (roverPosition && roverPosition.lat && roverPosition.lng) {
   //     const now = Date.now();
-  //     
+  //
   //     // Smart trail filtering with Haversine distance calculation
   //     const shouldAddTrailPoint = (() => {
   //       if (trailPointsRef.current.length === 0) return true;
@@ -1039,7 +1304,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     const wps = waypointsRef.current;
     const sMap = statusMapRef.current;
     if (wps.length > 0 || Object.keys(sMap).length > 0) {
-      console.log('[MissionReportScreen] Preserving current mission data for export access');
+      console.log(
+        "[MissionReportScreen] Preserving current mission data for export access",
+      );
       setPreviousMissionData({
         waypoints: [...wps],
         statusMap: { ...sMap },
@@ -1059,7 +1326,11 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     if (!POINT_MISSION_ENABLED || !px4MissionTerminal) return;
 
     const { outcome, event } = px4MissionTerminal;
-    console.log('[MissionReportScreen] PX4 point mission terminal:', outcome, event.event_type);
+    console.log(
+      "[MissionReportScreen] PX4 point mission terminal:",
+      outcome,
+      event.event_type,
+    );
 
     setIsMissionActive(false);
     preserveCurrentMission.current();
@@ -1069,8 +1340,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       setMissionEndTime(endTime);
     }
 
-    if (outcome === 'completed') {
-      showNotification('success', 'Mission Completed', 'All marking points have been processed!');
+    if (outcome === "completed") {
+      showNotification(
+        "success",
+        "Mission Completed",
+        "All marking points have been processed!",
+      );
       const dialogTimer = setTimeout(() => {
         if (mountedRef.current) {
           setShowCompletionDialog(true);
@@ -1081,7 +1356,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     }
 
     const detail = event.message || event.reason || `Mission ${outcome}`;
-    showNotification('error', 'Mission Ended', detail);
+    showNotification("error", "Mission Ended", detail);
     clearMissionTerminal();
   }, [px4MissionTerminal, clearMissionTerminal, verifiedCtx.isLoaded]);
 
@@ -1101,8 +1376,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       setMissionEndTime(endTime);
     }
 
-    if (verifiedTerminal.outcome === 'completed') {
-      showNotification('success', 'Mission Completed', 'All marking points processed!');
+    if (verifiedTerminal.outcome === "completed") {
+      showNotification(
+        "success",
+        "Mission Completed",
+        "All marking points processed!",
+      );
       const t = setTimeout(() => {
         if (mountedRef.current) setShowCompletionDialog(true);
         clearVerifiedTerminal();
@@ -1114,7 +1393,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       verifiedTerminal.event.message ??
       verifiedTerminal.event.reason ??
       `Mission ${verifiedTerminal.outcome}`;
-    showNotification('error', 'Mission Ended', detail);
+    showNotification("error", "Mission Ended", detail);
     clearVerifiedTerminal();
   }, [verifiedTerminal, clearVerifiedTerminal, verifiedCtx.isLoaded]);
 
@@ -1122,7 +1401,11 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // creating new object references on every telemetry-driven re-render
   const displayData = useMemo(() => {
     // If we have a completed previous mission and no current mission activity, show previous
-    if (previousMissionData && !isMissionActive && Object.keys(statusMap).length === 0) {
+    if (
+      previousMissionData &&
+      !isMissionActive &&
+      Object.keys(statusMap).length === 0
+    ) {
       return {
         waypoints: previousMissionData.waypoints,
         statusMap: previousMissionData.statusMap,
@@ -1139,7 +1422,15 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       startTime: missionStartTime,
       endTime: missionEndTime,
     };
-  }, [previousMissionData, isMissionActive, effectiveStatusMap, waypoints, missionMode, missionStartTime, missionEndTime]);
+  }, [
+    previousMissionData,
+    isMissionActive,
+    effectiveStatusMap,
+    waypoints,
+    missionMode,
+    missionStartTime,
+    missionEndTime,
+  ]);
 
   const missionProgressRef = useMemo(
     () =>
@@ -1154,29 +1445,29 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // Calculate mission statistics for completion dialog
   const getMissionStats = () => {
     const totalWaypoints = displayData.waypoints.length;
-    const completedWaypoints = displayData.waypoints.filter(wp => {
+    const completedWaypoints = displayData.waypoints.filter((wp) => {
       const wpStatus = displayData.statusMap[wp.sn];
-      return wpStatus && wpStatus.status === 'completed';
+      return wpStatus && wpStatus.status === "completed";
     }).length;
-    const skippedWaypoints = displayData.waypoints.filter(wp => {
+    const skippedWaypoints = displayData.waypoints.filter((wp) => {
       const wpStatus = displayData.statusMap[wp.sn];
-      return wpStatus && wpStatus.status === 'skipped';
+      return wpStatus && wpStatus.status === "skipped";
     }).length;
 
     const formatTime = (date: Date | null) => {
-      if (!date) return 'N/A';
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
+      if (!date) return "N/A";
+      return date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
       });
     };
 
     const formatDuration = () => {
       const startTime = displayData.startTime;
       const endTime = displayData.endTime;
-      if (!startTime || !endTime) return 'N/A';
+      if (!startTime || !endTime) return "N/A";
       const durationMs = endTime.getTime() - startTime.getTime();
       const minutes = Math.floor(durationMs / 60000);
       const seconds = Math.floor((durationMs % 60000) / 1000);
@@ -1195,8 +1486,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
   // DEBUG: Manual function to test completion dialog
   const testCompletionDialog = () => {
-    console.log('[MissionReportScreen] 🧪 TEST: Manually opening completion dialog');
-    console.log('[MissionReportScreen] 🧪 Current state:', {
+    console.log(
+      "[MissionReportScreen] 🧪 TEST: Manually opening completion dialog",
+    );
+    console.log("[MissionReportScreen] 🧪 Current state:", {
       showCompletionDialog,
       isMissionActive,
       missionStartTime,
@@ -1225,7 +1518,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
   // Clear current mission data when starting new mission
   const clearCurrentMissionData = () => {
-    console.log('[MissionReportScreen] Clearing current mission data for new mission');
+    console.log(
+      "[MissionReportScreen] Clearing current mission data for new mission",
+    );
     setStatusMap({});
     resetPointStatusMap();
     setCurrentIndex(null);
@@ -1237,288 +1532,351 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
     // trailPointsRef.current = [];
   };
 
-  // Mission control handlers matching web application
   const handleStart = async () => {
-    return executeStartMission();
-  };
-
-  // Actual mission start function (after confirmation)
-  const executeStartMission = async () => {
-    // Check if component is mounted
     if (!mountedRef.current) {
-      console.warn('[MissionReportScreen] Component unmounted, aborting mission start');
-      return { success: false, message: 'Component unmounted' };
+      return {
+        success: false,
+        message: "Mission screen is not active.",
+      };
     }
 
     try {
-      console.log('[MissionReportScreen] Starting mission...');
+      console.log("[MissionReportScreen] Requesting mission start...");
 
-      // Quick client-side validation: ensure we have waypoints to start
-      if (!waypoints || waypoints.length === 0) {
-        const msg = 'No waypoints available. Upload or add waypoints before starting.';
-        console.warn('[MissionReportScreen] Start blocked -', msg);
-        showNotification('error', 'No Marking Points', msg);
-        return { success: false, message: msg };
+      // The backend mission must exist and its trajectory must
+      // have been prepared successfully.
+      if (!canStartMission) {
+        const message =
+          mode === "MANUAL"
+            ? "Manual mission mode will be enabled after backend manual-mode support is implemented."
+            : backendMission?.loaded === true
+              ? "The mission file is stored, but its trajectory is not ready."
+              : "Upload and prepare a mission before starting.";
+
+        showNotification("error", "Mission Not Ready", message, 4000);
+
+        return {
+          success: false,
+          message,
+        };
       }
 
-      // Block mission start if joystick is active
-      if (telemetry.joystick_active || telemetry.control_owner === 'joystick') {
-        const msg = 'Release manual drive before starting a mission.';
-        console.warn('[MissionReportScreen] Start blocked - joystick active');
-        showNotification('error', 'Joystick Active', msg, 4000);
-        return { success: false, message: msg };
+      // Keep the frontend waypoint display as a second safety check.
+      if (waypoints.length === 0) {
+        const message = "No marking points are available in the frontend.";
+
+        showNotification("error", "No Marking Points", message);
+
+        return {
+          success: false,
+          message,
+        };
       }
 
-      // Validate waypoints have valid coordinates
-      const invalidWaypoints = waypoints.filter(wp =>
-        isNaN(wp.lat) || isNaN(wp.lon) || wp.lat === 0 || wp.lon === 0
+      // Never allow mission start while manual joystick control owns
+      // the rover.
+      if (telemetry.joystick_active || telemetry.control_owner === "joystick") {
+        const message = "Release manual drive before starting the mission.";
+
+        showNotification("error", "Joystick Active", message, 4000);
+
+        return {
+          success: false,
+          message,
+        };
+      }
+
+      // Validate locally displayed GPS marking coordinates.
+      const invalidWaypoints = waypoints.filter(
+        (waypoint) =>
+          !Number.isFinite(waypoint.lat) ||
+          !Number.isFinite(waypoint.lon) ||
+          waypoint.lat === 0 ||
+          waypoint.lon === 0,
       );
 
       if (invalidWaypoints.length > 0) {
-        const msg = `${invalidWaypoints.length} waypoint(s) have invalid coordinates. Please fix before starting.`;
-        console.error('[MissionReportScreen]', msg);
-        showNotification('error', 'Invalid Marking Points', msg);
-        return { success: false, message: msg };
+        const message =
+          `${invalidWaypoints.length} marking point(s) ` +
+          "have invalid coordinates.";
+
+        showNotification("error", "Invalid Marking Points", message);
+
+        return {
+          success: false,
+          message,
+        };
       }
 
-      // Guard: a mission_id must be loaded before start is valid.
-      if (!verifiedCtx.missionId) {
-        const msg = 'No mission loaded — upload a mission first.';
-        showNotification('error', 'Not Ready', msg);
-        return { success: false, message: msg };
+      // Current backend contract:
+      // POST /api/mission/start
+      // No mission_id body is required.
+      const response = await startMission();
+
+      if (!response.success) {
+        const message =
+          response.mission?.message ||
+          "The backend rejected the mission start request.";
+
+        showNotification("error", "Start Failed", message, 4000);
+
+        return {
+          success: false,
+          message,
+        };
       }
 
-      // Clear previous mission data to start fresh
+      // The backend accepted Start. Clear old runtime display data,
+      // but retain the uploaded marking points.
       clearCurrentMissionData();
-      resetVerifiedProgress();
 
-      // Call explicit start endpoint by mission_id.
-      const response = await startVerifiedMission(verifiedCtx.missionId);
-
-      // Determine success from the REAL backend shape. The verified start
-      // endpoint returns { state, message } on HTTP 200 (no `success` field);
-      // HTTP failures (404/409/422/503) are thrown by apiClient and handled in
-      // the catch below. So a resolved response with a non-error MissionState is
-      // success — never treat a `{ state: "running" }` response as failure just
-      // because `success` is absent.
-      const startState = typeof response?.state === 'string'
-        ? response.state.toLowerCase()
-        : undefined;
-      const startAccepted =
-        !!response &&
-        response.success !== false &&
-        (response.success === true ||
-          (startState !== undefined &&
-            startState !== 'error' &&
-            startState !== 'idle' &&
-            startState !== 'aborted'));
-
-      if (!startAccepted) {
-        console.error('[MissionReportScreen] Start failed - backend response:', response);
-        const message = response?.message ?? (response ? JSON.stringify(response) : 'Unknown error');
-        showNotification('error', 'Start Failed', message);
-        return { success: false, message };
-      }
-
-      // Success — isMissionActive is driven by telemetry / terminal events, not set here.
+      setBackendMission(response.mission);
+      setIsMissionActive(true);
+      setMissionStartTime(new Date());
+      setMissionEndTime(null);
       setCurrentIndex(0);
-      console.log('[MissionReportScreen] Mission started (backend acknowledged)');
-      showNotification('success', 'Mission Started', 'Mission controller started successfully!');
+
+      showNotification(
+        "success",
+        "Mission Started",
+        "The rover mission started successfully.",
+      );
+
+      console.log("[MissionReportScreen] Mission start accepted:", {
+        state: response.mission.state,
+        loaded: response.mission.loaded,
+        ready: response.mission.ready,
+      });
+
       return response;
     } catch (error) {
-      console.error('[MissionReportScreen] Start Error:', error);
-      // Try to extract useful info
-      let errMsg = 'Failed to start mission';
-      try {
-        if ((error as any)?.message) errMsg = (error as any).message;
-        else errMsg = String(error);
-      } catch (e) {
-        errMsg = 'Failed to start mission';
-      }
-      showNotification('error', 'Error', errMsg);
-      return { success: false, message: errMsg };
+      const message =
+        error instanceof Error ? error.message : "Failed to start mission.";
+
+      console.error("[MissionReportScreen] Mission start failed:", error);
+
+      // Re-read the status because the backend remains the source
+      // of truth after any failed command.
+      void refreshBackendMission();
+
+      showNotification("error", "Start Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
   const handlePause = async () => {
     try {
-      console.log('[MissionReportScreen] Pausing mission...');
-      const response = await services.pauseMission();
+      console.log("[MissionReportScreen] Pausing mission...");
+
+      const response = await pauseMission();
+
+      setBackendMission(response.mission);
 
       if (response.success) {
-        console.log('[MissionReportScreen] Mission paused successfully');
-        showNotification('success', 'Mission Paused', 'Mission paused successfully');
-      } else {
-        console.error('[MissionReportScreen] Pause failed:', response.message);
-        showNotification('error', 'Pause Failed', response.message || 'Failed to pause mission');
+        // A paused mission is still an active mission.
+        setIsMissionActive(true);
+
+        showNotification(
+          "success",
+          "Mission Paused",
+          response.mission.message || "Mission paused successfully.",
+        );
       }
+
       return response;
     } catch (error) {
-      console.error('[MissionReportScreen] Pause Error:', error);
-      showNotification('error', 'Error', 'Failed to pause mission');
-      return { success: false, message: String(error) };
+      const message =
+        error instanceof Error ? error.message : "Failed to pause mission.";
+
+      console.error("[MissionReportScreen] Pause failed:", error);
+
+      void refreshBackendMission();
+
+      showNotification("error", "Pause Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
   const handleResume = async () => {
     try {
-      console.log('[MissionReportScreen] Resuming mission...');
-      const response = await services.resumeMission();
+      console.log("[MissionReportScreen] Resuming mission...");
+
+      const response = await resumeMission();
+
+      setBackendMission(response.mission);
 
       if (response.success) {
-        console.log('[MissionReportScreen] Mission resumed successfully');
-        showNotification('success', 'Mission Resumed', 'Mission resumed successfully');
-      } else {
-        console.error('[MissionReportScreen] Resume failed:', response.message);
-        showNotification('error', 'Resume Failed', response.message || 'Failed to resume mission');
+        setIsMissionActive(true);
+
+        showNotification(
+          "success",
+          "Mission Resumed",
+          response.mission.message || "Mission resumed successfully.",
+        );
       }
+
       return response;
     } catch (error) {
-      console.error('[MissionReportScreen] Resume Error:', error);
-      showNotification('error', 'Error', 'Failed to resume mission');
-      return { success: false, message: String(error) };
+      const message =
+        error instanceof Error ? error.message : "Failed to resume mission.";
+
+      console.error("[MissionReportScreen] Resume failed:", error);
+
+      void refreshBackendMission();
+
+      showNotification("error", "Resume Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
   const handleStop = async () => {
     try {
-      console.log('[MissionReportScreen] Stopping mission (explicit stop)...');
-      const response = await services.stopMission();
+      console.log("[MissionReportScreen] Stopping mission...");
+
+      const response = await stopMission();
+
+      setBackendMission(response.mission);
 
       if (response.success) {
         setCurrentIndex(null);
-        setIsMissionActive(false); // Mark mission as inactive
-        // Preserve mission data when manually stopped (for export access)
-        preserveCurrentMission.current();
-        console.log('[MissionReportScreen] Mission stopped (backend acknowledged)');
-        showNotification('success', 'Mission Stopped', 'Mission controller stopped successfully!');
-        // TRAIL DISABLED: Clear trail when mission stops commented out
-        // trailPointsRef.current = [];
-        // setTrailPoints([]);
-      } else if (response?.message?.includes('No mission running')) {
-        // Mission was already stopped (likely by MissionControlCard)
-        setCurrentIndex(null);
         setIsMissionActive(false);
-        preserveCurrentMission.current();
-        console.log('[MissionReportScreen] Mission already stopped');
-        showNotification('info', 'Mission Stopped', 'Mission was already stopped');
-      } else {
-        console.error('[MissionReportScreen] Stop failed:', response.message);
-        showNotification('error', 'Stop Failed', response.message || 'Failed to stop mission');
-      }
-    } catch (error: any) {
-      const errMsg = error?.message ?? String(error);
-      if (errMsg.includes('No mission running')) {
-        // Mission was already stopped (likely by MissionControlCard)
-        setCurrentIndex(null);
-        setIsMissionActive(false);
-        preserveCurrentMission.current();
-        console.log('[MissionReportScreen] Mission already stopped (caught)');
-        showNotification('info', 'Mission Stopped', 'Mission was already stopped');
-      } else {
-        console.error('[MissionReportScreen] Stop Error:', error);
-        showNotification('error', 'Error', 'Failed to stop mission');
-      }
-    }
-  };
+        setWaitingForManual(false);
 
-  const handleClearMission = async () => {
-    try {
-      console.log('[MissionReportScreen] Clearing verified mission...');
-      await clearVerifiedMission();
-      verifiedCtx.clearLoadedMission();
-      resetVerifiedProgress();
-      showNotification('success', 'Cleared', 'Mission cleared from controller');
-    } catch (err) {
-      console.error('[MissionReportScreen] Clear mission error:', err);
-      showNotification('error', 'Clear Failed', String(err));
+        preserveCurrentMission.current();
+
+        showNotification(
+          "success",
+          "Mission Stopped",
+          response.mission.message || "Mission stopped successfully.",
+        );
+      }
+
+      return response;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to stop mission.";
+
+      console.error("[MissionReportScreen] Stop failed:", error);
+
+      void refreshBackendMission();
+
+      showNotification("error", "Stop Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
   const handleNext = async () => {
     try {
-      console.log('[MissionReportScreen] Requesting backend to move to next waypoint');
-      const response = POINT_MISSION_ENABLED
-        ? await continuePoint()
-        : await services.nextMission();
+      console.log("[MissionReportScreen] Moving to next marking point...");
+
+      const response = await nextMissionPoint();
+
+      setBackendMission(response.mission);
+
       if (response.success) {
         setWaitingForManual(false);
-        if (POINT_MISSION_ENABLED) {
-          acknowledgeContinueSuccess();
-        } else {
-          setCurrentIndex(prev => (prev === null ? 0 : Math.min(prev + 1, waypoints.length - 1)));
-        }
-        console.log('[MissionReportScreen] Next waypoint requested successfully');
-        showNotification('success', 'Next Marking Point', 'Moved to next marking point successfully');
-      } else {
-        console.error('[MissionReportScreen] Next failed:', (response as { message?: string }).message);
+
         showNotification(
-          'error',
-          'Next Failed',
-          (response as { message?: string }).message || 'Failed to move to next marking point',
+          "success",
+          "Next Marking Point",
+          response.mission.message || "Moving to the next marking point.",
         );
       }
+
       return response;
     } catch (error) {
-      console.error('[MissionReportScreen] Next Error:', error);
-      showNotification('error', 'Error', 'Failed to move to next marking point');
-      return { success: false, message: String(error) };
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to move to the next marking point.";
+
+      console.error("[MissionReportScreen] Next point failed:", error);
+
+      void refreshBackendMission();
+
+      showNotification("error", "Next Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
   const handleSkip = async () => {
     try {
-      console.log('[MissionReportScreen] Requesting backend to skip current waypoint');
-      let response: { success: boolean; message?: string };
-      if (POINT_MISSION_ENABLED) {
-        const ptStatus = await getPointStatus();
-        response = await skipPoint({
-          point_index: ptStatus.point_index,
-          ...(px4ExpectedGeneration != null
-            ? { expected_generation: px4ExpectedGeneration }
-            : ptStatus.expected_generation != null
-              ? { expected_generation: ptStatus.expected_generation }
-              : {}),
-          reason: 'operator_skip',
-        });
-      } else {
-        response = await services.skipMission();
-      }
+      console.log("[MissionReportScreen] Skipping current marking point...");
+
+      const response = await skipMissionPoint();
+
+      setBackendMission(response.mission);
+
       if (response.success) {
-        if (!POINT_MISSION_ENABLED && currentIndex !== null && currentIndex >= 0 && waypoints[currentIndex]) {
-          const skippedWp = waypoints[currentIndex];
-          setStatusMap(prev => ({
-            ...prev,
-            [skippedWp.sn]: {
-              ...(prev[skippedWp.sn] || {}),
-              status: 'skipped',
-              timestamp: new Date().toISOString(),
-              remark: 'Skipped',
-            },
-          }));
-          setCurrentIndex(prev => (prev === null ? 0 : Math.min(prev + 1, waypoints.length - 1)));
-        }
-        console.log('[MissionReportScreen] Skip requested successfully');
-        showNotification('success', 'Marking Point Skipped', 'Skipped current marking point successfully');
-      } else {
-        console.error('[MissionReportScreen] Skip failed:', response.message);
-        showNotification('error', 'Skip Failed', response.message || 'Failed to skip marking point');
+        showNotification(
+          "success",
+          "Marking Point Skipped",
+          response.mission.message || "Current marking point was skipped.",
+        );
       }
+
       return response;
     } catch (error) {
-      console.error('[MissionReportScreen] Skip Error:', error);
-      showNotification('error', 'Error', 'Failed to skip marking point');
-      return { success: false, message: String(error) };
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to skip the marking point.";
+
+      console.error("[MissionReportScreen] Skip point failed:", error);
+
+      void refreshBackendMission();
+
+      showNotification("error", "Skip Failed", message, 5000);
+
+      return {
+        success: false,
+        message,
+      };
+    }
+  };
+
+  const handleClearMission = async () => {
+    try {
+      console.log("[MissionReportScreen] Clearing verified mission...");
+      await clearVerifiedMission();
+      verifiedCtx.clearLoadedMission();
+      resetVerifiedProgress();
+      showNotification("success", "Cleared", "Mission cleared from controller");
+    } catch (err) {
+      console.error("[MissionReportScreen] Clear mission error:", err);
+      showNotification("error", "Clear Failed", String(err));
     }
   };
 
   const handleExport = () => {
-    console.log('[MissionReportScreen] Export report triggered');
+    console.log("[MissionReportScreen] Export report triggered");
   };
 
   // Handle export completion - prompt user to clear logs or keep for review
   const handleExportComplete = () => {
-    console.log('[MissionReportScreen] 📤 Export completed - showing clear logs prompt');
+    console.log(
+      "[MissionReportScreen] 📤 Export completed - showing clear logs prompt",
+    );
     // Show dialog asking if user wants to clear mission logs
     setShowClearLogsDialog(true);
   };
@@ -1526,7 +1884,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // User confirmed to clear logs after export
   const handleClearLogsAfterExport = async () => {
     try {
-      console.log('[MissionReportScreen] 🗑️ User confirmed - clearing mission logs after export');
+      console.log(
+        "[MissionReportScreen] 🗑️ User confirmed - clearing mission logs after export",
+      );
       // Clear all mission data
       await PersistentStorage.clearMissionData();
 
@@ -1538,31 +1898,37 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       setMissionEndTime(null);
       setShowClearLogsDialog(false);
 
-      showNotification('success', 'Logs Cleared', 'Mission logs cleared successfully');
-      console.log('[MissionReportScreen] ✅ Mission logs cleared after export');
+      showNotification(
+        "success",
+        "Logs Cleared",
+        "Mission logs cleared successfully",
+      );
+      console.log("[MissionReportScreen] ✅ Mission logs cleared after export");
     } catch (error) {
-      console.error('[MissionReportScreen] ❌ Failed to clear logs:', error);
-      showNotification('error', 'Clear Failed', 'Failed to clear mission logs');
+      console.error("[MissionReportScreen] ❌ Failed to clear logs:", error);
+      showNotification("error", "Clear Failed", "Failed to clear mission logs");
     }
   };
 
   // User declined to clear logs - keep for review
   const handleKeepLogsAfterExport = () => {
-    console.log('[MissionReportScreen] 📋 User declined - keeping mission logs for review');
+    console.log(
+      "[MissionReportScreen] 📋 User declined - keeping mission logs for review",
+    );
     setShowClearLogsDialog(false);
-    showNotification('info', 'Logs Kept', 'Mission logs preserved for review');
+    showNotification("info", "Logs Kept", "Mission logs preserved for review");
   };
 
   // Clear all mission data (user-initiated)
   const handleClearMissionData = async () => {
     Alert.alert(
-      'Clear Mission Data',
-      'This will clear all marking points, progress, and mission logs. This cannot be undone. Continue?',
+      "Clear Mission Data",
+      "This will clear all marking points, progress, and mission logs. This cannot be undone. Continue?",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Clear All',
-          style: 'destructive',
+          text: "Clear All",
+          style: "destructive",
           onPress: async () => {
             try {
               // Clear from persistent storage
@@ -1574,77 +1940,105 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               setMissionStartTime(null);
               setMissionEndTime(null);
               setIsMissionActive(false);
-              setMissionMode('DGPS Mark');
+              setMissionMode("DGPS Mark");
               setCurrentIndex(null);
 
-              showNotification('success', 'Mission Data Cleared', 'All mission data has been cleared from storage');
-              console.log('[MissionReportScreen] ✅ All mission data cleared');
+              showNotification(
+                "success",
+                "Mission Data Cleared",
+                "All mission data has been cleared from storage",
+              );
+              console.log("[MissionReportScreen] ✅ All mission data cleared");
             } catch (error) {
-              console.error('[MissionReportScreen] ❌ Failed to clear mission data:', error);
-              showNotification('error', 'Clear Failed', 'Failed to clear mission data');
+              console.error(
+                "[MissionReportScreen] ❌ Failed to clear mission data:",
+                error,
+              );
+              showNotification(
+                "error",
+                "Clear Failed",
+                "Failed to clear mission data",
+              );
             }
           },
         },
-      ]
+      ],
     );
   };
 
   // Debug function to test mission events (for development/testing)
   const simulateWaypointReached = (wpSn: number) => {
     console.log(`[MissionReportScreen] 🧪 Simulating waypoint ${wpSn} reached`);
-    setStatusMap(prev => ({
+    setStatusMap((prev) => ({
       ...prev,
       [wpSn]: {
         ...(prev[wpSn] || {}),
         reached: true,
-        status: 'reached',
+        status: "reached",
         timestamp: new Date().toISOString(),
       },
     }));
   };
 
   const simulateWaypointCompleted = (wpSn: number) => {
-    console.log(`[MissionReportScreen] 🧪 Simulating waypoint ${wpSn} completed`);
-    setStatusMap(prev => ({
+    console.log(
+      `[MissionReportScreen] 🧪 Simulating waypoint ${wpSn} completed`,
+    );
+    setStatusMap((prev) => ({
       ...prev,
       [wpSn]: {
         ...(prev[wpSn] || {}),
         marked: true,
-        status: 'completed',
+        status: "completed",
         timestamp: new Date().toISOString(),
-        remark: 'Test completion',
+        remark: "Test completion",
       },
     }));
   };
 
   // Test mission events by triggering them manually
   const testMissionEvents = () => {
-    console.log('[MissionReportScreen] 🧪 Testing mission events with waypoints:', waypoints.length);
+    console.log(
+      "[MissionReportScreen] 🧪 Testing mission events with waypoints:",
+      waypoints.length,
+    );
 
     if (waypoints.length === 0) {
-      showNotification('error', 'No Marking Points', 'Please load marking points first to test mission events');
+      showNotification(
+        "error",
+        "No Marking Points",
+        "Please load marking points first to test mission events",
+      );
       return;
     }
 
     // Test waypoint 1 reached
     setTimeout(() => {
-      console.log('[MissionReportScreen] 🧪 Simulating waypoint 1 reached...');
+      console.log("[MissionReportScreen] 🧪 Simulating waypoint 1 reached...");
       simulateWaypointReached(1);
     }, 1000);
 
     // Test waypoint 1 completed
     setTimeout(() => {
-      console.log('[MissionReportScreen] 🧪 Simulating waypoint 1 completed...');
+      console.log(
+        "[MissionReportScreen] 🧪 Simulating waypoint 1 completed...",
+      );
       simulateWaypointCompleted(1);
     }, 3000);
 
     // Test current waypoint change
     setTimeout(() => {
-      console.log('[MissionReportScreen] 🧪 Simulating current waypoint change to 2...');
+      console.log(
+        "[MissionReportScreen] 🧪 Simulating current waypoint change to 2...",
+      );
       setCurrentIndex(1); // Waypoint 2 (0-based index)
     }, 5000);
 
-    showNotification('info', 'Test Started', 'Mission event simulation started - check console logs');
+    showNotification(
+      "info",
+      "Test Started",
+      "Mission event simulation started - check console logs",
+    );
   };
 
   // Add to window for debugging in development
@@ -1653,10 +2047,12 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       (global as any).simulateWaypointReached = simulateWaypointReached;
       (global as any).simulateWaypointCompleted = simulateWaypointCompleted;
       (global as any).testMissionEvents = testMissionEvents;
-      console.log('[MissionReportScreen] Debug functions added to global scope:');
-      console.log('  - simulateWaypointReached(wpSn)');
-      console.log('  - simulateWaypointCompleted(wpSn)');
-      console.log('  - testMissionEvents() - runs full test sequence');
+      console.log(
+        "[MissionReportScreen] Debug functions added to global scope:",
+      );
+      console.log("  - simulateWaypointReached(wpSn)");
+      console.log("  - simulateWaypointCompleted(wpSn)");
+      console.log("  - testMissionEvents() - runs full test sequence");
     }
   }, [waypoints.length]);
 
@@ -1671,7 +2067,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         notificationTimeoutRef.current = null;
       }
 
-      console.log('[MissionReportScreen] Component unmounting - cleaned up timers');
+      console.log(
+        "[MissionReportScreen] Component unmounting - cleaned up timers",
+      );
     };
   }, []);
 
@@ -1685,55 +2083,85 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
         if (data.statusMap && Object.keys(data.statusMap).length > 0) {
           setStatusMap(data.statusMap);
-          console.log('[MissionReportScreen] 📂 Restored status map with', Object.keys(data.statusMap).length, 'entries');
+          console.log(
+            "[MissionReportScreen] 📂 Restored status map with",
+            Object.keys(data.statusMap).length,
+            "entries",
+          );
         }
 
         if (data.startTime) {
           setMissionStartTime(data.startTime);
-          console.log('[MissionReportScreen] 📂 Restored mission start time');
+          console.log("[MissionReportScreen] 📂 Restored mission start time");
         }
 
         if (data.endTime) {
           setMissionEndTime(data.endTime);
-          console.log('[MissionReportScreen] 📂 Restored mission end time');
+          console.log("[MissionReportScreen] 📂 Restored mission end time");
         }
 
         if (data.isActive) {
           // 🔧 FIX: Only restore mission active state if backend telemetry confirms mission is actually running
           // This prevents showing STOP button when backend mission is not running
-          const currentBackendStatus = telemetry?.mission?.status?.toString().toLowerCase();
-          const isBackendActuallyRunning = currentBackendStatus === 'running' || currentBackendStatus === 'active';
+          const currentBackendStatus = telemetry?.mission?.status
+            ?.toString()
+            .toLowerCase();
+          const isBackendActuallyRunning =
+            currentBackendStatus === "running" ||
+            currentBackendStatus === "active";
 
           if (isBackendActuallyRunning) {
             setIsMissionActive(data.isActive);
-            console.log('[MissionReportScreen] 📂 Restored mission active state:', data.isActive, '(confirmed by backend)');
-          } else if (currentBackendStatus === undefined || currentBackendStatus === '') {
+            console.log(
+              "[MissionReportScreen] 📂 Restored mission active state:",
+              data.isActive,
+              "(confirmed by backend)",
+            );
+          } else if (
+            currentBackendStatus === undefined ||
+            currentBackendStatus === ""
+          ) {
             // If no telemetry yet, temporarily restore but will be corrected by MissionControlCard sync
             setIsMissionActive(data.isActive);
-            console.log('[MissionReportScreen] 📂 Restored mission active state temporarily (no telemetry yet):', data.isActive);
+            console.log(
+              "[MissionReportScreen] 📂 Restored mission active state temporarily (no telemetry yet):",
+              data.isActive,
+            );
           } else {
             setIsMissionActive(false);
-            console.log('[MissionReportScreen] 📂 Skipped restoring mission active state - backend shows:', currentBackendStatus || 'no status');
+            console.log(
+              "[MissionReportScreen] 📂 Skipped restoring mission active state - backend shows:",
+              currentBackendStatus || "no status",
+            );
           }
         }
 
         if (data.mode) {
           setMissionMode(data.mode);
-          console.log('[MissionReportScreen] 📂 Restored mission mode:', data.mode);
+          console.log(
+            "[MissionReportScreen] 📂 Restored mission mode:",
+            data.mode,
+          );
         } else {
           // Ensure mode is set to default if no saved mode
-          setMissionMode('DGPS Mark');
+          setMissionMode("DGPS Mark");
         }
 
         // Restore UI state
         if (data.uiState) {
           if (data.uiState.currentIndex !== undefined) {
             setCurrentIndex(data.uiState.currentIndex);
-            console.log('[MissionReportScreen] 📂 Restored current waypoint index:', data.uiState.currentIndex);
+            console.log(
+              "[MissionReportScreen] 📂 Restored current waypoint index:",
+              data.uiState.currentIndex,
+            );
           }
           if (data.uiState.mode) {
             setMode(data.uiState.mode);
-            console.log('[MissionReportScreen] 📂 Restored mode:', data.uiState.mode);
+            console.log(
+              "[MissionReportScreen] 📂 Restored mode:",
+              data.uiState.mode,
+            );
           }
           const migratedPanels = migrateLegacyPanelVisibility(data.uiState);
           if (Object.keys(migratedPanels).length > 0) {
@@ -1744,7 +2172,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           }
         }
       } catch (error) {
-        console.error('[MissionReportScreen] Failed to load persisted state:', error);
+        console.error(
+          "[MissionReportScreen] Failed to load persisted state:",
+          error,
+        );
       }
     };
 
@@ -1754,8 +2185,11 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // Auto-save statusMap changes
   useEffect(() => {
     if (Object.keys(statusMap).length > 0) {
-      PersistentStorage.saveStatusMap(statusMap).catch(error => {
-        console.error('[MissionReportScreen] Failed to persist statusMap:', error);
+      PersistentStorage.saveStatusMap(statusMap).catch((error) => {
+        console.error(
+          "[MissionReportScreen] Failed to persist statusMap:",
+          error,
+        );
       });
     }
   }, [statusMap]);
@@ -1763,30 +2197,44 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // Auto-save mission times and active state
   useEffect(() => {
     if (missionStartTime) {
-      PersistentStorage.saveMissionStartTime(missionStartTime).catch(error => {
-        console.error('[MissionReportScreen] Failed to persist start time:', error);
-      });
+      PersistentStorage.saveMissionStartTime(missionStartTime).catch(
+        (error) => {
+          console.error(
+            "[MissionReportScreen] Failed to persist start time:",
+            error,
+          );
+        },
+      );
     }
   }, [missionStartTime]);
 
   useEffect(() => {
     if (missionEndTime) {
-      PersistentStorage.saveMissionEndTime(missionEndTime).catch(error => {
-        console.error('[MissionReportScreen] Failed to persist end time:', error);
+      PersistentStorage.saveMissionEndTime(missionEndTime).catch((error) => {
+        console.error(
+          "[MissionReportScreen] Failed to persist end time:",
+          error,
+        );
       });
     }
   }, [missionEndTime]);
 
   useEffect(() => {
-    PersistentStorage.saveMissionActive(isMissionActive).catch(error => {
-      console.error('[MissionReportScreen] Failed to persist active state:', error);
+    PersistentStorage.saveMissionActive(isMissionActive).catch((error) => {
+      console.error(
+        "[MissionReportScreen] Failed to persist active state:",
+        error,
+      );
     });
   }, [isMissionActive]);
 
   useEffect(() => {
     if (missionMode) {
-      PersistentStorage.saveMissionMode(missionMode).catch(error => {
-        console.error('[MissionReportScreen] Failed to persist mission mode:', error);
+      PersistentStorage.saveMissionMode(missionMode).catch((error) => {
+        console.error(
+          "[MissionReportScreen] Failed to persist mission mode:",
+          error,
+        );
       });
     }
   }, [missionMode]);
@@ -1803,8 +2251,8 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       isMissionControlsVisible,
       isBottomTableVisible,
       isBottomTableExpanded,
-    }).catch(error => {
-      console.error('[MissionReportScreen] Failed to persist UI state:', error);
+    }).catch((error) => {
+      console.error("[MissionReportScreen] Failed to persist UI state:", error);
     });
   }, [
     currentIndex,
@@ -1826,14 +2274,14 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       const eventType = (() => {
         if (rawEventType) {
           const raw = String(rawEventType);
-          if (raw.startsWith('point_')) return 'point_mission_event';
+          if (raw.startsWith("point_")) return "point_mission_event";
           return raw;
         }
         if (
           event.state !== undefined &&
           (event.dist_to_goal !== undefined || event.rpp_state !== undefined)
         ) {
-          return 'mission_status';
+          return "mission_status";
         }
         if (
           event.mission_state !== undefined ||
@@ -1841,16 +2289,23 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           event.current_waypoint !== undefined ||
           event.total_waypoints !== undefined
         ) {
-          return 'mission_status';
+          return "mission_status";
         }
-        return 'unknown';
+        return "unknown";
       })();
 
       // NRP_ROS LEGACY DISABLED — ignore old mission_event types (use point_mission_event on PX4)
       const NRP_ROS_LEGACY_EVENTS = new Set([
-        'bulk_skip', 'waypoint_reached', 'waypoint_marked', 'waypoint_completed',
-        'waiting_for_manual', 'mission_event', 'failsafe_resumed', 'failsafe_restarted',
-        'obstacle_detection_changed', 'led_controller_changed',
+        "bulk_skip",
+        "waypoint_reached",
+        "waypoint_marked",
+        "waypoint_completed",
+        "waiting_for_manual",
+        "mission_event",
+        "failsafe_resumed",
+        "failsafe_restarted",
+        "obstacle_detection_changed",
+        "led_controller_changed",
       ]);
       if (NRP_ROS_LEGACY_EVENTS.has(eventType)) {
         return;
@@ -1867,22 +2322,31 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       // WORKAROUND: Check if this is a spray suppressed message from SERVER_ACTIVITY
       // Backend logs "Mission: Spray suppressed: accuracy XXmm > YYmm" but doesn't send proper events
       // Match only the full "Mission: Spray suppressed" pattern to avoid duplicates
-      if (event.message && typeof event.message === 'string' && event.message.includes('Mission: Spray suppressed')) {
-        console.log('[MissionReportScreen] 🚫 Detected spray suppression message:', event.message);
+      if (
+        event.message &&
+        typeof event.message === "string" &&
+        event.message.includes("Mission: Spray suppressed")
+      ) {
+        console.log(
+          "[MissionReportScreen] 🚫 Detected spray suppression message:",
+          event.message,
+        );
         // Mark the most recent waypoint as skipped — read prev inside functional updater
-        setStatusMap(prev => {
+        setStatusMap((prev) => {
           const currentWpIndex = Object.keys(prev).length;
           const allWps = waypointsRef.current;
           if (currentWpIndex > 0 && currentWpIndex <= allWps.length) {
             const wpId = allWps[currentWpIndex - 1]?.sn;
             if (wpId && prev[wpId]) {
-              console.log(`[MissionReportScreen] ⏭️ Marking waypoint ${wpId} as SKIPPED (spray suppressed)`);
+              console.log(
+                `[MissionReportScreen] ⏭️ Marking waypoint ${wpId} as SKIPPED (spray suppressed)`,
+              );
               return {
                 ...prev,
                 [wpId]: {
                   ...prev[wpId],
-                  status: 'skipped',
-                  remark: 'Skipped - GPS accuracy too low',
+                  status: "skipped",
+                  remark: "Skipped - GPS accuracy too low",
                 },
               };
             }
@@ -1892,29 +2356,57 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       }
 
       // Handle bulk skip events (backend emits event_type: 'bulk_skip')
-      if (eventType === 'bulk_skip' || event.event_type === 'bulk_skip' || (event.data && event.data.event_type === 'bulk_skip')) {
+      if (
+        eventType === "bulk_skip" ||
+        event.event_type === "bulk_skip" ||
+        (event.data && event.data.event_type === "bulk_skip")
+      ) {
         try {
-          const skipFrom = event.skip_from ?? event.data?.skip_from ?? event.skipped_from ?? event.data?.skipped_from;
-          const skipTo = event.skip_to ?? event.data?.skip_to ?? event.skipped_to ?? event.data?.skipped_to;
-          const nextWp = event.next_waypoint ?? event.data?.next_waypoint ?? event.next_waypoint_id ?? null;
-          console.log('[MissionReportScreen] ⏭️ Bulk skip event received', { skipFrom, skipTo, nextWp });
+          const skipFrom =
+            event.skip_from ??
+            event.data?.skip_from ??
+            event.skipped_from ??
+            event.data?.skipped_from;
+          const skipTo =
+            event.skip_to ??
+            event.data?.skip_to ??
+            event.skipped_to ??
+            event.data?.skipped_to;
+          const nextWp =
+            event.next_waypoint ??
+            event.data?.next_waypoint ??
+            event.next_waypoint_id ??
+            null;
+          console.log("[MissionReportScreen] ⏭️ Bulk skip event received", {
+            skipFrom,
+            skipTo,
+            nextWp,
+          });
 
-          if (typeof skipFrom === 'number' && typeof skipTo === 'number' && skipTo >= skipFrom) {
-            const timestamp = event.timestamp ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString()) : new Date().toISOString();
+          if (
+            typeof skipFrom === "number" &&
+            typeof skipTo === "number" &&
+            skipTo >= skipFrom
+          ) {
+            const timestamp = event.timestamp
+              ? typeof event.timestamp === "string"
+                ? event.timestamp
+                : new Date(event.timestamp).toISOString()
+              : new Date().toISOString();
 
             // Capture previous statuses for audit/undo and mark as skipped —
             // both read prev inside the functional updater to avoid stale refs
-            setStatusMap(prev => {
+            setStatusMap((prev) => {
               const copy = { ...prev };
               const prevStatuses: Record<number, WpStatus | null> = {};
-              waypointsRef.current.forEach(wp => {
+              waypointsRef.current.forEach((wp) => {
                 if (wp.sn >= skipFrom && wp.sn <= skipTo) {
                   prevStatuses[wp.sn] = prev[wp.sn] ?? null;
                   copy[wp.sn] = {
                     ...(copy[wp.sn] || {}),
-                    status: 'skipped',
+                    status: "skipped",
                     timestamp,
-                    remark: 'Skipped (bulk)',
+                    remark: "Skipped (bulk)",
                   } as WpStatus;
                 }
               });
@@ -1928,8 +2420,13 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
                 timestamp,
                 previousStatuses: prevStatuses,
               };
-              PersistentStorage.saveSkipAuditRecord(auditRecord).catch(err => console.warn('[MissionReportScreen] Failed to save skip audit', err));
-              setSkipHistory(h => [auditRecord as any].concat(h));
+              PersistentStorage.saveSkipAuditRecord(auditRecord).catch((err) =>
+                console.warn(
+                  "[MissionReportScreen] Failed to save skip audit",
+                  err,
+                ),
+              );
+              setSkipHistory((h) => [auditRecord as any].concat(h));
               setUndoPrompt({ visible: true, id: recordId });
               if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
               undoTimerRef.current = setTimeout(() => {
@@ -1941,13 +2438,16 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             });
 
             // Advance current index to next waypoint if provided
-            if (typeof nextWp === 'number' && nextWp > 0) {
+            if (typeof nextWp === "number" && nextWp > 0) {
               const newIndex = Math.max(0, nextWp - 1);
               setCurrentIndex(newIndex);
             }
           }
         } catch (err) {
-          console.error('[MissionReportScreen] Error processing bulk_skip event', err);
+          console.error(
+            "[MissionReportScreen] Error processing bulk_skip event",
+            err,
+          );
         }
       }
 
@@ -1962,65 +2462,96 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       // });
 
       // DEBUG: Log distance-to-next-waypoint from backend
-      const distToNext = event.wp_dist_cm ?? event.distance_to_next ?? event.dist_to_wp ?? event.data?.wp_dist_cm ?? event.data?.distance_to_next ?? telemetryRef.current.wp_dist_cm;
+      const distToNext =
+        event.wp_dist_cm ??
+        event.distance_to_next ??
+        event.dist_to_wp ??
+        event.data?.wp_dist_cm ??
+        event.data?.distance_to_next ??
+        telemetryRef.current.wp_dist_cm;
       if (distToNext != null) {
-        console.log(`[MissionReportScreen] 📏 Distance to next WP: ${distToNext} cm (${(distToNext / 100).toFixed(2)} m) [eventType: ${eventType}]`);
+        console.log(
+          `[MissionReportScreen] 📏 Distance to next WP: ${distToNext} cm (${(distToNext / 100).toFixed(2)} m) [eventType: ${eventType}]`,
+        );
       }
 
       // Skip high-frequency events (mission_status, unknown telemetry updates)
-      if (eventType === 'mission_status' || eventType === 'unknown') {
+      if (eventType === "mission_status" || eventType === "unknown") {
         // Process state updates silently without logging
-        if (eventType === 'unknown' && event.data?.message === 'Telemetry update') {
+        if (
+          eventType === "unknown" &&
+          event.data?.message === "Telemetry update"
+        ) {
           return; // Ignore telemetry update events
         }
       }
 
       // Handle waypoint reached events (multiple possible event formats)
-      if (eventType === 'waypoint_reached' || event.event_type === 'waypoint_reached' ||
-        (event.data && event.data.event_type === 'waypoint_reached')) {
-        const wpId = event.waypoint_id ?? event.waypointId ?? event.id ?? event.data?.waypoint_id ?? event.data?.waypointId ?? event.data?.id ?? 0;
-        const timestamp = event.timestamp ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString()) : new Date().toISOString();
+      if (
+        eventType === "waypoint_reached" ||
+        event.event_type === "waypoint_reached" ||
+        (event.data && event.data.event_type === "waypoint_reached")
+      ) {
+        const wpId =
+          event.waypoint_id ??
+          event.waypointId ??
+          event.id ??
+          event.data?.waypoint_id ??
+          event.data?.waypointId ??
+          event.data?.id ??
+          0;
+        const timestamp = event.timestamp
+          ? typeof event.timestamp === "string"
+            ? event.timestamp
+            : new Date(event.timestamp).toISOString()
+          : new Date().toISOString();
 
-        console.log(`[MissionReportScreen] 🎯 Processing waypoint_reached: wpId=${wpId}, mode=${modeRef.current}, waypoints.length=${waypointsRef.current.length}`);
+        console.log(
+          `[MissionReportScreen] 🎯 Processing waypoint_reached: wpId=${wpId}, mode=${modeRef.current}, waypoints.length=${waypointsRef.current.length}`,
+        );
 
         // Find the corresponding waypoint by waypoint_id to get the correct sn
-        const targetWaypoint = waypointsRef.current.find(wp => wp.sn === wpId);
+        const targetWaypoint = waypointsRef.current.find(
+          (wp) => wp.sn === wpId,
+        );
         const statusKey = targetWaypoint ? targetWaypoint.sn : wpId;
         const currentMode = modeRef.current;
 
         // CONTINUOUS / DASH modes — simplified status, no accuracy tracking
-        if (currentMode === 'CONTINUOUS' || currentMode === 'DASH') {
-          let status: WpStatus['status'];
+        if (currentMode === "CONTINUOUS" || currentMode === "DASH") {
+          let status: WpStatus["status"];
           let remark: string;
 
-          if (currentMode === 'CONTINUOUS') {
+          if (currentMode === "CONTINUOUS") {
             if (event.is_first) {
-              status = 'spray_on';
-              remark = 'Spray ON';
+              status = "spray_on";
+              remark = "Spray ON";
             } else if (event.is_last) {
-              status = 'spray_off';
-              remark = 'Spray OFF';
+              status = "spray_off";
+              remark = "Spray OFF";
             } else {
-              status = 'passed';
-              remark = 'Passed';
+              status = "passed";
+              remark = "Passed";
             }
           } else {
             // DASH mode
             if (event.is_first) {
-              status = 'spray_on';
-              remark = 'Dash Started';
+              status = "spray_on";
+              remark = "Dash Started";
             } else {
-              status = 'passed';
-              remark = 'Passed';
+              status = "passed";
+              remark = "Passed";
             }
           }
 
           // Move downgrade guard and nextEntry construction inside functional updater
           // so they read fresh state from `prev` instead of stale `statusMapRef.current`
-          setStatusMap(prev => {
+          setStatusMap((prev) => {
             const prevEntry = prev[statusKey];
             if (isStatusDowngrade(prevEntry?.status, status)) {
-              console.log(`[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${status}`);
+              console.log(
+                `[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${status}`,
+              );
               return prev;
             }
             const nextEntry = {
@@ -2034,50 +2565,64 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             } as WpStatus;
 
             if (!prevEntry || prevEntry.status !== nextEntry.status) {
-              console.log(`[MissionReportScreen] ✅ [${currentMode}] Waypoint ${statusKey} → ${status} at ${timestamp}`);
+              console.log(
+                `[MissionReportScreen] ✅ [${currentMode}] Waypoint ${statusKey} → ${status} at ${timestamp}`,
+              );
               return { ...prev, [statusKey]: nextEntry };
             }
             return prev;
           });
         } else {
           // AUTO / MANUAL modes — existing logic with accuracy tracking
-          const roverLat = event.position?.lat ?? telemetryRef.current.global?.lat;
-          const roverLon = event.position?.lng ?? telemetryRef.current.global?.lon;
+          const roverLat =
+            event.position?.lat ?? telemetryRef.current.global?.lat;
+          const roverLon =
+            event.position?.lng ?? telemetryRef.current.global?.lon;
           const hrms = telemetryRef.current.hrms;
           const vrms = telemetryRef.current.vrms;
 
           const gpsFailsafeAccuracyMm = event.accuracy_error_mm ?? null;
           const backendAccuracyMm = gpsFailsafeAccuracyMm;
 
-          let accuracyData: { accuracy_level?: string; position_error_cm?: number } = {};
+          let accuracyData: {
+            accuracy_level?: string;
+            position_error_cm?: number;
+          } = {};
           if (backendAccuracyMm != null) {
             const accuracy = getAccuracyLevel(backendAccuracyMm);
             accuracyData = {
               accuracy_level: accuracy.level,
               position_error_cm: backendAccuracyMm / 10,
             };
-            console.log(`[MissionReportScreen] 📊 Backend accuracy for WP ${statusKey}: ${backendAccuracyMm.toFixed(1)}mm (${accuracy.label})`);
+            console.log(
+              `[MissionReportScreen] 📊 Backend accuracy for WP ${statusKey}: ${backendAccuracyMm.toFixed(1)}mm (${accuracy.label})`,
+            );
           } else {
-            console.log(`[MissionReportScreen] ⚠️ No backend accuracy for WP ${statusKey}, sources checked:`, {
-              event_accuracy_error_mm: event.accuracy_error_mm,
-            });
+            console.log(
+              `[MissionReportScreen] ⚠️ No backend accuracy for WP ${statusKey}, sources checked:`,
+              {
+                event_accuracy_error_mm: event.accuracy_error_mm,
+              },
+            );
           }
 
           // Move downgrade guard and nextEntry inside functional updater
           // to read fresh state from `prev` instead of stale `statusMapRef.current`
-          setStatusMap(prev => {
+          setStatusMap((prev) => {
             const prevEntry = prev[statusKey];
 
             // GUARD: Don't downgrade a completed/skipped waypoint back to reached
-            if (isStatusDowngrade(prevEntry?.status, 'reached')) {
-              console.log(`[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → reached`);
+            if (isStatusDowngrade(prevEntry?.status, "reached")) {
+              console.log(
+                `[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → reached`,
+              );
               return prev;
             }
 
             const nextEntry = {
               ...(prevEntry || {}),
               reached: true,
-              status: 'reached',
+              status: "reached",
               timestamp,
               pile: event.pile ?? prevEntry?.pile,
               rowNo: event.rowNo ?? event.row_no ?? prevEntry?.rowNo,
@@ -2088,7 +2633,8 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               ...accuracyData,
             } as WpStatus;
 
-            const changed = !prevEntry ||
+            const changed =
+              !prevEntry ||
               prevEntry.status !== nextEntry.status ||
               prevEntry.reached !== nextEntry.reached ||
               prevEntry.pile !== nextEntry.pile ||
@@ -2096,7 +2642,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               prevEntry.accuracy_level !== nextEntry.accuracy_level;
 
             if (changed) {
-              console.log(`[MissionReportScreen] ✅ Waypoint ${statusKey} reached at ${timestamp}`);
+              console.log(
+                `[MissionReportScreen] ✅ Waypoint ${statusKey} reached at ${timestamp}`,
+              );
               return { ...prev, [statusKey]: nextEntry };
             }
             return prev;
@@ -2105,19 +2653,44 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       }
 
       // Handle waypoint marked/completed events (multiple possible event formats)
-      if (eventType === 'waypoint_marked' || eventType === 'waypoint_completed' ||
-        event.event_type === 'waypoint_marked' || event.event_type === 'waypoint_completed' ||
-        (event.data && (event.data.event_type === 'waypoint_marked' || event.data.event_type === 'waypoint_completed'))) {
-        const wpId = event.waypoint_id ?? event.waypointId ?? event.id ?? event.data?.waypoint_id ?? event.data?.waypointId ?? event.data?.id ?? 0;
+      if (
+        eventType === "waypoint_marked" ||
+        eventType === "waypoint_completed" ||
+        event.event_type === "waypoint_marked" ||
+        event.event_type === "waypoint_completed" ||
+        (event.data &&
+          (event.data.event_type === "waypoint_marked" ||
+            event.data.event_type === "waypoint_completed"))
+      ) {
+        const wpId =
+          event.waypoint_id ??
+          event.waypointId ??
+          event.id ??
+          event.data?.waypoint_id ??
+          event.data?.waypointId ??
+          event.data?.id ??
+          0;
         const timestamp = event.timestamp
-          ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString())
+          ? typeof event.timestamp === "string"
+            ? event.timestamp
+            : new Date(event.timestamp).toISOString()
           : new Date().toISOString();
-        const markingStatus = event.marking_status ?? event.markingStatus ?? event.status ?? event.data?.marking_status ?? 'completed';
+        const markingStatus =
+          event.marking_status ??
+          event.markingStatus ??
+          event.status ??
+          event.data?.marking_status ??
+          "completed";
 
         // DEBUG: Log the full event to see what backend is sending
-        console.log('[MissionReportScreen] 📦 Full waypoint event:', JSON.stringify(event, null, 2));
-        console.log(`[MissionReportScreen] ✅ Processing waypoint_marked/completed: wpId=${wpId}, status=${markingStatus}`);
-        console.log('[MissionReportScreen] 🔍 Event fields:', {
+        console.log(
+          "[MissionReportScreen] 📦 Full waypoint event:",
+          JSON.stringify(event, null, 2),
+        );
+        console.log(
+          `[MissionReportScreen] ✅ Processing waypoint_marked/completed: wpId=${wpId}, status=${markingStatus}`,
+        );
+        console.log("[MissionReportScreen] 🔍 Event fields:", {
           marking_status: event.marking_status,
           markingStatus: event.markingStatus,
           status: event.status,
@@ -2126,7 +2699,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         });
 
         // Find the corresponding waypoint by waypoint_id to get the correct sn
-        const targetWaypoint = waypointsRef.current.find(wp => wp.sn === wpId);
+        const targetWaypoint = waypointsRef.current.find(
+          (wp) => wp.sn === wpId,
+        );
         const statusKey = targetWaypoint ? targetWaypoint.sn : wpId;
 
         // Get hrms from telemetry for accuracy fallback
@@ -2154,7 +2729,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         //                              ? positionErrorMm
         //                              : hrmsAccuracyMm;
 
-        let accuracyData: { accuracy_level?: string; position_error_cm?: number } = {};
+        let accuracyData: {
+          accuracy_level?: string;
+          position_error_cm?: number;
+        } = {};
         if (backendAccuracyMm != null) {
           // Use same thresholds as frontend: Excellent ≤30mm, Good 30-60mm, Poor >60mm
           const accuracy = getAccuracyLevel(backendAccuracyMm);
@@ -2162,33 +2740,41 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             accuracy_level: accuracy.level,
             position_error_cm: backendAccuracyMm / 10, // Convert mm to cm for consistency with WaypointsTable
           };
-          const source = 'event_accuracy_error_mm';
-          console.log(`[MissionReportScreen] 📊 Backend accuracy for WP ${statusKey} (marked): ${backendAccuracyMm.toFixed(1)}mm (${accuracy.label}) [source: ${source}]`);
+          const source = "event_accuracy_error_mm";
+          console.log(
+            `[MissionReportScreen] 📊 Backend accuracy for WP ${statusKey} (marked): ${backendAccuracyMm.toFixed(1)}mm (${accuracy.label}) [source: ${source}]`,
+          );
         } else {
-          console.log(`[MissionReportScreen] ⚠️ No backend accuracy for WP ${statusKey} (marked), sources checked:`, {
-            event_accuracy_error_mm: event.accuracy_error_mm,
-            // telemetry_position_error_cm: telemetryRef.current.position_error_cm,
-            // event_position_error_cm: event.position_error_cm,
-            // hrms: hrms,
-          });
+          console.log(
+            `[MissionReportScreen] ⚠️ No backend accuracy for WP ${statusKey} (marked), sources checked:`,
+            {
+              event_accuracy_error_mm: event.accuracy_error_mm,
+              // telemetry_position_error_cm: telemetryRef.current.position_error_cm,
+              // event_position_error_cm: event.position_error_cm,
+              // hrms: hrms,
+            },
+          );
         }
 
         // Move prevEntry read and changed check inside functional updater
         // to read fresh state from `prev` instead of stale `statusMapRef.current`
-        setStatusMap(prev => {
+        setStatusMap((prev) => {
           const prevEntry = prev[statusKey];
           const nextEntry = {
             ...(prevEntry || {}),
             marked: true,
-            status: markingStatus === 'skipped' ? 'skipped' : 'completed',
+            status: markingStatus === "skipped" ? "skipped" : "completed",
             timestamp,
             pile: event.pile ?? prevEntry?.pile,
             rowNo: event.rowNo ?? event.row_no ?? prevEntry?.rowNo,
-            remark: event.remark ?? (markingStatus === 'skipped' ? 'Skipped' : prevEntry?.remark),
+            remark:
+              event.remark ??
+              (markingStatus === "skipped" ? "Skipped" : prevEntry?.remark),
             ...accuracyData,
           } as WpStatus;
 
-          const changed = !prevEntry ||
+          const changed =
+            !prevEntry ||
             prevEntry.status !== nextEntry.status ||
             prevEntry.marked !== nextEntry.marked ||
             prevEntry.pile !== nextEntry.pile ||
@@ -2203,60 +2789,90 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           return prev;
         });
 
-        const statusEmoji = markingStatus === 'skipped' ? '⏭️' : '✅';
-        console.log(`[MissionReportScreen] ${statusEmoji} Waypoint ${statusKey} ${markingStatus} at ${timestamp}`);
+        const statusEmoji = markingStatus === "skipped" ? "⏭️" : "✅";
+        console.log(
+          `[MissionReportScreen] ${statusEmoji} Waypoint ${statusKey} ${markingStatus} at ${timestamp}`,
+        );
       }
 
       // waypoint_hold_complete — hold period done, servo sequence about to run (AUTO + MANUAL)
       // No statusMap update needed here — waypoint_marked/waypoint_skipped follows immediately
-      if (eventType === 'waypoint_hold_complete' || event.event_type === 'waypoint_hold_complete') {
-        const wpId = event.waypoint_id ?? event.waypointId ?? event.current_waypoint ?? 0;
-        console.log(`[MissionReportScreen] ⏱️ Hold complete for WP ${wpId}, should_mark=${event.should_mark}`);
+      if (
+        eventType === "waypoint_hold_complete" ||
+        event.event_type === "waypoint_hold_complete"
+      ) {
+        const wpId =
+          event.waypoint_id ?? event.waypointId ?? event.current_waypoint ?? 0;
+        console.log(
+          `[MissionReportScreen] ⏱️ Hold complete for WP ${wpId}, should_mark=${event.should_mark}`,
+        );
         // Intentionally no statusMap change — waypoint_marked or waypoint_skipped fires next
       }
 
       // DASH MODE: dash_completed — overwrite last waypoint with final summary
-      if (eventType === 'dash_completed' || event.event_type === 'dash_completed') {
+      if (
+        eventType === "dash_completed" ||
+        event.event_type === "dash_completed"
+      ) {
         const allWps = waypointsRef.current;
         if (allWps.length > 0) {
           const lastWpSn = allWps[allWps.length - 1].sn;
           const timestamp = event.timestamp
-            ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString())
+            ? typeof event.timestamp === "string"
+              ? event.timestamp
+              : new Date(event.timestamp).toISOString()
             : new Date().toISOString();
-          const distance = event.cumulative_distance ?? event.total_distance ?? '';
-          const distanceDisplay = distance ? ` | ${Number(distance).toFixed(1)}m` : '';
+          const distance =
+            event.cumulative_distance ?? event.total_distance ?? "";
+          const distanceDisplay = distance
+            ? ` | ${Number(distance).toFixed(1)}m`
+            : "";
 
-          setStatusMap(prev => ({
+          setStatusMap((prev) => ({
             ...prev,
             [lastWpSn]: {
               ...(prev[lastWpSn] || {}),
-              status: 'mission_end',
+              status: "mission_end",
               remark: `Done${distanceDisplay}`,
               timestamp,
             } as WpStatus,
           }));
-          console.log(`[MissionReportScreen] 🏁 [DASH] dash_completed: last WP ${lastWpSn} → mission_end${distanceDisplay}`);
+          console.log(
+            `[MissionReportScreen] 🏁 [DASH] dash_completed: last WP ${lastWpSn} → mission_end${distanceDisplay}`,
+          );
         }
       }
 
       // MANUAL MODE ONLY: waypoint_completed_manual — WP is done, mission paused waiting for user NEXT
-      if (eventType === 'waypoint_completed_manual' || event.event_type === 'waypoint_completed_manual') {
-        const wpId = event.waypoint_id ?? event.waypointId ?? event.current_waypoint ?? 0;
+      if (
+        eventType === "waypoint_completed_manual" ||
+        event.event_type === "waypoint_completed_manual"
+      ) {
+        const wpId =
+          event.waypoint_id ?? event.waypointId ?? event.current_waypoint ?? 0;
         const timestamp = event.timestamp
-          ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString())
+          ? typeof event.timestamp === "string"
+            ? event.timestamp
+            : new Date(event.timestamp).toISOString()
           : new Date().toISOString();
 
-        console.log(`[MissionReportScreen] 🖐️ MANUAL waypoint_completed_manual: wpId=${wpId}, waiting_for_manual=${event.waiting_for_manual}`);
+        console.log(
+          `[MissionReportScreen] 🖐️ MANUAL waypoint_completed_manual: wpId=${wpId}, waiting_for_manual=${event.waiting_for_manual}`,
+        );
 
         if (wpId > 0) {
-          const targetWaypoint = waypointsRef.current.find(wp => wp.sn === wpId);
+          const targetWaypoint = waypointsRef.current.find(
+            (wp) => wp.sn === wpId,
+          );
           const statusKey = targetWaypoint ? targetWaypoint.sn : wpId;
 
           // Move downgrade guard inside functional updater for fresh state
-          setStatusMap(prev => {
+          setStatusMap((prev) => {
             const prevEntry = prev[statusKey];
-            if (isStatusDowngrade(prevEntry?.status, 'completed')) {
-              console.log(`[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → completed`);
+            if (isStatusDowngrade(prevEntry?.status, "completed")) {
+              console.log(
+                `[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → completed`,
+              );
               return prev;
             }
             return {
@@ -2264,7 +2880,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               [statusKey]: {
                 ...(prevEntry || {}),
                 marked: true,
-                status: 'completed',
+                status: "completed",
                 timestamp,
               } as WpStatus,
             };
@@ -2274,24 +2890,33 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         // Signal UI that NEXT button needs to be pressed to continue
         if (event.waiting_for_manual) {
           setWaitingForManual(true);
-          console.log('[MissionReportScreen] 🖐️ MANUAL mode: waiting for user to press NEXT');
+          console.log(
+            "[MissionReportScreen] 🖐️ MANUAL mode: waiting for user to press NEXT",
+          );
         }
       }
 
       // PX4 point_mission_event — consumed by usePointMissionEvents; skip duplicate handling here
-      if (eventType === 'point_mission_event' || (event.event_type && String(event.event_type).startsWith('point_'))) {
+      if (
+        eventType === "point_mission_event" ||
+        (event.event_type && String(event.event_type).startsWith("point_"))
+      ) {
         return;
       }
 
       // Handle mission completed event - including mission_state: completed
-      if (eventType === 'mission_completed' ||
-        event.event_type === 'mission_completed' ||
-        event.mission_state === 'completed' ||
-        event.state === 'completed' ||
-        (event.data && event.data.event_type === 'mission_completed') ||
-        (event.data && event.data.mission_state === 'completed')) {
-        console.log('[MissionReportScreen] 🏁 Mission completed event received from backend');
-        console.log('[MissionReportScreen] Completion event details:', {
+      if (
+        eventType === "mission_completed" ||
+        event.event_type === "mission_completed" ||
+        event.mission_state === "completed" ||
+        event.state === "completed" ||
+        (event.data && event.data.event_type === "mission_completed") ||
+        (event.data && event.data.mission_state === "completed")
+      ) {
+        console.log(
+          "[MissionReportScreen] 🏁 Mission completed event received from backend",
+        );
+        console.log("[MissionReportScreen] Completion event details:", {
           eventType,
           mission_state: event.mission_state,
           completion_time: event.completion_time,
@@ -2300,36 +2925,56 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
         // Set mission start time if not set (fallback for missed start event)
         if (!missionStartTimeRef.current) {
-          console.log('[MissionReportScreen] ⚠️ Mission start time was not set! Using fallback.');
+          console.log(
+            "[MissionReportScreen] ⚠️ Mission start time was not set! Using fallback.",
+          );
           // Calculate start time from completion_time and mission_duration if available
           if (event.completion_time && event.mission_duration) {
             const completionDate = new Date(event.completion_time);
-            const startDate = new Date(completionDate.getTime() - (event.mission_duration * 1000));
+            const startDate = new Date(
+              completionDate.getTime() - event.mission_duration * 1000,
+            );
             setMissionStartTime(startDate);
-            console.log('[MissionReportScreen] ✅ Calculated mission start time from duration:', startDate);
+            console.log(
+              "[MissionReportScreen] ✅ Calculated mission start time from duration:",
+              startDate,
+            );
           } else {
             // Fallback: use current time minus 1 minute as approximate start
             setMissionStartTime(new Date(Date.now() - 60000));
-            console.log('[MissionReportScreen] ⚠️ Using fallback start time (1 minute ago)');
+            console.log(
+              "[MissionReportScreen] ⚠️ Using fallback start time (1 minute ago)",
+            );
           }
         }
 
         // Set mission end time if not already set
         if (!missionEndTimeRef.current) {
-          const completionTime = event.completion_time ? new Date(event.completion_time) : new Date();
+          const completionTime = event.completion_time
+            ? new Date(event.completion_time)
+            : new Date();
           setMissionEndTime(completionTime);
-          console.log('[MissionReportScreen] ✅ Mission end time set:', completionTime);
+          console.log(
+            "[MissionReportScreen] ✅ Mission end time set:",
+            completionTime,
+          );
         }
 
         // Mark mission as inactive
         setIsMissionActive(false);
-        console.log('[MissionReportScreen] ✅ isMissionActive set to false - button will reset to START');
+        console.log(
+          "[MissionReportScreen] ✅ isMissionActive set to false - button will reset to START",
+        );
 
         // Preserve mission data for export
         preserveCurrentMission.current();
 
         // Show completion notification
-        showNotification('success', 'Mission Completed', 'All marking points have been processed!');
+        showNotification(
+          "success",
+          "Mission Completed",
+          "All marking points have been processed!",
+        );
 
         // Show completion dialog
         const dialogTimer = setTimeout(() => {
@@ -2344,28 +2989,43 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       }
 
       // Handle mission status updates (high frequency - no notifications)
-      if (eventType === 'mission_status') {
+      if (eventType === "mission_status") {
         const px4State = event.state ?? event.mission_state;
-        if (px4State === 'running' || px4State === 'paused') {
+        if (px4State === "running" || px4State === "paused") {
           setIsMissionActive(true);
-        } else if (px4State === 'completed' || px4State === 'stopped' || px4State === 'idle') {
+        } else if (
+          px4State === "completed" ||
+          px4State === "stopped" ||
+          px4State === "idle"
+        ) {
           setIsMissionActive(false);
         }
 
         if (
           POINT_MISSION_ENABLED &&
-          typeof event.point_index === 'number' &&
+          typeof event.point_index === "number" &&
           event.point_index >= 0
         ) {
           setCurrentIndex(event.point_index);
         }
 
         // Check if mission was paused (by GPS failsafe or manual action)
-        if (px4State === 'paused' || px4State === 'PAUSED') {
-          console.log('[MissionReportScreen] 🔴 MISSION STATE CHANGED TO PAUSED');
-          console.log('[MissionReportScreen] 📋 Pause reason:', event.pause_reason || event.reason || 'Unknown');
-          console.log('[MissionReportScreen] 📋 GPS Failsafe mode:', telemetryRef.current.gps_failsafe?.mode);
-          console.log('[MissionReportScreen] 📋 Full pause event:', JSON.stringify(event));
+        if (px4State === "paused" || px4State === "PAUSED") {
+          console.log(
+            "[MissionReportScreen] 🔴 MISSION STATE CHANGED TO PAUSED",
+          );
+          console.log(
+            "[MissionReportScreen] 📋 Pause reason:",
+            event.pause_reason || event.reason || "Unknown",
+          );
+          console.log(
+            "[MissionReportScreen] 📋 GPS Failsafe mode:",
+            telemetryRef.current.gps_failsafe?.mode,
+          );
+          console.log(
+            "[MissionReportScreen] 📋 Full pause event:",
+            JSON.stringify(event),
+          );
         }
 
         let statusUpdated = false;
@@ -2373,7 +3033,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         if (event.current_waypoint != null) {
           const newIndex = event.current_waypoint - 1; // Convert from 1-based to 0-based
           const currentWaypointNumber = event.current_waypoint;
-          setCurrentIndex(prev => {
+          setCurrentIndex((prev) => {
             if (prev === newIndex) return prev;
 
             // Guard: only advance forward when the waypoint being left is terminal.
@@ -2381,29 +3041,44 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             // which would jump the indicator ahead. Auto-derive corrects it once the
             // waypoint_marked event arrives and statusMap updates.
             if (newIndex > (prev ?? -1)) {
-              const leavingWp = prev !== null ? waypointsRef.current[prev] : null;
+              const leavingWp =
+                prev !== null ? waypointsRef.current[prev] : null;
               if (leavingWp) {
                 const leavingStatus = statusMapRef.current[leavingWp.sn];
-                if (!leavingStatus || (leavingStatus.status !== 'completed' && leavingStatus.status !== 'skipped')) {
-                  console.log(`[MissionReportScreen] ⏸ Holding indicator at index ${prev} — WP${leavingWp.sn} not yet terminal (${leavingStatus?.status ?? 'no status'})`);
+                if (
+                  !leavingStatus ||
+                  (leavingStatus.status !== "completed" &&
+                    leavingStatus.status !== "skipped")
+                ) {
+                  console.log(
+                    `[MissionReportScreen] ⏸ Holding indicator at index ${prev} — WP${leavingWp.sn} not yet terminal (${leavingStatus?.status ?? "no status"})`,
+                  );
                   return prev;
                 }
               }
             }
 
-            console.log(`[MissionReportScreen] ✦ Current waypoint changed: index ${prev} -> ${newIndex} (waypoint #${currentWaypointNumber})`);
-            console.log(`[MissionReportScreen] ✦ Looking for waypoint with sn=${currentWaypointNumber} in ${waypointsRef.current.length} waypoints`);
+            console.log(
+              `[MissionReportScreen] ✦ Current waypoint changed: index ${prev} -> ${newIndex} (waypoint #${currentWaypointNumber})`,
+            );
+            console.log(
+              `[MissionReportScreen] ✦ Looking for waypoint with sn=${currentWaypointNumber} in ${waypointsRef.current.length} waypoints`,
+            );
 
-            const targetWaypoint = waypointsRef.current.find(wp => wp.sn === currentWaypointNumber);
+            const targetWaypoint = waypointsRef.current.find(
+              (wp) => wp.sn === currentWaypointNumber,
+            );
             if (targetWaypoint) {
               console.log(`[MissionReportScreen] ✦ Found target waypoint:`, {
                 sn: targetWaypoint.sn,
                 block: targetWaypoint.block,
                 row: targetWaypoint.row,
-                pile: targetWaypoint.pile
+                pile: targetWaypoint.pile,
               });
             } else {
-              console.log(`[MissionReportScreen] ⚠️ Target waypoint sn=${currentWaypointNumber} not found in waypoints array`);
+              console.log(
+                `[MissionReportScreen] ⚠️ Target waypoint sn=${currentWaypointNumber} not found in waypoints array`,
+              );
             }
 
             statusUpdated = true;
@@ -2416,7 +3091,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           const nextMode = mapBackendMissionModeToUiMode(event.mission_mode);
 
           if (nextMode && nextMode !== modeRef.current) {
-            console.log(`[MissionReportScreen] Syncing Mission Control mode from backend: ${modeRef.current} -> ${nextMode}`);
+            console.log(
+              `[MissionReportScreen] Syncing Mission Control mode from backend: ${modeRef.current} -> ${nextMode}`,
+            );
             modeRef.current = nextMode;
             setMode(nextMode);
             statusUpdated = true;
@@ -2426,38 +3103,55 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         // Check if mission_status contains waypoint completion info
         if (event.waypoint_status && event.current_waypoint) {
           const wpId = event.current_waypoint;
-          const targetWaypoint = waypointsRef.current.find(wp => wp.sn === wpId);
+          const targetWaypoint = waypointsRef.current.find(
+            (wp) => wp.sn === wpId,
+          );
           const statusKey = targetWaypoint ? targetWaypoint.sn : wpId;
 
-          const incomingStatus = event.waypoint_status === 'completed' ? 'completed' :
-            event.waypoint_status === 'reached' ? 'reached' :
-              event.waypoint_status;
+          const incomingStatus =
+            event.waypoint_status === "completed"
+              ? "completed"
+              : event.waypoint_status === "reached"
+                ? "reached"
+                : event.waypoint_status;
 
-          console.log(`[MissionReportScreen] 📊 Mission status contains waypoint info: wpId=${wpId}, status=${incomingStatus}`);
+          console.log(
+            `[MissionReportScreen] 📊 Mission status contains waypoint info: wpId=${wpId}, status=${incomingStatus}`,
+          );
 
           // Move downgrade guard and nextEntry inside functional updater
-          setStatusMap(prev => {
+          setStatusMap((prev) => {
             const prevEntry = prev[statusKey];
 
             if (isStatusDowngrade(prevEntry?.status, incomingStatus)) {
-              console.log(`[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${incomingStatus}`);
+              console.log(
+                `[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${incomingStatus}`,
+              );
               return prev;
             }
 
             const nextEntry = {
               ...(prevEntry || {}),
               status: incomingStatus,
-              timestamp: event.timestamp ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString()) : new Date().toISOString(),
-              reached: event.waypoint_status === 'reached' || event.waypoint_status === 'completed',
-              marked: event.waypoint_status === 'completed',
+              timestamp: event.timestamp
+                ? typeof event.timestamp === "string"
+                  ? event.timestamp
+                  : new Date(event.timestamp).toISOString()
+                : new Date().toISOString(),
+              reached:
+                event.waypoint_status === "reached" ||
+                event.waypoint_status === "completed",
+              marked: event.waypoint_status === "completed",
               pile: event.pile ?? prevEntry?.pile,
               rowNo: event.rowNo ?? event.row_no ?? prevEntry?.rowNo,
               remark: event.remark ?? prevEntry?.remark,
               accuracy_level: event.accuracy_level ?? prevEntry?.accuracy_level,
-              position_error_cm: event.position_error_cm ?? prevEntry?.position_error_cm,
+              position_error_cm:
+                event.position_error_cm ?? prevEntry?.position_error_cm,
             } as WpStatus;
 
-            const changed = !prevEntry ||
+            const changed =
+              !prevEntry ||
               prevEntry.status !== nextEntry.status ||
               prevEntry.reached !== nextEntry.reached ||
               prevEntry.marked !== nextEntry.marked ||
@@ -2477,26 +3171,30 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
 
         // Only log mission_status when something actually changed to reduce noise
         if (statusUpdated) {
-          console.log('[MissionReportScreen] Mission status updated:', {
+          console.log("[MissionReportScreen] Mission status updated:", {
             current_waypoint: event.current_waypoint,
             mission_mode: event.mission_mode,
             waypoint_status: event.waypoint_status,
-            waypoints_count: waypointsRef.current.length
+            waypoints_count: waypointsRef.current.length,
           });
         }
         return;
       }
 
       // Handle mission errors
-      if (eventType === 'mission_error') {
-        const errorMsg = event.message || event.error || 'Unknown mission error';
-        console.error(`[MissionReportScreen] ❌ Mission error: ${errorMsg}`, event);
-        showNotification('error', 'Mission Error', errorMsg);
+      if (eventType === "mission_error") {
+        const errorMsg =
+          event.message || event.error || "Unknown mission error";
+        console.error(
+          `[MissionReportScreen] ❌ Mission error: ${errorMsg}`,
+          event,
+        );
+        showNotification("error", "Mission Error", errorMsg);
       }
 
       // Handle mission state changes (show notifications only for important events)
-      if (eventType === 'mission_started') {
-        console.log('[MissionReportScreen] 🚀 Mission started');
+      if (eventType === "mission_started") {
+        console.log("[MissionReportScreen] 🚀 Mission started");
         setMissionStartTime(new Date());
         setMissionEndTime(null); // Reset end time for new mission
         setIsMissionActive(true); // Mark mission as active
@@ -2505,78 +3203,110 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         // setTrailPoints([]); // Clear trail on new mission start
       }
 
-      if (eventType === 'mission_paused' || event.mission_state === 'paused' ||
-        (event.data && event.data.mission_state === 'paused')) {
-        console.log('[MissionReportScreen] ⏸️ Mission paused');
-        console.log('[MissionReportScreen] 📋 Pause event details:', {
+      if (
+        eventType === "mission_paused" ||
+        event.mission_state === "paused" ||
+        (event.data && event.data.mission_state === "paused")
+      ) {
+        console.log("[MissionReportScreen] ⏸️ Mission paused");
+        console.log("[MissionReportScreen] 📋 Pause event details:", {
           eventType,
           mission_state: event.mission_state,
           gps_failsafe_triggered: event.gps_failsafe_triggered,
           reason: event.reason,
           current_waypoint: event.current_waypoint,
           wp_dist_cm: event.wp_dist_cm,
-          full_event: JSON.stringify(event)
+          full_event: JSON.stringify(event),
         });
         // Show notification to user
         showNotification(
-          'info',
-          'Mission Paused',
-          event.reason || 'Mission paused by system'
+          "info",
+          "Mission Paused",
+          event.reason || "Mission paused by system",
         );
       }
 
-      if (eventType === 'mission_resumed') {
-        console.log('[MissionReportScreen] ▶️ Mission resumed');
+      if (eventType === "mission_resumed") {
+        console.log("[MissionReportScreen] ▶️ Mission resumed");
       }
 
       // Note: mission_completed is handled earlier in the event handler (line ~848)
 
       // Catch-all handler for any other mission events that might contain waypoint updates
       // Exclude mission_progress - it's a high-frequency status ping, not a waypoint state change
-      if (eventType !== 'mission_status' && eventType !== 'unknown' && eventType !== 'mission_progress' &&
-        eventType !== 'waypoint_hold_complete' && eventType !== 'waypoint_completed_manual' &&
-        (event.waypoint_id || event.id || event.current_waypoint)) {
-        console.log(`[MissionReportScreen] 🔍 Unhandled mission event with waypoint info:`, {
-          eventType,
-          waypoint_id: event.waypoint_id,
-          id: event.id,
-          current_waypoint: event.current_waypoint,
-          status: event.status,
-          event_type: event.event_type
-        });
+      if (
+        eventType !== "mission_status" &&
+        eventType !== "unknown" &&
+        eventType !== "mission_progress" &&
+        eventType !== "waypoint_hold_complete" &&
+        eventType !== "waypoint_completed_manual" &&
+        (event.waypoint_id || event.id || event.current_waypoint)
+      ) {
+        console.log(
+          `[MissionReportScreen] 🔍 Unhandled mission event with waypoint info:`,
+          {
+            eventType,
+            waypoint_id: event.waypoint_id,
+            id: event.id,
+            current_waypoint: event.current_waypoint,
+            status: event.status,
+            event_type: event.event_type,
+          },
+        );
 
         // Try to extract waypoint status updates from any unhandled events
-        const wpId = event.waypoint_id ?? event.waypointId ?? event.id ?? event.current_waypoint ?? 0;
+        const wpId =
+          event.waypoint_id ??
+          event.waypointId ??
+          event.id ??
+          event.current_waypoint ??
+          0;
         if (wpId > 0 && waypointsRef.current.length > 0) {
-          const targetWaypoint = waypointsRef.current.find(wp => wp.sn === wpId);
+          const targetWaypoint = waypointsRef.current.find(
+            (wp) => wp.sn === wpId,
+          );
           const statusKey = targetWaypoint ? targetWaypoint.sn : wpId;
 
           // Check for any status indicators in the event
-          if (event.status === 'completed' || event.status === 'reached' ||
-            event.status === 'marked' || event.status === 'skipped') {
-
+          if (
+            event.status === "completed" ||
+            event.status === "reached" ||
+            event.status === "marked" ||
+            event.status === "skipped"
+          ) {
             // Move all reads inside functional updater to avoid stale statusMapRef
-            setStatusMap(prev => {
+            setStatusMap((prev) => {
               const prevEntry = prev[statusKey];
 
               // GUARD: Don't downgrade a completed/skipped waypoint
               if (isStatusDowngrade(prevEntry?.status, event.status)) {
-                console.log(`[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${event.status}`);
+                console.log(
+                  `[MissionReportScreen] 🛡️ Blocked status downgrade for WP ${statusKey}: ${prevEntry?.status} → ${event.status}`,
+                );
                 return prev;
               }
 
-              console.log(`[MissionReportScreen] 📝 Extracting status from unhandled event: wpId=${wpId}, status=${event.status}`);
+              console.log(
+                `[MissionReportScreen] 📝 Extracting status from unhandled event: wpId=${wpId}, status=${event.status}`,
+              );
 
               const nextEntry = {
                 ...(prevEntry || {}),
                 status: event.status,
-                timestamp: event.timestamp ? (typeof event.timestamp === 'string' ? event.timestamp : new Date(event.timestamp).toISOString()) : new Date().toISOString(),
-                reached: event.status === 'reached' || event.status === 'completed',
-                marked: event.status === 'completed' || event.status === 'marked',
-                remark: event.remark ?? prevEntry?.remark ?? '—',
+                timestamp: event.timestamp
+                  ? typeof event.timestamp === "string"
+                    ? event.timestamp
+                    : new Date(event.timestamp).toISOString()
+                  : new Date().toISOString(),
+                reached:
+                  event.status === "reached" || event.status === "completed",
+                marked:
+                  event.status === "completed" || event.status === "marked",
+                remark: event.remark ?? prevEntry?.remark ?? "—",
               } as WpStatus;
 
-              const changed = !prevEntry ||
+              const changed =
+                !prevEntry ||
                 prevEntry.status !== nextEntry.status ||
                 prevEntry.reached !== nextEntry.reached ||
                 prevEntry.marked !== nextEntry.marked ||
@@ -2605,7 +3335,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
   // No need to fetch from backend as PathPlan handles upload and syncs to context
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
       <StatusBar backgroundColor={colors.headerBlue} barStyle="light-content" />
 
       <View style={styles.absoluteMapContainer}>
@@ -2633,10 +3363,10 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             status={vehicleStatus}
             telemetry={telemetry}
             isConnected={
-              connectionState === 'connected' &&
+              connectionState === "connected" &&
               telemetry.fcu_connected !== false
             }
-            onClose={() => setPanelVisible('robotStatus', false)}
+            onClose={() => setPanelVisible("robotStatus", false)}
           />
         </DraggableCard>
       )}
@@ -2655,14 +3385,16 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             },
           ]}
           handleType="custom"
-          onLayout={(e) => setMissionProgressPanelHeight(e.nativeEvent.layout.height)}
+          onLayout={(e) =>
+            setMissionProgressPanelHeight(e.nativeEvent.layout.height)
+          }
         >
           <MissionProgressCard
             waypoints={displayData.waypoints}
             currentIndex={effectiveCurrentIndex}
             markedCount={markedCount}
             isMissionActive={effectiveMissionActive}
-            onClose={() => setPanelVisible('missionProgress', false)}
+            onClose={() => setPanelVisible("missionProgress", false)}
           />
         </DraggableCard>
       )}
@@ -2715,7 +3447,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
           handleType="custom"
           onLayout={(e) => setSystemPanelHeight(e.nativeEvent.layout.height)}
         >
-          <SystemStatusPanel onClose={() => setPanelVisible('systemStatus', false)} />
+          <SystemStatusPanel
+            onClose={() => setPanelVisible("systemStatus", false)}
+          />
         </DraggableCard>
       )}
 
@@ -2746,9 +3480,11 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             onSkip={handleSkip}
             missionMode={missionMode}
             isMissionActive={effectiveMissionActive}
+            isMissionPaused={isBackendMissionPaused}
             waitingForManual={effectiveWaitingForManual}
-            isMissionLoaded={verifiedCtx.isLoaded}
-            onClose={() => setPanelVisible('missionControls', false)}
+            isMissionLoaded={hasUploadedMission}
+            isMissionReady={canStartMission}
+            onClose={() => setPanelVisible("missionControls", false)}
           />
         </DraggableCard>
       )}
@@ -2759,8 +3495,8 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
             progressCurrent={missionProgressRef.current}
             progressTotal={missionProgressRef.total}
             isExpanded={isBottomTableExpanded}
-            onToggleExpand={() => setIsBottomTableExpanded(prev => !prev)}
-            onClose={() => setPanelVisible('bottom', false)}
+            onToggleExpand={() => setIsBottomTableExpanded((prev) => !prev)}
+            onClose={() => setPanelVisible("bottom", false)}
             toolbarActions={
               <MissionTableToolbarActions
                 onClear={() => setShowClearLogsDialog(true)}
@@ -2807,13 +3543,13 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               const id = undoPrompt.id;
               if (!id) return;
               // Find record
-              const rec = skipHistory.find(r => r.id === id);
+              const rec = skipHistory.find((r) => r.id === id);
               if (!rec) return;
 
               // Restore previous statuses
-              setStatusMap(prev => {
+              setStatusMap((prev) => {
                 const copy = { ...prev };
-                Object.keys(rec.previousStatuses).forEach(k => {
+                Object.keys(rec.previousStatuses).forEach((k) => {
                   const sn = parseInt(k, 10);
                   const prevEntry = rec.previousStatuses[sn];
                   if (!prevEntry) {
@@ -2826,17 +3562,22 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
               });
 
               // Mark audit record undone in persistent storage
-              await PersistentStorage.markSkipAuditUndone(id).catch(err => console.warn('[MissionReportScreen] Failed to mark audit undone', err));
+              await PersistentStorage.markSkipAuditUndone(id).catch((err) =>
+                console.warn(
+                  "[MissionReportScreen] Failed to mark audit undone",
+                  err,
+                ),
+              );
 
               // Remove prompt and record
-              setSkipHistory(prev => prev.filter(r => r.id !== id));
+              setSkipHistory((prev) => prev.filter((r) => r.id !== id));
               setUndoPrompt({ visible: false, id: null });
               if (undoTimerRef.current) {
                 clearTimeout(undoTimerRef.current);
                 undoTimerRef.current = null;
               }
 
-              showNotification('info', 'Undo', 'Bulk skip undone locally');
+              showNotification("info", "Undo", "Bulk skip undone locally");
             }}
           >
             <Text style={styles.undoButtonText}>Undo</Text>
@@ -2848,7 +3589,7 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         visible={showRTKInjection}
         onClose={closeRTKInjection}
         services={services}
-        isConnected={connectionState === 'connected'}
+        isConnected={connectionState === "connected"}
       />
 
       {/* Auto-Assign Dialog */}
@@ -2873,7 +3614,9 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
       <MissionCompletionDialog
         visible={showCompletionDialog}
         onDismiss={() => {
-          console.log('[MissionReportScreen] 📋 Closing mission completion dialog');
+          console.log(
+            "[MissionReportScreen] 📋 Closing mission completion dialog",
+          );
           setShowCompletionDialog(false);
         }}
         onExport={handleExport}
@@ -2889,23 +3632,21 @@ export default function MissionReportScreen({ isVisible = true }: MissionReportS
         onConfirm={handleClearLogsAfterExport}
         onCancel={handleKeepLogsAfterExport}
       />
-
-
     </SafeAreaView>
   );
 }
 
 function getFixTypeLabel(fixType: number): string {
   const labels: { [key: number]: string } = {
-    0: 'No GPS',
-    1: 'No Fix',
-    2: '2D Fix',
-    3: '3D Fix',
-    4: 'DGPS',
-    5: 'RTK Float',
-    6: 'RTK Fixed',
+    0: "No GPS",
+    1: "No Fix",
+    2: "2D Fix",
+    3: "3D Fix",
+    4: "DGPS",
+    5: "RTK Float",
+    6: "RTK Fixed",
   };
-  return labels[fixType] || 'Unknown';
+  return labels[fixType] || "Unknown";
 }
 
 const bottomTableInsets = getMissionProgressBottomTableInsets();
@@ -2914,56 +3655,56 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.primary,
-    position: 'relative',
+    position: "relative",
   },
   absoluteMapContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
   },
   floatingRobotStatusPanel: {
-    position: 'absolute',
+    position: "absolute",
     top: MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE,
     left: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     zIndex: 1000,
   },
   floatingMissionProgressPanel: {
-    position: 'absolute',
+    position: "absolute",
     left: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     zIndex: 1000,
   },
   floatingQuickNtripPanel: {
-    position: 'absolute',
+    position: "absolute",
     left: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     zIndex: 999,
   },
   floatingDistanceToTargetPanel: {
-    position: 'absolute',
+    position: "absolute",
     left: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     bottom: MISSION_PROGRESS_LAYOUT.BOTTOM_INSET,
     zIndex: 1000,
   },
   floatingSystemStatusPanel: {
-    position: 'absolute',
+    position: "absolute",
     top: MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE,
     right: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.RIGHT_PANEL_WIDTH,
     zIndex: 1000,
   },
   floatingMissionControlsPanel: {
-    position: 'absolute',
+    position: "absolute",
     right: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.RIGHT_PANEL_WIDTH,
     zIndex: 1000,
   },
   floatingBottomTable: {
-    position: 'absolute',
+    position: "absolute",
     bottom: MISSION_PROGRESS_LAYOUT.BOTTOM_INSET,
     left: bottomTableInsets.left,
     right: bottomTableInsets.right,
@@ -2973,57 +3714,57 @@ const styles = StyleSheet.create({
     borderRadius: PATH_PLAN_GLASS.borderRadius,
     borderWidth: 1,
     borderColor: PATH_PLAN_GLASS.border,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
   },
   floatingBottomTableBody: {
     height: MISSION_PROGRESS_LAYOUT.BOTTOM_TABLE_BODY_HEIGHT,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   previousMissionBanner: {
-    backgroundColor: '#FFF3CD',
+    backgroundColor: "#FFF3CD",
     borderBottomWidth: 1,
-    borderBottomColor: '#FDBF47',
+    borderBottomColor: "#FDBF47",
     paddingVertical: 8,
     paddingHorizontal: 16,
   },
   previousMissionText: {
-    color: '#856404',
+    color: "#856404",
     fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'center',
+    fontWeight: "500",
+    textAlign: "center",
   },
   undoBanner: {
-    position: 'absolute',
+    position: "absolute",
     left: 20,
     right: 20,
     bottom: 110,
-    backgroundColor: '#072334',
+    backgroundColor: "#072334",
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)'
+    borderColor: "rgba(255,255,255,0.06)",
   },
   undoText: {
-    color: '#E6F7FF',
+    color: "#E6F7FF",
     fontSize: 13,
   },
   undoButton: {
     marginLeft: 10,
-    backgroundColor: '#0ea5a5',
+    backgroundColor: "#0ea5a5",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
   },
   undoButtonText: {
-    color: '#001219',
-    fontWeight: '700'
+    color: "#001219",
+    fontWeight: "700",
   },
 });
