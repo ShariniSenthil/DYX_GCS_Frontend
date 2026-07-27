@@ -1,414 +1,317 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { colors } from '../../theme/colors';
-import { RoverServices } from '../../hooks/useRoverTelemetry';
-import { NTRIPProfileList } from './NTRIPProfileList';
-import { NTRIPProfileEditor } from './NTRIPProfileEditor';
-import { NTRIPProfile } from '../../types/ntrip';
-import { LoraRTKStatus } from '../../types/rtk';
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+
+import { colors } from "../../theme/colors";
+import type { RoverServices } from "../../hooks/useRoverTelemetry";
+import { NTRIPProfileList } from "./NTRIPProfileList";
+import { NTRIPProfileEditor } from "./NTRIPProfileEditor";
+import type { NTRIPProfile } from "../../types/ntrip";
+import { getAllProfiles } from "../../services/ntripProfileStorage";
+import {
+  getRtkConfiguration,
+  getRtkStatus,
+  reconnectRtk,
+  updateRtkConfiguration,
+  type ActiveRtkConfiguration,
+  type RtkStatusResponse,
+} from "../../services/rtkService";
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Retained temporarily so MissionReportScreen does not need a prop change. */
   services: RoverServices;
   isConnected: boolean;
 }
 
-type RTKSource = 'ntrip' | 'lora';
-type ModalScreen = 'list' | 'editor';
+type ModalScreen = "list" | "editor";
 
-export const RTKInjectionScreen: React.FC<Props> = ({ visible, onClose, services, isConnected }) => {
-  const [rtkSource, setRtkSource] = useState<RTKSource>('ntrip');
-  const [modalScreen, setModalScreen] = useState<ModalScreen>('list');
-  const [selectedProfile, setSelectedProfile] = useState<NTRIPProfile | null>(null);
+function profileMatchesConfiguration(
+  profile: NTRIPProfile,
+  configuration: ActiveRtkConfiguration,
+): boolean {
+  return (
+    profile.casterAddress.trim().toLowerCase() ===
+      configuration.host.trim().toLowerCase() &&
+    Number.parseInt(profile.port || "2101", 10) === configuration.port &&
+    profile.mountpoint.trim().replace(/^\/+/, "") ===
+      configuration.mountpoint.trim().replace(/^\/+/, "") &&
+    profile.username.trim() === configuration.username.trim()
+  );
+}
+
+function statusLabel(
+  status: RtkStatusResponse | null,
+  connected: boolean,
+): string {
+  if (!connected) return "Disconnected";
+  if (!status) return "Loading";
+  if (status.rtk_fixed || status.fix_type >= 6) return "RTK Fixed";
+  if (status.fix_type === 5) return "RTK Float";
+  if (status.healthy && status.correction_fresh) return "Corrections Active";
+
+  const state = String(status.status || "")
+    .trim()
+    .toUpperCase();
+  if (state === "CONNECTING") return "Connecting";
+  if (state === "RELOADING") return "Reloading";
+  if (state === "RECONNECT_WAIT") return "Reconnecting";
+  if (state === "STARTING") return "Starting";
+  if (state === "CONNECTED") return "Connected";
+  if (state === "DISCONNECTED") return "Disconnected";
+  return state || "Unavailable";
+}
+
+export const RTKInjectionScreen: React.FC<Props> = ({
+  visible,
+  onClose,
+  isConnected,
+}) => {
+  const [modalScreen, setModalScreen] = useState<ModalScreen>("list");
+  const [selectedProfile, setSelectedProfile] = useState<NTRIPProfile | null>(
+    null,
+  );
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
-  const [isNtripRunning, setIsNtripRunning] = useState(false);
-  const [ntripBytes, setNtripBytes] = useState(0);
+  const [activeConfiguration, setActiveConfiguration] =
+    useState<ActiveRtkConfiguration | null>(null);
+  const [status, setStatus] = useState<RtkStatusResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const monitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const [loraStatus, setLoraStatus] = useState<LoraRTKStatus>({
-    status: 'disconnected',
-    message: 'Idle',
-    messages_received: 0,
-    bytes_received: 0,
-    error_count: 0,
-    is_connected: false,
-    is_running: false,
-  });
-  const [loraRunning, setLoraRunning] = useState(false);
-  const [loraConnected, setLoraConnected] = useState(false);
-
-  const stopMonitor = useCallback(() => {
-    if (monitorRef.current) {
-      clearInterval(monitorRef.current);
-      monitorRef.current = null;
-    }
-  }, []);
-
-  const startMonitor = useCallback(() => {
-    if (monitorRef.current) return;
-    monitorRef.current = setInterval(async () => {
-      try {
-        const status = await services.getRTKStatus();
-        if (status.success) {
-          const bytes = status.ntrip.total_bytes ?? 0;
-          setNtripBytes(bytes);
-          // Always sync running state from backend
-          setIsNtripRunning(Boolean(status.ntrip.running));
-          if (!status.ntrip.running) {
-            stopMonitor();
-          }
-        }
-      } catch (err) {
-        console.error('[RTKInjection] RTK monitor error:', err);
+  const findActiveLocalProfile = useCallback(
+    async (configuration: ActiveRtkConfiguration | null): Promise<void> => {
+      if (!configuration) {
+        setActiveProfileId(null);
+        return;
       }
-    }, 250);
-  }, [services, stopMonitor]);
 
-  useEffect(() => {
-    if (!visible) {
-      stopMonitor();
+      try {
+        const profiles = await getAllProfiles();
+        const match = profiles.find((profile) =>
+          profileMatchesConfiguration(profile, configuration),
+        );
+        setActiveProfileId(match?.id ?? null);
+      } catch (profileError) {
+        console.warn(
+          "[RTKInjection] Unable to match active local profile:",
+          profileError,
+        );
+      }
+    },
+    [],
+  );
+
+  const refreshConfiguration = useCallback(async (): Promise<void> => {
+    const response = await getRtkConfiguration();
+    const active = response.configuration.active;
+    setActiveConfiguration(active);
+    await findActiveLocalProfile(active);
+  }, [findActiveLocalProfile]);
+
+  const refreshStatus = useCallback(async (): Promise<void> => {
+    if (!visible || !isConnected) {
+      setStatus(null);
       return;
     }
 
-    const checkStatus = async () => {
-      try {
-        const status = await services.getRTKStatus();
-        if (status.success) {
-          setIsNtripRunning(Boolean(status.ntrip.running));
-          setNtripBytes(status.ntrip.total_bytes || 0);
-          if (status.ntrip.running) {
-            startMonitor();
-          }
-        }
-      } catch (err) {
-        console.error('[RTKInjection] Failed to load RTK status:', err);
-      }
-    };
+    try {
+      const nextStatus = await getRtkStatus();
+      setStatus(nextStatus);
+    } catch (statusError) {
+      console.warn("[RTKInjection] Failed to read RTK status:", statusError);
+      setStatus(null);
+    }
+  }, [isConnected, visible]);
 
-    checkStatus();
-  }, [services, startMonitor, stopMonitor, visible, rtkSource]);
+  const loadScreen = useCallback(async (): Promise<void> => {
+    if (!visible || !isConnected) {
+      setStatus(null);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await Promise.all([refreshConfiguration(), refreshStatus()]);
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load RTK configuration.";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isConnected, refreshConfiguration, refreshStatus, visible]);
 
   useEffect(() => {
     if (!visible) return;
-    if (!services.onLoraRTKStatus) return;
-
-    const unsubscribe = services.onLoraRTKStatus((payload) => {
-      setLoraStatus((prev) => ({ ...prev, ...payload }));
-      const connected = Boolean(payload.is_connected) || payload.status === 'connected' || payload.status === 'streaming';
-      const running = Boolean(payload.is_running) || payload.status === 'streaming';
-      setLoraConnected(connected);
-      setLoraRunning(running);
-    });
-
-    // Get initial LoRa status when component becomes visible
-    const initializeLoraStatus = async () => {
-      try {
-        const status = await services.getRTKStatus();
-        if (status.success && status.lora.running) {
-          setLoraRunning(true);
-          setLoraConnected(Boolean(status.lora.status?.is_connected));
-          if (status.lora.status) {
-            setLoraStatus((prev) => ({ ...prev, ...status.lora.status }));
-          }
-        } else {
-          setLoraRunning(false);
-          setLoraConnected(false);
-        }
-      } catch (err) {
-        console.error('[RTKInjection] Failed to get initial LoRa status:', err);
-      }
-    };
-
-    initializeLoraStatus();
-    services.getLoraRTKStatus?.();
-
-    return unsubscribe;
-  }, [services, visible]);
+    void loadScreen();
+  }, [loadScreen, visible]);
 
   useEffect(() => {
-    return () => stopMonitor();
-  }, [stopMonitor]);
+    if (!visible || !isConnected) return undefined;
 
-  const handleSwitchSource = async (source: RTKSource) => {
-    if (source === rtkSource) return;
+    const timer = setInterval(() => {
+      void refreshStatus();
+    }, 1000);
 
-    if (source === 'ntrip' && loraRunning) {
-      await services.stopLoRaStream().catch(() => undefined);
-      setLoraRunning(false);
-    } else if (source === 'lora' && isNtripRunning) {
-      await services.stopNTRIPStream().catch(() => undefined);
-      setIsNtripRunning(false);
-      stopMonitor();
+    return () => clearInterval(timer);
+  }, [isConnected, refreshStatus, visible]);
+
+  const handleSelectProfile = async (profile: NTRIPProfile): Promise<void> => {
+    if (!isConnected) {
+      Alert.alert(
+        "Rover Disconnected",
+        "Connect to the rover Wi-Fi before applying RTK settings.",
+      );
+      return;
     }
 
-    setRtkSource(source);
-  };
+    const host = profile.casterAddress.trim();
+    const port = Number.parseInt(profile.port || "2101", 10);
+    const mountpoint = profile.mountpoint.trim().replace(/^\/+/, "");
+    const username = profile.username.trim();
+    const password = profile.password.trim();
 
-  const handleSelectProfile = async (profile: NTRIPProfile) => {
+    if (
+      !host ||
+      !mountpoint ||
+      !username ||
+      !Number.isFinite(port) ||
+      port < 1 ||
+      port > 65535
+    ) {
+      Alert.alert(
+        "Invalid RTK Profile",
+        "Enter a valid caster host, port, mountpoint, and username.",
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     setFeedback(null);
     setError(null);
 
     try {
-      // Use new NTRIP endpoint with individual parameters
-      const response = await services.startNTRIPStream({
-        host: profile.casterAddress,
-        port: parseInt(profile.port, 10),
-        mountpoint: profile.mountpoint,
-        user: profile.username,
-        password: profile.password,
+      const response = await updateRtkConfiguration({
+        host,
+        port,
+        mountpoint,
+        username,
+        ...(password ? { password } : {}),
       });
 
-      if (response.success) {
-        setFeedback(response.message ?? 'RTK stream started successfully.');
-        setIsNtripRunning(true);
-        setActiveProfileId(profile.id);
-        
-        // Immediately start monitoring to sync state from backend
-        startMonitor();
-        
-        setTimeout(async () => {
-          try {
-            const status = await services.getRTKStatus();
-            if (status.success && status.ntrip.running) {
-              // Stream confirmed running - monitor already started
-              console.log('[RTKInjection] Stream verified running with', status.ntrip.total_bytes, 'bytes');
-            } else {
-              // Stream failed to start
-              setError('Stream started but backend reported not running.');
-              setIsNtripRunning(false);
-              setActiveProfileId(null);
-              stopMonitor();
-            }
-          } catch (err) {
-            console.warn('[RTKInjection] Status verification failed:', err);
-            // Monitor already running, keep it going
-          }
-        }, 1000);
-      } else {
-        setError(response.message ?? 'Failed to start RTK stream.');
-        Alert.alert('Connection Failed', response.message ?? 'Failed to start RTK stream.');
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to start RTK stream.';
-      setError(errorMsg);
-      Alert.alert('Error', errorMsg);
+      const savedConfiguration: ActiveRtkConfiguration = {
+        host: response.configuration.host,
+        port: response.configuration.port,
+        mountpoint: response.configuration.mountpoint,
+        username: response.configuration.username,
+        password_configured: response.configuration.password_configured,
+        caster_url: response.configuration.caster_url,
+      };
+
+      setActiveConfiguration(savedConfiguration);
+      setActiveProfileId(profile.id);
+      setFeedback(
+        response.message ||
+          "RTK configuration saved permanently. The rover is reconnecting automatically.",
+      );
+
+      await refreshStatus();
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Unable to save the RTK configuration.";
+      setError(message);
+      Alert.alert("RTK Configuration Failed", message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleAddNewProfile = () => {
-    setSelectedProfile(null);
-    setModalScreen('editor');
+  const handleReconnect = async (): Promise<void> => {
+    if (!isConnected) {
+      Alert.alert(
+        "Rover Disconnected",
+        "Connect to the rover Wi-Fi before reconnecting RTK.",
+      );
+      return;
+    }
+
+    setIsReconnecting(true);
+    setFeedback(null);
+    setError(null);
+
+    try {
+      const response = await reconnectRtk();
+      setFeedback(response.message || "RTK reconnect requested.");
+      await refreshStatus();
+    } catch (reconnectError) {
+      const message =
+        reconnectError instanceof Error
+          ? reconnectError.message
+          : "Unable to reconnect RTK.";
+      setError(message);
+      Alert.alert("RTK Reconnect Failed", message);
+    } finally {
+      setIsReconnecting(false);
+    }
   };
 
-  const handleEditProfile = (profile: NTRIPProfile) => {
+  const handleAddNewProfile = (): void => {
+    setSelectedProfile(null);
+    setModalScreen("editor");
+  };
+
+  const handleEditProfile = (profile: NTRIPProfile): void => {
     setSelectedProfile(profile);
-    setModalScreen('editor');
+    setModalScreen("editor");
   };
 
-  const handleProfileSaved = (profile: NTRIPProfile) => {
+  const handleProfileSaved = (): void => {
     setSelectedProfile(null);
-    setModalScreen('list');
-    setActiveProfileId((prev) => prev ?? profile.id);
+    setModalScreen("list");
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = (): void => {
     setSelectedProfile(null);
-    setModalScreen('list');
+    setModalScreen("list");
   };
-
-  const handleStopNtrip = async () => {
-    setIsSubmitting(true);
-    setFeedback(null);
-    setError(null);
-
-    try {
-      const response = await services.stopNTRIPStream();
-      if (response.success) {
-        setIsNtripRunning(false);
-        setActiveProfileId(null);
-        stopMonitor();
-        setFeedback(response.message ?? 'NTRIP stream stopped successfully.');
-      } else {
-        setError(response.message ?? 'Failed to stop NTRIP stream.');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop NTRIP stream.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleStartLora = async () => {
-    setFeedback(null);
-    setError(null);
-
-    try {
-      if (isNtripRunning) {
-        await services.stopNTRIPStream();
-        setIsNtripRunning(false);
-        stopMonitor();
-      }
-
-      const response = await services.startLoRaStream();
-      if (!response.success) {
-        setError(response.message ?? 'Failed to start LoRa stream.');
-        return;
-      }
-
-      setFeedback(response.message ?? 'LoRa stream started successfully.');
-      setLoraRunning(true);
-
-      // Update status from response if available
-      if (response.status) {
-        setLoraStatus((prev) => ({ ...prev, ...response.status }));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start LoRa stream.');
-    }
-  };
-
-  const handleStopLora = async () => {
-    setFeedback(null);
-    setError(null);
-
-    try {
-      const response = await services.stopLoRaStream();
-      if (!response.success) {
-        setError(response.message ?? 'Failed to stop LoRa stream.');
-        return;
-      }
-
-      setFeedback(response.message ?? 'LoRa stream stopped successfully.');
-      setLoraRunning(false);
-      setLoraConnected(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop LoRa stream.');
-    }
-  };
-
-  const ntripHeader = (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>NTRIP Caster</Text>
-      <View style={[styles.statusPill, isNtripRunning ? styles.pillSuccess : styles.pillDanger]}>
-        <Text style={styles.pillText}>{isNtripRunning ? 'Streaming' : 'Stopped'}</Text>
-      </View>
-    </View>
-  );
-
-  const loraHeader = (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>LoRa USB Receiver</Text>
-      <View style={[styles.statusPill, loraRunning ? styles.pillSuccess : styles.pillDanger]}>
-        <Text style={styles.pillText}>{loraRunning ? 'Streaming' : 'Stopped'}</Text>
-      </View>
-    </View>
-  );
-
-  const renderNtrip = () => (
-    <View style={styles.sectionCard}>
-      {ntripHeader}
-      {modalScreen === 'list' ? (
-        <NTRIPProfileList
-          onSelectProfile={handleSelectProfile}
-          onAddNew={handleAddNewProfile}
-          onEditProfile={handleEditProfile}
-          isConnecting={isSubmitting}
-          activeProfileId={activeProfileId}
-          isStreamRunning={isNtripRunning}
-        />
-      ) : (
-        <NTRIPProfileEditor
-          profile={selectedProfile}
-          onSave={handleProfileSaved}
-          onCancel={handleCancelEdit}
-        />
-      )}
-
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Bytes</Text>
-          <Text style={styles.summaryValue}>{(ntripBytes / 1024).toFixed(2)} KB</Text>
-        </View>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Status</Text>
-          <Text style={styles.summaryValue}>{isNtripRunning ? 'Running' : 'Stopped'}</Text>
-        </View>
-      </View>
-
-      <View style={styles.buttonRow}>
-        <TouchableOpacity
-          style={[styles.button, styles.buttonSecondary, styles.buttonSpacing, !isNtripRunning && styles.buttonDisabled]}
-          onPress={handleStopNtrip}
-          disabled={!isNtripRunning || isSubmitting}
-        >
-          <Text style={styles.buttonText}>Stop Stream</Text>
-        </TouchableOpacity>
-      </View>
-
-      {feedback && <Text style={styles.feedback}>{feedback}</Text>}
-      {error && <Text style={styles.error}>{error}</Text>}
-    </View>
-  );
-
-  const renderLora = () => (
-    <View style={styles.sectionCard}>
-      {loraHeader}
-
-      <View style={styles.loraStats}>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Connection</Text>
-          <Text style={styles.statValue}>{loraConnected ? 'Connected' : 'Not Connected'}</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Messages</Text>
-          <Text style={styles.statValue}>{loraStatus.messages_received ?? 0}</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Bytes</Text>
-          <Text style={styles.statValue}>{((loraStatus.bytes_received ?? 0) / 1024).toFixed(2)} KB</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Errors</Text>
-          <Text style={styles.statValue}>{loraStatus.error_count ?? 0}</Text>
-        </View>
-      </View>
-
-      <View style={styles.messageBox}>
-        <Text style={styles.messageLabel}>Status</Text>
-        <Text style={styles.messageValue}>{loraStatus.message || 'Waiting for status...'}</Text>
-      </View>
-
-      <View style={styles.buttonRow}>
-        <TouchableOpacity
-          style={[styles.button, styles.buttonPrimary, styles.buttonSpacing, loraRunning && styles.buttonDisabled]}
-          onPress={handleStartLora}
-          disabled={loraRunning}
-        >
-          <Text style={styles.buttonText}>Start Stream</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.button, styles.buttonSecondary, !loraRunning && styles.buttonDisabled]}
-          onPress={handleStopLora}
-          disabled={!loraRunning}
-        >
-          <Text style={styles.buttonText}>Stop Stream</Text>
-        </TouchableOpacity>
-      </View>
-
-      {feedback && <Text style={styles.feedback}>{feedback}</Text>}
-      {error && <Text style={styles.error}>{error}</Text>}
-    </View>
-  );
 
   if (!visible) return null;
+
+  const label = statusLabel(status, isConnected);
+  const isHealthy = Boolean(status?.healthy && status?.correction_fresh);
+  const isFixed = Boolean(status?.rtk_fixed || (status?.fix_type ?? 0) >= 6);
+  const isErrorState = Boolean(
+    isConnected &&
+    status &&
+    !status.healthy &&
+    ["DISCONNECTED", "UNAVAILABLE", "ERROR"].includes(
+      String(status.status || "").toUpperCase(),
+    ),
+  );
+
+  const pillStyle =
+    isFixed || isHealthy
+      ? styles.pillSuccess
+      : isErrorState || !isConnected
+        ? styles.pillDanger
+        : styles.pillPending;
 
   return (
     <View style={styles.overlay} pointerEvents="box-none">
@@ -418,26 +321,133 @@ export const RTKInjectionScreen: React.FC<Props> = ({ visible, onClose, services
             <Text style={styles.backText}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>RTK INJECTION</Text>
-          <View style={[styles.connectionDot, { backgroundColor: isConnected ? colors.success : colors.danger }]} />
+          <View
+            style={[
+              styles.connectionDot,
+              { backgroundColor: isConnected ? colors.success : colors.danger },
+            ]}
+          />
         </View>
 
-        <View style={styles.sourceToggle}>
-          <TouchableOpacity
-            style={[styles.toggleButton, rtkSource === 'ntrip' && styles.toggleActive]}
-            onPress={() => handleSwitchSource('ntrip')}
-          >
-            <Text style={[styles.toggleText, rtkSource === 'ntrip' && styles.toggleTextActive]}>NTRIP</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleButton, rtkSource === 'lora' && styles.toggleActive]}
-            onPress={() => handleSwitchSource('lora')}
-          >
-            <Text style={[styles.toggleText, rtkSource === 'lora' && styles.toggleTextActive]}>LoRa</Text>
-          </TouchableOpacity>
-        </View>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+        >
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>NTRIP Caster</Text>
+              <View style={[styles.statusPill, pillStyle]}>
+                <Text style={styles.pillText}>{label}</Text>
+              </View>
+            </View>
 
-        <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 32 }}>
-          {rtkSource === 'ntrip' ? renderNtrip() : renderLora()}
+            {!isConnected ? (
+              <View style={styles.messageBox}>
+                <Text style={styles.messageLabel}>Rover connection</Text>
+                <Text style={styles.messageValue}>
+                  Connect to the rover Wi-Fi to view or change RTK settings.
+                </Text>
+              </View>
+            ) : null}
+
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={styles.loadingText}>
+                  Loading RTK configuration...
+                </Text>
+              </View>
+            ) : modalScreen === "list" ? (
+              <NTRIPProfileList
+                onSelectProfile={handleSelectProfile}
+                onAddNew={handleAddNewProfile}
+                onEditProfile={handleEditProfile}
+                isConnecting={isSubmitting}
+                activeProfileId={activeProfileId}
+                isStreamRunning={Boolean(
+                  status?.healthy && status?.correction_fresh,
+                )}
+              />
+            ) : (
+              <NTRIPProfileEditor
+                profile={selectedProfile}
+                onSave={handleProfileSaved}
+                onCancel={handleCancelEdit}
+              />
+            )}
+
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Fix</Text>
+                <Text style={styles.summaryValue}>
+                  {status?.fix_name ?? "—"}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Satellites</Text>
+                <Text style={styles.summaryValue}>
+                  {status ? status.satellites_visible : "—"}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Correction</Text>
+                <Text style={styles.summaryValue}>
+                  {status?.correction_fresh ? "Fresh" : "Not Fresh"}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Correction Age</Text>
+                <Text style={styles.summaryValue}>
+                  {status?.correction_age_sec == null
+                    ? "—"
+                    : `${status.correction_age_sec.toFixed(2)} s`}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.messageBox}>
+              <Text style={styles.messageLabel}>Active caster</Text>
+              <Text style={styles.messageValue}>
+                {activeConfiguration
+                  ? `${activeConfiguration.host}:${activeConfiguration.port}/${activeConfiguration.mountpoint}`
+                  : "No RTK caster configuration saved"}
+              </Text>
+              {activeConfiguration ? (
+                <Text style={styles.messageSubValue}>
+                  User: {activeConfiguration.username} • Password:{" "}
+                  {activeConfiguration.password_configured
+                    ? "Configured"
+                    : "Missing"}
+                </Text>
+              ) : null}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.reconnectButton,
+                (!isConnected || isReconnecting || !activeConfiguration) &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={handleReconnect}
+              disabled={!isConnected || isReconnecting || !activeConfiguration}
+            >
+              {isReconnecting ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : null}
+              <Text style={styles.reconnectButtonText}>
+                {isReconnecting ? "Reconnecting..." : "Reconnect Saved RTK"}
+              </Text>
+            </TouchableOpacity>
+
+            <Text style={styles.helperText}>
+              Selecting a profile saves it permanently on the Jetson and
+              automatically reconnects the RTK bridge. You do not need to send
+              the profile again after a reboot.
+            </Text>
+
+            {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+          </View>
         </ScrollView>
       </View>
     </View>
@@ -447,26 +457,26 @@ export const RTKInjectionScreen: React.FC<Props> = ({ visible, onClose, services
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: "rgba(0,0,0,0.7)",
     zIndex: 20000,
     elevation: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   container: {
-    width: '92%',
-    height: '90%',
+    width: "92%",
+    height: "90%",
     backgroundColor: colors.primary,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    overflow: 'hidden',
+    overflow: "hidden",
     zIndex: 20001,
     elevation: 21,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -482,10 +492,10 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    textAlign: 'center',
+    textAlign: "center",
     color: colors.text,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
   },
   connectionDot: {
@@ -493,34 +503,13 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
   },
-  sourceToggle: {
-    flexDirection: 'row',
-    margin: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-  },
-  toggleActive: {
-    backgroundColor: colors.accent,
-  },
-  toggleText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  toggleTextActive: {
-    color: '#0A1628',
-  },
   body: {
     flex: 1,
     paddingHorizontal: 12,
+  },
+  bodyContent: {
+    paddingVertical: 12,
+    paddingBottom: 32,
   },
   sectionCard: {
     backgroundColor: colors.secondary,
@@ -530,15 +519,15 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
   },
   sectionTitle: {
     color: colors.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   statusPill: {
     paddingVertical: 6,
@@ -551,19 +540,33 @@ const styles = StyleSheet.create({
   pillDanger: {
     backgroundColor: colors.danger,
   },
+  pillPending: {
+    backgroundColor: colors.accent,
+  },
   pillText: {
-    color: '#0A1628',
-    fontWeight: '700',
+    color: "#0A1628",
+    fontWeight: "700",
     fontSize: 12,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    marginLeft: 10,
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginTop: 12,
-    marginBottom: 12,
+    marginHorizontal: -4,
   },
   summaryItem: {
-    flex: 1,
+    width: "50%",
+    padding: 4,
   },
   summaryLabel: {
     color: colors.textSecondary,
@@ -572,68 +575,8 @@ const styles = StyleSheet.create({
   summaryValue: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '600',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  buttonSpacing: {
-    marginRight: 10,
-  },
-  buttonPrimary: {
-    backgroundColor: colors.accent,
-  },
-  buttonSecondary: {
-    backgroundColor: colors.secondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: colors.text,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  feedback: {
-    marginTop: 10,
-    color: colors.success,
-  },
-  error: {
-    marginTop: 10,
-    color: colors.danger,
-  },
-  loraStats: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  statBox: {
-    flex: 1,
-    minWidth: '48%',
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  statLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "600",
+    marginTop: 2,
   },
   messageBox: {
     backgroundColor: colors.primary,
@@ -641,7 +584,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 10,
+    marginTop: 10,
   },
   messageLabel: {
     color: colors.textSecondary,
@@ -651,5 +594,42 @@ const styles = StyleSheet.create({
   messageValue: {
     color: colors.text,
     fontSize: 14,
+  },
+  messageSubValue: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 5,
+  },
+  reconnectButton: {
+    minHeight: 46,
+    marginTop: 12,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  reconnectButtonText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  helperText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+  },
+  feedback: {
+    marginTop: 10,
+    color: colors.success,
+  },
+  error: {
+    marginTop: 10,
+    color: colors.danger,
   },
 });

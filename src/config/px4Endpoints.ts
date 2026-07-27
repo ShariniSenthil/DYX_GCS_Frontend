@@ -147,15 +147,8 @@ export const PX4_PATH = {
 
 export const PX4_RTK = {
   STATUS: "/api/rtk/status",
-
-  /*
-   * RTK start/stop integration will be completed after the main mission
-   * backend integration. These are retained for current UI compatibility.
-   */
-  STOP: "/api/rtk/stop",
-  NTRIP_START: "/api/rtk/ntrip/start",
-  LORA_START: "/api/rtk/lora/start",
-  LORA_STOP: "/api/rtk/lora/stop",
+  CONFIG: "/api/rtk/config",
+  RECONNECT: "/api/rtk/reconnect",
 } as const;
 
 // ── Legacy spray compatibility ────────────────────────────────────────────────

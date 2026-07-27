@@ -1,28 +1,91 @@
 /**
  * TelemetryContext — 20Hz real-time rover telemetry (isolated)
  *
- * Split from RoverContext to prevent telemetry updates from causing
- * re-renders on mission/connection screens. Only components that render
- * live numbers (speed, battery, GPS, etc.) should subscribe here.
- *
- * Components needing BOTH telemetry + mission state should use the
- * split pattern:
- *   OuterComponent (reads useTelemetry(), passes primitives as props)
- *   → InnerComponent wrapped in React.memo (receives primitives only)
- *
- * NOTE: Cross-context socket event forwarding is handled by
- * SocketEventCoordinator, not this provider. TelemetryProvider
- * does NOT read from MissionContext.
+ * Live rover values are exposed only while Socket.IO reports a confirmed
+ * rover connection. During connecting, disconnected or error states, the UI
+ * receives a clean disconnected snapshot and no rover position.
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import useRoverTelemetry, {
-  UseRoverTelemetryResult,
-  RoverServices,
-} from '../hooks/useRoverTelemetry';
-import { RoverTelemetry, ConnectionState, GpsFailsafeMode, GpsFailsafeStatus, GpsFailsafeEvent } from '../types/telemetry';
-import type { Socket } from 'socket.io-client';
+  type RoverServices,
+} from "../hooks/useRoverTelemetry";
+import type {
+  ConnectionState,
+  GpsFailsafeMode,
+  GpsFailsafeStatus,
+  RoverTelemetry,
+} from "../types/telemetry";
+import type { Socket } from "socket.io-client";
 
+/**
+ * Safe empty snapshot exposed whenever the tablet is not currently connected
+ * to the rover backend through Socket.IO.
+ *
+ * This prevents the UI from continuing to show the last battery, GPS, RTK,
+ * position, mission and vehicle values after rover Wi-Fi is lost.
+ */
+const DISCONNECTED_TELEMETRY: RoverTelemetry = {
+  state: {
+    armed: false,
+    mode: "UNKNOWN",
+    system_status: "DISCONNECTED",
+    heartbeat_ts: 0,
+  },
+  global: {
+    lat: 0,
+    lon: 0,
+    alt_rel: 0,
+    vel: 0,
+    satellites_visible: 0,
+  },
+  battery: {
+    voltage: 0,
+    current: 0,
+    percentage: 0,
+  },
+  rtk: {
+    fix_type: 0,
+    baseline_age: 0,
+    base_linked: false,
+  },
+  mission: {
+    total_wp: 0,
+    current_wp: 0,
+    status: "DISCONNECTED",
+    progress_pct: 0,
+  },
+  servo: {
+    servo_id: 0,
+    active: false,
+    last_command_ts: 0,
+  },
+  network: {
+    connection_type: "none",
+    wifi_signal_strength: 0,
+    wifi_rssi: -100,
+    interface: "",
+    wifi_connected: false,
+    lora_connected: false,
+  },
+  hrms: 0,
+  vrms: 0,
+  imu_status: "DISCONNECTED",
+  lastMessageTs: null,
+  wp_dist_cm: undefined,
+  xtrack_cm: undefined,
+  wp_brg: undefined,
+  position_error_cm: undefined,
+  distance_to_next_m: undefined,
+};
 
 export interface TelemetryContextValue {
   telemetry: RoverTelemetry;
@@ -32,7 +95,6 @@ export interface TelemetryContextValue {
   services: RoverServices;
   onMissionEvent: (callback: (event: any) => void) => () => void;
   socket: Socket | null;
-  // GPS failsafe — derived from telemetry, managed here
   gpsFailsafeMode: GpsFailsafeMode;
   setGpsFailsafeMode: (mode: GpsFailsafeMode) => void;
   gpsFailsafeStatus: GpsFailsafeStatus | null;
@@ -47,115 +109,103 @@ interface TelemetryProviderProps {
   children: ReactNode;
 }
 
-export function TelemetryProvider({ children }: TelemetryProviderProps): React.ReactElement {
+export function TelemetryProvider({
+  children,
+}: TelemetryProviderProps): React.ReactElement {
   const rover = useRoverTelemetry();
+  const isRoverConnected = rover.connectionState === "connected";
 
-  const [gpsFailsafeMode, setGpsFailsafeModeState] = useState<GpsFailsafeMode>('disable');
-  const [gpsFailsafeStatus, setGpsFailsafeStatus] = useState<GpsFailsafeStatus | null>(null);
+  /**
+   * Even if an older REST request finishes after disconnection, consumers do
+   * not receive it until Socket.IO confirms that the rover is connected again.
+   */
+  const visibleTelemetry = useMemo<RoverTelemetry>(
+    () => (isRoverConnected ? rover.telemetry : DISCONNECTED_TELEMETRY),
+    [isRoverConnected, rover.telemetry],
+  );
 
-  // Update GPS failsafe status from telemetry
+  const visibleRoverPosition = isRoverConnected ? rover.roverPosition : null;
+
+  const [gpsFailsafeMode, setGpsFailsafeModeState] =
+    useState<GpsFailsafeMode>("disable");
+  const [gpsFailsafeStatus, setGpsFailsafeStatus] =
+    useState<GpsFailsafeStatus | null>(null);
+
   useEffect(() => {
-    if (rover.telemetry.gps_failsafe) {
-      setGpsFailsafeStatus(rover.telemetry.gps_failsafe);
+    if (!isRoverConnected) {
+      setGpsFailsafeStatus(null);
+      return;
     }
-  }, [rover.telemetry.gps_failsafe]);
+
+    if (visibleTelemetry.gps_failsafe) {
+      setGpsFailsafeStatus(visibleTelemetry.gps_failsafe);
+    }
+  }, [isRoverConnected, visibleTelemetry.gps_failsafe]);
 
   const setGpsFailsafeMode = useCallback((mode: GpsFailsafeMode) => {
     setGpsFailsafeModeState(mode);
-    // NRP_ROS LEGACY DISABLED — socket.emit('set_gps_failsafe_mode')
   }, []);
 
   const onFailsafeAcknowledge = useCallback(() => {
-    // NRP_ROS LEGACY DISABLED — socket.emit('failsafe_acknowledge')
+    // Reserved for backend integration.
   }, []);
 
   const onFailsafeResume = useCallback(() => {
-    // 4WD_SERVER — GPS safety abort recovery via REST
-    import('../services/missionLifecycleService').then(({ resumeMission }) => {
+    import("../services/missionLifecycleService").then(({ resumeMission }) => {
       resumeMission().catch(console.error);
     });
   }, []);
 
   const onFailsafeRestart = useCallback(() => {
-    // 4WD_SERVER — GPS safety abort recovery via REST
-    import('../services/missionLifecycleService').then(({ restartMission }) => {
+    import("../services/missionLifecycleService").then(({ restartMission }) => {
       restartMission().catch(console.error);
     });
   }, []);
 
-  // Listen for GPS failsafe events (mission_status forwarding moved to SocketEventCoordinator)
-  useEffect(() => {
-    if (!rover.socket || rover.connectionState !== 'connected') {
-      return;
-    }
-
-    const handleServoSuppressed = (event: GpsFailsafeEvent) => {
-      // Event received — logged at verbose level if needed
-    };
-
-    const handleFailsafeModeChanged = (data: { mode: GpsFailsafeMode }) => {
-      setGpsFailsafeModeState(data.mode);
-    };
-
-    // NRP_ROS LEGACY DISABLED — servo_suppressed / failsafe_mode_changed / request_gps_failsafe_mode
-    // rover.socket.on('servo_suppressed', handleServoSuppressed);
-    // rover.socket.on('failsafe_mode_changed', handleFailsafeModeChanged);
-    // rover.socket.emit('request_gps_failsafe_mode');
-
-    return () => {
-      // rover.socket?.off('servo_suppressed', handleServoSuppressed);
-      // rover.socket?.off('failsafe_mode_changed', handleFailsafeModeChanged);
-    };
-  }, [rover.socket, rover.connectionState]);
-
-  const contextValue = React.useMemo<TelemetryContextValue>(() => ({
-    telemetry: rover.telemetry,
-    roverPosition: rover.roverPosition,
-    connectionState: rover.connectionState,
-    reconnect: rover.reconnect,
-    services: rover.services,
-    onMissionEvent: rover.onMissionEvent,
-    socket: rover.socket,
-    gpsFailsafeMode,
-    setGpsFailsafeMode,
-    gpsFailsafeStatus,
-    onFailsafeAcknowledge,
-    onFailsafeResume,
-    onFailsafeRestart,
-  }), [
-    rover.telemetry,
-    rover.roverPosition,
-    rover.connectionState,
-    rover.reconnect,
-    rover.services,
-    rover.onMissionEvent,
-    rover.socket,
-    gpsFailsafeMode,
-    setGpsFailsafeMode,
-    gpsFailsafeStatus,
-    onFailsafeAcknowledge,
-    onFailsafeResume,
-    onFailsafeRestart,
-  ]);
+  const contextValue = useMemo<TelemetryContextValue>(
+    () => ({
+      telemetry: visibleTelemetry,
+      roverPosition: visibleRoverPosition,
+      connectionState: rover.connectionState,
+      reconnect: rover.reconnect,
+      services: rover.services,
+      onMissionEvent: rover.onMissionEvent,
+      socket: rover.socket,
+      gpsFailsafeMode,
+      setGpsFailsafeMode,
+      gpsFailsafeStatus,
+      onFailsafeAcknowledge,
+      onFailsafeResume,
+      onFailsafeRestart,
+    }),
+    [
+      visibleTelemetry,
+      visibleRoverPosition,
+      rover.connectionState,
+      rover.reconnect,
+      rover.services,
+      rover.onMissionEvent,
+      rover.socket,
+      gpsFailsafeMode,
+      setGpsFailsafeMode,
+      gpsFailsafeStatus,
+      onFailsafeAcknowledge,
+      onFailsafeResume,
+      onFailsafeRestart,
+    ],
+  );
 
   return React.createElement(
     TelemetryContext.Provider,
     { value: contextValue },
-    children
+    children,
   );
 }
 
-/**
- * Hook: useTelemetry
- *
- * Subscribe to 20Hz telemetry data. Components using this hook
- * will re-render on every telemetry tick (~20 times per second).
- * Only use this in components that render live numbers.
- */
 export function useTelemetry(): TelemetryContextValue {
   const ctx = useContext(TelemetryContext);
   if (!ctx) {
-    throw new Error('useTelemetry must be used within a TelemetryProvider');
+    throw new Error("useTelemetry must be used within a TelemetryProvider");
   }
   return ctx;
 }

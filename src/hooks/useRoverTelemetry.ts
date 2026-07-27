@@ -2086,7 +2086,7 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   }, [connectionState]);
 
   useEffect(() => {
-    if (isOfflineMode()) {
+  if (isOfflineMode() || connectionState !== 'connected') {
       if (robotStatusPollRef.current) {
         clearInterval(robotStatusPollRef.current);
         robotStatusPollRef.current = null;

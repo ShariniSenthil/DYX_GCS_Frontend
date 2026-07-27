@@ -1,25 +1,14 @@
 /**
- * Maps GET /api/rtk/status → partial telemetry envelope (RTK + LoRa link flag).
+ * Maps GET /api/rtk/status to the telemetry fields used by the rover UI.
+ * The current backend provides NTRIP corrections only; LoRa is not part of
+ * this contract.
  */
 
 import type { TelemetryEnvelope } from '../types/telemetry';
 import type { RtkStatusResponse } from '../services/rtkService';
 
 export function rtkStatusToEnvelope(status: RtkStatusResponse): TelemetryEnvelope {
-  const source = (status.active_source ?? status.mode ?? '').toLowerCase();
-  const loraActive =
-    Boolean(status.running) &&
-    (source.includes('lora') || Boolean(status.serial_open));
-  const ntripActive =
-    Boolean(status.running) &&
-    (source.includes('ntrip') || source.includes('tcp'));
-
-  const fixType =
-    typeof status.gps_fix_type === 'number'
-      ? status.gps_fix_type
-      : typeof status.fix_type === 'number'
-        ? status.fix_type
-        : undefined;
+  const correctionActive = Boolean(status.healthy && status.correction_fresh);
 
   const envelope: TelemetryEnvelope & {
     rtk_stream_active?: boolean;
@@ -27,15 +16,16 @@ export function rtkStatusToEnvelope(status: RtkStatusResponse): TelemetryEnvelop
   } = {
     timestamp: Date.now(),
     network: {
-      lora_connected: loraActive || ntripActive,
+      // Do not report the NTRIP internet stream as a LoRa connection.
+      lora_connected: false,
     },
     rtk: {
-      fix_type: fixType,
-      baseline_age: status.last_valid_rtcm_age_s ?? status.last_frame_age_s ?? 0,
-      base_linked: Boolean(status.running && (status.stream_healthy ?? status.healthy)),
+      fix_type: status.fix_type,
+      baseline_age: status.correction_age_sec ?? 0,
+      base_linked: correctionActive,
     },
-    rtk_stream_active: Boolean(status.running && (status.stream_healthy ?? status.healthy)),
-    rtk_source: status.active_source ?? status.mode,
+    rtk_stream_active: correctionActive,
+    rtk_source: 'ntrip',
   };
 
   return envelope;
