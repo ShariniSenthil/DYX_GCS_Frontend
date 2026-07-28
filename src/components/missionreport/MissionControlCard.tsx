@@ -123,7 +123,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       "→ isRunning:",
       isRunning,
       "isPaused:",
-      isPaused,
+      isPaused
     );
   }, [telemetry?.mission?.status]);
 
@@ -143,7 +143,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     "mission-control",
     "Mission Control",
     "mission",
-    false, // not critical - just UI controls
+    false // not critical - just UI controls
   );
 
   // Mark as ready once component mounts
@@ -158,12 +158,12 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   const showLocalToast = (
     type: "success" | "error" | "info",
     message?: string,
-    duration = 3000,
+    duration = 3000
   ) => {
     setToast({ visible: true, type, message });
     setTimeout(
       () => setToast({ visible: false, type: "info", message: undefined }),
-      duration,
+      duration
     );
   };
 
@@ -195,7 +195,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       console.error("[MissionControlCard] Start Error:", error);
       showLocalToast(
         "error",
-        (error as any)?.message ?? "Failed to start mission",
+        (error as any)?.message ?? "Failed to start mission"
       );
     } finally {
       setIsStarting(false);
@@ -229,7 +229,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
       showLocalToast(
         "error",
-        error instanceof Error ? error.message : "Failed to stop mission",
+        error instanceof Error ? error.message : "Failed to stop mission"
       );
     } finally {
       setIsStopping(false);
@@ -268,7 +268,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       } else {
         showLocalToast(
           "error",
-          response?.message || "Failed to resume mission",
+          response?.message || "Failed to resume mission"
         );
       }
       return response;
@@ -290,7 +290,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       } else {
         showLocalToast(
           "error",
-          response?.message || "Failed to move to next marking point",
+          response?.message || "Failed to move to next marking point"
         );
       }
       return response;
@@ -312,7 +312,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       } else {
         showLocalToast(
           "error",
-          response?.message || "Failed to skip marking point",
+          response?.message || "Failed to skip marking point"
         );
       }
       return response;
@@ -330,7 +330,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       showLocalToast(
         "info",
         "Stop the mission before changing AUTO or MANUAL mode.",
-        4000,
+        4000
       );
       return;
     }
@@ -400,12 +400,12 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
               {isStarting
                 ? "⏳ Starting..."
                 : isStopping
-                  ? "⏳ Stopping..."
-                  : isRunning
-                    ? "STOP"
-                    : !isMissionLoaded
-                      ? "NO MISSION"
-                      : "START"}
+                ? "⏳ Stopping..."
+                : isRunning
+                ? "STOP"
+                : !isMissionLoaded
+                ? "NO MISSION"
+                : "START"}
             </Text>
           </TouchableOpacity>
 
@@ -423,49 +423,51 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             </Text>
           </TouchableOpacity>
 
+          {/* NEXT MARK — MANUAL MODE ONLY */}
           {mode === "MANUAL" && (
-            <>
-              {/* NEXT MARK — MANUAL MODE ONLY */}
+            <TouchableOpacity
+              style={[
+                styles.controlButton,
+                styles.nextButton,
+                waitingForManual && styles.nextButtonWaiting,
+                (!isRunning || isNexting) && styles.buttonDisabled,
+              ]}
+              onPress={handleNext}
+              disabled={!isRunning || isNexting}
+            >
+              <Text style={styles.buttonText}>
+                {isNexting
+                  ? "⏳ Moving..."
+                  : waitingForManual
+                  ? "👆 NEXT MARK"
+                  : "NEXT MARK"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* SKIP POINT — AVAILABLE IN AUTO AND MANUAL */}
+          {(mode === "AUTO" || mode === "MANUAL") && (
+            <View style={styles.skipRow}>
               <TouchableOpacity
                 style={[
                   styles.controlButton,
-                  styles.nextButton,
-                  waitingForManual && styles.nextButtonWaiting,
-                  (!isRunning || isNexting) && styles.buttonDisabled,
+                  styles.skipButton,
+                  (!isRunning || isSkipping) && styles.buttonDisabled,
+                  {
+                    flex: 1,
+                    position: "relative",
+                  },
                 ]}
-                onPress={handleNext}
-                disabled={!isRunning || isNexting}
+                onPress={() =>
+                  showConfirmDialog("Skip Current Point", handleSkip)
+                }
+                disabled={!isRunning || isSkipping}
               >
                 <Text style={styles.buttonText}>
-                  {isNexting
-                    ? "⏳ Moving..."
-                    : waitingForManual
-                      ? "👆 NEXT MARK"
-                      : "NEXT MARK"}
+                  {isSkipping ? "⏳ Skipping..." : "SKIP POINT"}
                 </Text>
               </TouchableOpacity>
-
-              {/* SKIP MARK — MANUAL MODE ONLY */}
-              <View style={styles.skipRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.controlButton,
-                    styles.skipButton,
-                    (!isRunning || isSkipping) && styles.buttonDisabled,
-                    {
-                      flex: 1,
-                      position: "relative",
-                    },
-                  ]}
-                  onPress={handleSkip}
-                  disabled={!isRunning || isSkipping}
-                >
-                  <Text style={styles.buttonText}>
-                    {isSkipping ? "⏳ Skipping..." : "SKIP MARK"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
+            </View>
           )}
 
           {/* AUTO / MANUAL MODE SELECTION */}
@@ -617,7 +619,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                       .toUpperCase();
                     if (missionStatus !== "PAUSED") {
                       setBulkError(
-                        "Mission must be PAUSED to perform bulk skip",
+                        "Mission must be PAUSED to perform bulk skip"
                       );
                       return;
                     }
@@ -641,10 +643,10 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                       } catch (err) {
                         console.error(
                           "[MissionControlCard] bulk skip error",
-                          err,
+                          err
                         );
                         setBulkError(
-                          (err as any)?.message || "Bulk skip error",
+                          (err as any)?.message || "Bulk skip error"
                         );
                       } finally {
                         setIsBulkSubmitting(false);

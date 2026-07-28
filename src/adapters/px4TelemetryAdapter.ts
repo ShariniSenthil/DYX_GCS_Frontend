@@ -10,7 +10,7 @@
  *   Implementation plan §Phase 3 field mapping table
  */
 
-import type { Px4TelemetryData } from '../types/px4/telemetry';
+import type { Px4TelemetryData } from "../types/px4/telemetry";
 import type {
   RoverTelemetry,
   TelemetryState,
@@ -20,8 +20,8 @@ import type {
   TelemetryMission,
   ServoStatus,
   NetworkData,
-} from '../types/telemetry';
-import { normalizePx4Mode } from './px4ModeAdapter';
+} from "../types/telemetry";
+import { normalizePx4Mode } from "./px4ModeAdapter";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -30,36 +30,36 @@ import { normalizePx4Mode } from './px4ModeAdapter';
  * PX4 payloads have `pos_n` / `pos_e` (NED); ArduRover has `state.armed` or `position`.
  */
 export function isPx4Payload(data: unknown): data is Px4TelemetryData {
-  if (!data || typeof data !== 'object') return false;
+  if (!data || typeof data !== "object") return false;
   const d = data as Record<string, unknown>;
   // PX4 flat dict — accept any of these top-level fields (backend may omit null keys).
   return (
-    'pos_n' in d ||
-    'pos_e' in d ||
-    ('lat' in d && 'lon' in d) ||
-    'battery_pct' in d ||
-    'gps_fix' in d ||
-    'rpp_state' in d ||
-    'heading_ned_deg' in d
+    "pos_n" in d ||
+    "pos_e" in d ||
+    ("lat" in d && "lon" in d) ||
+    "battery_pct" in d ||
+    "gps_fix" in d ||
+    "rpp_state" in d ||
+    "heading_ned_deg" in d
   );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const safeNum = (v: unknown, fallback = 0): number => {
-  const n = typeof v === 'number' ? v : parseFloat(v as string);
+  const n = typeof v === "number" ? v : parseFloat(v as string);
   return isNaN(n) || !isFinite(n) ? fallback : n;
 };
 
 const safeBool = (v: unknown, fallback = false): boolean => {
-  if (typeof v === 'boolean') return v;
-  if (v === 1 || v === '1' || v === 'true') return true;
-  if (v === 0 || v === '0' || v === 'false') return false;
+  if (typeof v === "boolean") return v;
+  if (v === 1 || v === "1" || v === "true") return true;
+  if (v === 0 || v === "0" || v === "false") return false;
   return fallback;
 };
 
 const optionalNum = (v: unknown): number | null => {
-  const n = typeof v === 'number' ? v : parseFloat(v as string);
+  const n = typeof v === "number" ? v : parseFloat(v as string);
   return isFinite(n) ? n : null;
 };
 
@@ -82,12 +82,12 @@ function mapGpsFix(fix: unknown): number {
  */
 export function toRoverTelemetry(
   flat: Px4TelemetryData,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): RoverTelemetry {
   const state: TelemetryState = {
     armed: safeBool(flat.armed),
     mode: normalizePx4Mode(flat.mode),
-    system_status: flat.connected ? 'ACTIVE' : 'STANDBY',
+    system_status: flat.connected ? "ACTIVE" : "STANDBY",
     heartbeat_ts: now,
   };
 
@@ -119,10 +119,10 @@ export function toRoverTelemetry(
   } = {
     total_wp: 0,
     current_wp: 0,
-    status: 'IDLE',
+    status: "IDLE",
     progress_pct: 0,
     rpp_state: safeNum(flat.rpp_state),
-    rpp_state_name: flat.rpp_state_name ?? '',
+    rpp_state_name: flat.rpp_state_name ?? "",
     dist_to_goal_m: safeNum(flat.dist_to_goal_m),
     xtrack_m: safeNum(flat.xtrack_m),
   };
@@ -138,7 +138,7 @@ export function toRoverTelemetry(
     active: safeBool(flat.spraying),
     last_command_ts: now,
     spraying: safeBool(flat.spraying),
-    marking_state: flat.marking_state ?? 'idle',
+    marking_state: flat.marking_state ?? "idle",
     commanded_on: safeBool(flat.commanded_on),
     confirmed_off: safeBool(flat.confirmed_off),
     dash_feasible: safeBool(flat.dash_feasible),
@@ -146,17 +146,19 @@ export function toRoverTelemetry(
 
   // Jetson Wi-Fi/Ethernet comes from GET /api/network poll — not FCU `connected`.
   const network: NetworkData = {
-    connection_type: 'none',
+    connection_type: "none",
     wifi_signal_strength: 0,
     wifi_rssi: -100,
-    interface: '',
+    interface: "",
     wifi_connected: false,
     lora_connected: false,
   };
 
   const imuLabel =
     flat.imu_status ??
-    (flat.rpp_debug_fresh === false ? 'RPP STALE' : flat.rpp_state_name ?? 'OK');
+    (flat.rpp_debug_fresh === false
+      ? "RPP STALE"
+      : flat.rpp_state_name ?? "OK");
 
   return {
     state,
@@ -174,7 +176,29 @@ export function toRoverTelemetry(
     gps_fix_name: flat.gps_fix_name,
     rpp_state_name: flat.rpp_state_name,
     xtrack_cm: safeNum(flat.xtrack_m) * 100,
-    distance_to_next_m: safeNum(flat.dist_to_goal_m),
+    distance_to_next_m: (() => {
+      const payload = flat as Px4TelemetryData & {
+        dist_to_goal?: unknown;
+        wp_dist_cm?: unknown;
+      };
+
+      if (
+        payload.dist_to_goal_m !== null &&
+        payload.dist_to_goal_m !== undefined
+      ) {
+        return Math.max(0, safeNum(payload.dist_to_goal_m));
+      }
+
+      if (payload.dist_to_goal !== null && payload.dist_to_goal !== undefined) {
+        return Math.max(0, safeNum(payload.dist_to_goal));
+      }
+
+      if (payload.wp_dist_cm !== null && payload.wp_dist_cm !== undefined) {
+        return Math.max(0, safeNum(payload.wp_dist_cm) / 100);
+      }
+
+      return undefined;
+    })(),
     attitude: { yaw_deg: safeNum(flat.heading_ned_deg) },
     measured_speed_m_s: optionalNum(flat.measured_speed_m_s),
     along_track_speed_mps: optionalNum(flat.along_track_speed_mps),
@@ -202,7 +226,7 @@ export function mergeMissionStatus(
     speed?: number;
     xtrack?: number;
     path_name?: string;
-  },
+  }
 ): RoverTelemetry {
   const missionPatch: Partial<TelemetryMission> & {
     rpp_state?: number;
@@ -210,19 +234,22 @@ export function mergeMissionStatus(
   } = {
     status: status.state ?? base.mission.status,
     rpp_state: status.rpp_state ?? (base.mission as any).rpp_state,
-    rpp_state_name: status.rpp_state_name ?? (base.mission as any).rpp_state_name,
+    rpp_state_name:
+      status.rpp_state_name ?? (base.mission as any).rpp_state_name,
   };
 
   return {
     ...base,
     mission: { ...base.mission, ...missionPatch },
     distance_to_next_m:
-      typeof status.dist_to_goal === 'number' ? status.dist_to_goal : base.distance_to_next_m,
+      typeof status.dist_to_goal === "number"
+        ? status.dist_to_goal
+        : base.distance_to_next_m,
     xtrack_cm:
-      typeof status.xtrack === 'number' ? status.xtrack * 100 : base.xtrack_cm,
+      typeof status.xtrack === "number" ? status.xtrack * 100 : base.xtrack_cm,
     global: {
       ...base.global,
-      vel: typeof status.speed === 'number' ? status.speed : base.global.vel,
+      vel: typeof status.speed === "number" ? status.speed : base.global.vel,
     },
   };
 }
