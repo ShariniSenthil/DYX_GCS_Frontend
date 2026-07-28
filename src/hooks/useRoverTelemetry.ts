@@ -1537,10 +1537,17 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
       pendingDispatchRef.current = null;
     }
 
+    socketGenerationRef.current += 1;
+    socketConnectedAtRef.current = null;
+    hasLiveTelemetryRef.current = false;
+
     const defaultTelemetry = createDefaultTelemetry();
+
     mutableRef.current.telemetry = defaultTelemetry;
     mutableRef.current.lastEnvelopeTs = null;
+
     setTelemetrySnapshot(defaultTelemetry);
+    setHasLiveTelemetry(false);
   }, [clearReconnectTimer]);
 
   const scheduleReconnect = useCallback(() => {
@@ -1654,6 +1661,8 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         );
         socketRef.current = socket;
 
+        let connectionGeneration: number | null = null;
+
         socket.on("connect", () => {
           telemetryDiagLog("Socket connected", {
             id: socket.id,
@@ -1671,6 +1680,16 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
            */
           socketGenerationRef.current += 1;
 
+          /*
+           * Store the generation belonging to this successfully connected socket.
+           */
+          connectionGeneration = socketGenerationRef.current;
+          console.log("[SOCKET] ✅ Connected successfully", {
+            id: socket.id,
+            backendUrl,
+            generation: connectionGeneration,
+            transport: socket.io.engine?.transport?.name ?? "unknown",
+          });
           socketConnectedAtRef.current = Date.now();
 
           hasLiveTelemetryRef.current = false;
@@ -1716,32 +1735,47 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         // socket.on('mission_status_subscribed', (data: any) => { ... });
 
         socket.on("connect_error", (error: any) => {
-          const backendUrl = getHttpBase();
+          const message =
+            error instanceof Error ? error.message : String(error);
+
           telemetryDiagLog("Socket connect_error", {
-            message: error.message || String(error),
-            code: error.code,
+            message,
+            code: error?.code,
             url: backendUrl,
             hasToken,
           });
-          if (!isOfflineMode()) {
-            console.error("[SOCKET] Connection error:", error.message || error);
-            if (
-              error.message?.includes("unauthorised") ||
-              error.message?.includes("unauthorized")
-            ) {
-              console.error(
-                "[SOCKET] Auth rejected — re-enter password on discovery screen"
-              );
-            }
+
+          console.error("[SOCKET] Connection error:", message);
+
+          if (
+            message.toLowerCase().includes("unauthorized") ||
+            message.toLowerCase().includes("unauthorised")
+          ) {
+            console.error(
+              "[SOCKET] Authentication rejected. Log out and log in again."
+            );
           }
 
           patchRobotStatusDebug({
             connectionState: "error",
             socketConnected: false,
-            rejectReason: error.message ?? "connect_error",
+            rejectReason: message,
           });
+
           resetTelemetry();
           setConnectionState("error");
+
+          /*
+           * Destroy this failed socket completely.
+           * The next connection will load the latest saved authentication token.
+           */
+          socket.removeAllListeners();
+          socket.disconnect();
+
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+          }
+
           scheduleReconnect();
         });
 
@@ -1751,10 +1785,9 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           });
 
           socketGenerationRef.current += 1;
-
           socketConnectedAtRef.current = null;
-
           hasLiveTelemetryRef.current = false;
+          connectionGeneration = null;
 
           const emptyTelemetry = createDefaultTelemetry();
 
@@ -1763,57 +1796,30 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           mutableRef.current.lastEnvelopeTs = null;
 
           setTelemetrySnapshot(emptyTelemetry);
-
           setHasLiveTelemetry(false);
 
           if (manualDisconnectRef.current) {
             manualDisconnectRef.current = false;
-
             return;
           }
 
           setConnectionState("disconnected");
 
-          if (reason === "io server disconnect") {
-            socket.connect();
-          } else {
-            scheduleReconnect();
+          if (socketRef.current === socket) {
+            socketRef.current = null;
           }
+
+          /*
+           * Do not call socket.connect() here.
+           * Create a fresh authenticated socket instead.
+           */
+          scheduleReconnect();
         });
 
         socket.on("error", (error: any) => {
           if (!isOfflineMode()) {
             console.error("[SOCKET] Error:", error);
           }
-          setConnectionState("error");
-        });
-
-        socket.io.on("reconnect", (attempt: any) => {
-          console.log("[SOCKET] Reconnected after", attempt, "attempts");
-          clearReconnectTimer();
-          backoffRef.current = INITIAL_BACKOFF_MS;
-          setConnectionState("connected");
-        });
-
-        socket.io.on("reconnect_attempt", () => {
-          if (!isOfflineMode()) {
-            console.log("[SOCKET] Reconnecting...");
-          }
-          setConnectionState("connecting");
-        });
-
-        socket.io.on("reconnect_error", (error: any) => {
-          if (!isOfflineMode()) {
-            console.error("[SOCKET] Reconnect error:", error);
-          }
-          setConnectionState("error");
-        });
-
-        socket.io.on("reconnect_failed", () => {
-          if (!isOfflineMode()) {
-            console.error("[SOCKET] Reconnect failed");
-          }
-          clearReconnectTimer();
           setConnectionState("error");
         });
 
@@ -1830,13 +1836,15 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         // socket.on('vehicle_telemetry', handleBridgeTelemetry.current);
 
         // 4WD_SERVER — flat telemetry socket contract
-        const connectionGeneration = socketGenerationRef.current;
 
         socket.on(SOCKET_EVENTS.TELEMETRY, (payload: unknown) => {
           /*
            * Reject packets handled by an older socket connection.
            */
-          if (connectionGeneration !== socketGenerationRef.current) {
+          if (
+            connectionGeneration === null ||
+            connectionGeneration !== socketGenerationRef.current
+          ) {
             return;
           }
 
@@ -1850,33 +1858,40 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
             return;
           }
 
-          const generatedAt = getTelemetryGeneratedTime(payload);
+          const backendGeneratedAt = getTelemetryGeneratedTime(payload);
 
           /*
-           * The backend must provide a timestamp.
-           * Without it, the frontend cannot prove that the packet is current.
+           * A packet received through the currently connected socket is treated as live.
+           * When the backend later supplies generated_at, that backend timestamp is used.
            */
-          if (generatedAt === null) {
-            telemetryDiagLog(
-              "Telemetry rejected: missing generated_at or timestamp"
-            );
-
-            return;
-          }
+          const generatedAt = backendGeneratedAt ?? Date.now();
 
           const CLOCK_TOLERANCE_MS = 500;
 
           /*
            * Reject telemetry generated before this connection.
            */
-          if (generatedAt < connectedAt - CLOCK_TOLERANCE_MS) {
+          if (
+            backendGeneratedAt !== null &&
+            backendGeneratedAt < connectedAt - CLOCK_TOLERANCE_MS
+          ) {
             telemetryDiagLog("Telemetry rejected: packet predates connection", {
-              generatedAt,
+              backendGeneratedAt,
               connectedAt,
             });
 
             return;
           }
+
+          console.log("[TELEMETRY] Live packet received", {
+            generation: connectionGeneration,
+            currentGeneration: socketGenerationRef.current,
+            hasBackendTimestamp: getTelemetryGeneratedTime(payload) !== null,
+            keys:
+              payload && typeof payload === "object"
+                ? Object.keys(payload as Record<string, unknown>).slice(0, 20)
+                : [],
+          });
 
           const raw =
             payload && typeof payload === "object"
@@ -1912,6 +1927,16 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           const adapted = toRoverTelemetry(
             payload as Parameters<typeof toRoverTelemetry>[0]
           );
+
+          console.log("[TELEMETRY] Adapted values", {
+            lat: adapted.global.lat,
+            lon: adapted.global.lon,
+            battery: adapted.battery.percentage,
+            satellites: adapted.global.satellites_visible,
+            fixType: adapted.rtk.fix_type,
+            mode: adapted.state.mode,
+            fcuConnected: adapted.fcu_connected,
+          });
 
           const envelope: TelemetryEnvelope = {
             timestamp: generatedAt,

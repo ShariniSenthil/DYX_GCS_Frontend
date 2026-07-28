@@ -11,7 +11,7 @@
  * - Falls back to environment variables or defaults
  */
 
-import { getSavedBackendURL } from './utils/backendStorage';
+import { getSavedBackendURL } from "./utils/backendStorage";
 
 // Default fallback values (supports multiple env variable names).
 // The hardcoded IP is a last-resort development fallback only — in production
@@ -39,18 +39,14 @@ let _offlineMode = false;
 /**
  * Remove trailing slashes so endpoint construction remains consistent.
  */
-function normalizeBackendURL(
-  url: string,
-): string {
+function normalizeBackendURL(url: string): string {
   return url.trim().replace(/\/+$/, "");
 }
 
 /**
  * Convert an HTTP backend address into a WebSocket address.
  */
-function createWebSocketURL(
-  backendURL: string,
-): string {
+function createWebSocketURL(backendURL: string): string {
   return normalizeBackendURL(backendURL)
     .replace(/^http:\/\//i, "ws://")
     .replace(/^https:\/\//i, "wss://");
@@ -63,47 +59,28 @@ function createWebSocketURL(
  */
 export async function initializeBackendURL(): Promise<void> {
   try {
-    const savedURL =
-      await getSavedBackendURL();
+    const savedURL = await getSavedBackendURL();
 
     if (savedURL) {
-      const normalizedURL =
-        normalizeBackendURL(savedURL);
+      const normalizedURL = normalizeBackendURL(savedURL);
 
-      dynamicBackendURL =
-        normalizedURL;
+      dynamicBackendURL = normalizedURL;
 
-      dynamicWsURL =
-        createWebSocketURL(
-          normalizedURL,
-        );
+      dynamicWsURL = createWebSocketURL(normalizedURL);
 
       _offlineMode =
-        normalizedURL.includes(
-          "localhost",
-        ) ||
-        normalizedURL.includes(
-          "127.0.0.1",
-        );
+        normalizedURL.includes("localhost") ||
+        normalizedURL.includes("127.0.0.1");
 
       return;
     }
   } catch (error) {
-    console.warn(
-      "[config] Could not restore saved backend URL:",
-      error,
-    );
+    console.warn("[config] Could not restore saved backend URL:", error);
   }
 
-  dynamicBackendURL =
-    normalizeBackendURL(
-      DEFAULT_BACKEND_URL,
-    );
+  dynamicBackendURL = normalizeBackendURL(DEFAULT_BACKEND_URL);
 
-  dynamicWsURL =
-    createWebSocketURL(
-      DEFAULT_WS_URL,
-    );
+  dynamicWsURL = createWebSocketURL(DEFAULT_WS_URL);
 
   _offlineMode = false;
 }
@@ -111,27 +88,15 @@ export async function initializeBackendURL(): Promise<void> {
 /**
  * Set the active rover backend address.
  */
-export function setBackendURL(
-  url: string,
-): void {
-  const normalizedURL =
-    normalizeBackendURL(url);
+export function setBackendURL(url: string): void {
+  const normalizedURL = normalizeBackendURL(url);
 
-  dynamicBackendURL =
-    normalizedURL;
+  dynamicBackendURL = normalizedURL;
 
-  dynamicWsURL =
-    createWebSocketURL(
-      normalizedURL,
-    );
+  dynamicWsURL = createWebSocketURL(normalizedURL);
 
   _offlineMode =
-    normalizedURL.includes(
-      "localhost",
-    ) ||
-    normalizedURL.includes(
-      "127.0.0.1",
-    );
+    normalizedURL.includes("localhost") || normalizedURL.includes("127.0.0.1");
 }
 
 /**
@@ -145,12 +110,7 @@ export function isOfflineMode(): boolean {
  * Return the currently selected backend HTTP address.
  */
 export function getBackendURL(): string {
-  return (
-    dynamicBackendURL ||
-    normalizeBackendURL(
-      DEFAULT_BACKEND_URL,
-    )
-  );
+  return dynamicBackendURL || normalizeBackendURL(DEFAULT_BACKEND_URL);
 }
 
 /**
@@ -159,12 +119,7 @@ export function getBackendURL(): string {
  * Socket.IO still uses the configured `/socket.io/` path separately.
  */
 export function getWsURL(): string {
-  return (
-    dynamicWsURL ||
-    createWebSocketURL(
-      DEFAULT_WS_URL,
-    )
-  );
+  return dynamicWsURL || createWebSocketURL(DEFAULT_WS_URL);
 }
 
 /**
@@ -184,29 +139,33 @@ export const WS_URL = DEFAULT_WS_URL;
  * Optimized for high-frequency telemetry data
  */
 export const SOCKET_CONFIG = {
-  // Use WebSocket first for real-time performance, fallback to polling
-  transports: ['websocket', 'polling'],
-  // Reconnect settings - reduced for faster recovery
-  reconnection: true,
-  reconnectionAttempts: 10,
-  reconnectionDelay: 500,
-  reconnectionDelayMax: 2000,
-  // Fast timeout for quick WebSocket attempt, then fallback to polling
-  timeout: 5000,
-  // Don't auto-connect, we'll control it
-  autoConnect: false,
-  // Socket.IO path
-  path: '/socket.io/',
-  // Fast ping for real-time telemetry
-  pingInterval: 5000,
-  pingTimeout: 3000,
-  // Force WebSocket upgrade
-  upgrade: true,
-  rememberUpgrade: true,
-  // Force new connection to avoid stale state
-  forceNew: false,
-};
+  /*
+   * Establish a reliable HTTP polling connection first,
+   * then upgrade to WebSocket automatically.
+   */
+  transports: ["polling", "websocket"],
 
+  reconnection: false,
+
+  timeout: 10000,
+
+  autoConnect: false,
+
+  path: "/socket.io/",
+
+  upgrade: true,
+
+  /*
+   * Do not reuse an earlier failed WebSocket decision.
+   */
+  rememberUpgrade: false,
+
+  /*
+   * Do not reuse a manager containing an old authentication token.
+   */
+  forceNew: true,
+  multiplex: false,
+};
 /**
  * NRP_ROS / ArduRover legacy API catalog — DISABLED (reference only).
  * Do not call these routes; use PX4_API_ENDPOINTS / px4Endpoints.ts instead.
@@ -247,46 +206,46 @@ export const SOCKET_CONFIG = {
  */
 export const API_ENDPOINTS = {
   // Auth
-  AUTH_LOGIN: '/api/auth/login',
-  AUTH_LOGOUT: '/api/auth/logout',
-  AUTH_CHANGE_PASSWORD: '/api/auth/change-password',
+  AUTH_LOGIN: "/api/auth/login",
+  AUTH_LOGOUT: "/api/auth/logout",
+  AUTH_CHANGE_PASSWORD: "/api/auth/change-password",
   // System
-  PING: '/api/ping',
-  HEALTHZ: '/api/healthz',
+  PING: "/api/ping",
+  HEALTHZ: "/api/healthz",
   // Telemetry
-  TELEMETRY_LATEST: '/api/telemetry/latest',
+  TELEMETRY_LATEST: "/api/telemetry/latest",
   // Vehicle
-  ARM: '/api/arm',
-  SET_MODE: '/api/set_mode',
-  ESTOP: '/api/estop',
+  ARM: "/api/arm",
+  SET_MODE: "/api/set_mode",
+  ESTOP: "/api/estop",
   // Mission
-  MISSION_START: '/api/mission/start',
-  MISSION_STOP: '/api/mission/stop',
-  MISSION_ABORT: '/api/mission/abort',
-  MISSION_PAUSE: '/api/mission/pause',
-  MISSION_RESUME: '/api/mission/resume',
-  MISSION_RESTART: '/api/mission/restart',
-  MISSION_CLEAR: '/api/mission/clear',
-  MISSION_STATUS: '/api/mission/status',
-  MISSION_LOADED_PATH: '/api/mission/loaded-path',
-  POINT_CONTINUE: '/api/mission/point/continue',
-  POINT_SKIP: '/api/mission/point/skip',
-  POINT_EVENTS: '/api/mission/point/events',
-  POINT_STATUS: '/api/mission/point/status',
+  MISSION_START: "/api/mission/start",
+  MISSION_STOP: "/api/mission/stop",
+  MISSION_ABORT: "/api/mission/abort",
+  MISSION_PAUSE: "/api/mission/pause",
+  MISSION_RESUME: "/api/mission/resume",
+  MISSION_RESTART: "/api/mission/restart",
+  MISSION_CLEAR: "/api/mission/clear",
+  MISSION_STATUS: "/api/mission/status",
+  MISSION_LOADED_PATH: "/api/mission/loaded-path",
+  POINT_CONTINUE: "/api/mission/point/continue",
+  POINT_SKIP: "/api/mission/point/skip",
+  POINT_EVENTS: "/api/mission/point/events",
+  POINT_STATUS: "/api/mission/point/status",
   // Path staging
-  PATHS_LIST: '/api/paths',
-  PATH_LOAD_TO_CONTROLLER: '/api/path/load-to-controller',
+  PATHS_LIST: "/api/paths",
+  PATH_LOAD_TO_CONTROLLER: "/api/path/load-to-controller",
   // RTK (slash-separated paths)
-  RTK_STATUS: '/api/rtk/status',
-  RTK_STOP: '/api/rtk/stop',
-  RTK_NTRIP_START: '/api/rtk/ntrip/start',
-  RTK_LORA_START: '/api/rtk/lora/start',
-  RTK_LORA_STOP: '/api/rtk/lora/stop',
+  RTK_STATUS: "/api/rtk/status",
+  RTK_STOP: "/api/rtk/stop",
+  RTK_NTRIP_START: "/api/rtk/ntrip/start",
+  RTK_LORA_START: "/api/rtk/lora/start",
+  RTK_LORA_STOP: "/api/rtk/lora/stop",
   // Spray
-  SPRAY_STATUS: '/api/spray/status',
+  SPRAY_STATUS: "/api/spray/status",
   // Activity
-  ACTIVITY_LOGS: '/api/activity',
-  ACTIVITY: '/api/activity',
+  ACTIVITY_LOGS: "/api/activity",
+  ACTIVITY: "/api/activity",
 };
 
 /**
@@ -320,25 +279,25 @@ export const API_ENDPOINTS = {
 
 /** Active Socket.IO event names (4WD_SERVER + shared transport). */
 export const SOCKET_EVENTS = {
-  TELEMETRY: 'telemetry',
-  MISSION_STATUS: 'mission_status',
-  MISSION_ERROR: 'mission_error',
-  POINT_MISSION_EVENT: 'point_mission_event',
-  MISSION_COMPLETED: 'mission_completed',
-  MISSION_COMPLETION_DEGRADED: 'mission_completion_degraded',
-  GPS_SAFETY_ABORT: 'gps_safety_abort',
-  SAFETY_ABORT: 'safety_abort',
-  ESTOP_RESULT: 'estop_result',
-  ARM_RESULT: 'arm_result',
-  AUTH_REVOKED: 'auth_revoked',
-  ROVER_DISCONNECTED: 'rover_disconnected',
-  JOYSTICK_ACQUIRED: 'joystick_acquired',
-  JOYSTICK_RELEASED: 'joystick_released',
-  JOYSTICK_ERROR: 'joystick_error',
-  EMERGENCY_STOP: 'emergency_stop',
-  JOYSTICK_ACQUIRE: 'joystick_acquire',
-  JOYSTICK_COMMAND: 'joystick_command',
-  JOYSTICK_RELEASE: 'joystick_release',
+  TELEMETRY: "telemetry",
+  MISSION_STATUS: "mission_status",
+  MISSION_ERROR: "mission_error",
+  POINT_MISSION_EVENT: "point_mission_event",
+  MISSION_COMPLETED: "mission_completed",
+  MISSION_COMPLETION_DEGRADED: "mission_completion_degraded",
+  GPS_SAFETY_ABORT: "gps_safety_abort",
+  SAFETY_ABORT: "safety_abort",
+  ESTOP_RESULT: "estop_result",
+  ARM_RESULT: "arm_result",
+  AUTH_REVOKED: "auth_revoked",
+  ROVER_DISCONNECTED: "rover_disconnected",
+  JOYSTICK_ACQUIRED: "joystick_acquired",
+  JOYSTICK_RELEASED: "joystick_released",
+  JOYSTICK_ERROR: "joystick_error",
+  EMERGENCY_STOP: "emergency_stop",
+  JOYSTICK_ACQUIRE: "joystick_acquire",
+  JOYSTICK_COMMAND: "joystick_command",
+  JOYSTICK_RELEASE: "joystick_release",
 };
 
 /**
@@ -348,23 +307,23 @@ export const SOCKET_EVENTS = {
  * This alias is here for convenience in files that already import from config.ts.
  */
 export const PX4_SOCKET_EVENTS_COMPAT = {
-  TELEMETRY: 'telemetry',
-  MISSION_STATUS: 'mission_status',
-  POINT_MISSION_EVENT: 'point_mission_event',
-  MISSION_COMPLETED: 'mission_completed',
-  MISSION_COMPLETION_DEGRADED: 'mission_completion_degraded',
-  GPS_SAFETY_ABORT: 'gps_safety_abort',
-  SAFETY_ABORT: 'safety_abort',
-  ESTOP_RESULT: 'estop_result',
-  ARM_RESULT: 'arm_result',
-  AUTH_REVOKED: 'auth_revoked',
-  JOYSTICK_ACQUIRED: 'joystick_acquired',
-  JOYSTICK_RELEASED: 'joystick_released',
-  JOYSTICK_ERROR: 'joystick_error',
-  EMERGENCY_STOP: 'emergency_stop',
-  JOYSTICK_ACQUIRE: 'joystick_acquire',
-  JOYSTICK_COMMAND: 'joystick_command',
-  JOYSTICK_RELEASE: 'joystick_release',
+  TELEMETRY: "telemetry",
+  MISSION_STATUS: "mission_status",
+  POINT_MISSION_EVENT: "point_mission_event",
+  MISSION_COMPLETED: "mission_completed",
+  MISSION_COMPLETION_DEGRADED: "mission_completion_degraded",
+  GPS_SAFETY_ABORT: "gps_safety_abort",
+  SAFETY_ABORT: "safety_abort",
+  ESTOP_RESULT: "estop_result",
+  ARM_RESULT: "arm_result",
+  AUTH_REVOKED: "auth_revoked",
+  JOYSTICK_ACQUIRED: "joystick_acquired",
+  JOYSTICK_RELEASED: "joystick_released",
+  JOYSTICK_ERROR: "joystick_error",
+  EMERGENCY_STOP: "emergency_stop",
+  JOYSTICK_ACQUIRE: "joystick_acquire",
+  JOYSTICK_COMMAND: "joystick_command",
+  JOYSTICK_RELEASE: "joystick_release",
 };
 
 /**
@@ -373,45 +332,45 @@ export const PX4_SOCKET_EVENTS_COMPAT = {
  */
 export const PX4_API_ENDPOINTS = {
   // Auth
-  AUTH_LOGIN: '/api/auth/login',
-  AUTH_LOGOUT: '/api/auth/logout',
-  AUTH_CHANGE_PASSWORD: '/api/auth/change-password',
+  AUTH_LOGIN: "/api/auth/login",
+  AUTH_LOGOUT: "/api/auth/logout",
+  AUTH_CHANGE_PASSWORD: "/api/auth/change-password",
   // System
-  PING: '/api/ping',
-  HEALTHZ: '/api/healthz',
+  PING: "/api/ping",
+  HEALTHZ: "/api/healthz",
   // Telemetry
-  TELEMETRY_LATEST: '/api/telemetry/latest',
+  TELEMETRY_LATEST: "/api/telemetry/latest",
   // Vehicle
-  ARM: '/api/arm',
-  SET_MODE: '/api/set_mode',
-  ESTOP: '/api/estop',
+  ARM: "/api/arm",
+  SET_MODE: "/api/set_mode",
+  ESTOP: "/api/estop",
   // Mission
-  MISSION_START: '/api/mission/start',
-  MISSION_STOP: '/api/mission/stop',
-  MISSION_ABORT: '/api/mission/abort',
-  MISSION_PAUSE: '/api/mission/pause',
-  MISSION_RESUME: '/api/mission/resume',
-  MISSION_RESTART: '/api/mission/restart',
-  MISSION_CLEAR: '/api/mission/clear',
-  MISSION_STATUS: '/api/mission/status',
-  MISSION_LOADED_PATH: '/api/mission/loaded-path',
-  POINT_CONTINUE: '/api/mission/point/continue',
-  POINT_SKIP: '/api/mission/point/skip',
-  POINT_EVENTS: '/api/mission/point/events',
-  POINT_STATUS: '/api/mission/point/status',
+  MISSION_START: "/api/mission/start",
+  MISSION_STOP: "/api/mission/stop",
+  MISSION_ABORT: "/api/mission/abort",
+  MISSION_PAUSE: "/api/mission/pause",
+  MISSION_RESUME: "/api/mission/resume",
+  MISSION_RESTART: "/api/mission/restart",
+  MISSION_CLEAR: "/api/mission/clear",
+  MISSION_STATUS: "/api/mission/status",
+  MISSION_LOADED_PATH: "/api/mission/loaded-path",
+  POINT_CONTINUE: "/api/mission/point/continue",
+  POINT_SKIP: "/api/mission/point/skip",
+  POINT_EVENTS: "/api/mission/point/events",
+  POINT_STATUS: "/api/mission/point/status",
   // Path staging
-  PATHS_LIST: '/api/paths',
-  PATH_LOAD_TO_CONTROLLER: '/api/path/load-to-controller',
+  PATHS_LIST: "/api/paths",
+  PATH_LOAD_TO_CONTROLLER: "/api/path/load-to-controller",
   // RTK
-  RTK_STATUS: '/api/rtk/status',
-  RTK_STOP: '/api/rtk/stop',
-  RTK_NTRIP_START: '/api/rtk/ntrip/start',
-  RTK_LORA_START: '/api/rtk/lora/start',
-  RTK_LORA_STOP: '/api/rtk/lora/stop',
+  RTK_STATUS: "/api/rtk/status",
+  RTK_STOP: "/api/rtk/stop",
+  RTK_NTRIP_START: "/api/rtk/ntrip/start",
+  RTK_LORA_START: "/api/rtk/lora/start",
+  RTK_LORA_STOP: "/api/rtk/lora/stop",
   // Spray
-  SPRAY_STATUS: '/api/spray/status',
+  SPRAY_STATUS: "/api/spray/status",
   // Activity
-  ACTIVITY: '/api/activity',
+  ACTIVITY: "/api/activity",
 };
 
 /**
