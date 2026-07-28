@@ -16,10 +16,10 @@ import { NTRIPProfileEditor } from "./NTRIPProfileEditor";
 import type { NTRIPProfile } from "../../types/ntrip";
 import { getAllProfiles } from "../../services/ntripProfileStorage";
 import {
+  applyNtripConfiguration,
   getRtkConfiguration,
   getRtkStatus,
   reconnectRtk,
-  updateRtkConfiguration,
   type ActiveRtkConfiguration,
   type RtkStatusResponse,
 } from "../../services/rtkService";
@@ -50,24 +50,56 @@ function profileMatchesConfiguration(
 
 function statusLabel(
   status: RtkStatusResponse | null,
-  connected: boolean,
+  roverConnected: boolean,
 ): string {
-  if (!connected) return "Disconnected";
+  if (!roverConnected) return "Rover Offline";
   if (!status) return "Loading";
-  if (status.rtk_fixed || status.fix_type >= 6) return "RTK Fixed";
-  if (status.fix_type === 5) return "RTK Float";
-  if (status.healthy && status.correction_fresh) return "Corrections Active";
 
   const state = String(status.status || "")
     .trim()
     .toUpperCase();
+  const correctionsHealthy = Boolean(status.healthy && status.correction_fresh);
+
+  if (state === "AUTH_FAILED") return "Authentication Failed";
+  if (state === "DNS_FAILED") return "DNS / Internet Unavailable";
+  if (state === "NETWORK_TIMEOUT") return "Network Timeout";
+  if (state === "NETWORK_ERROR") return "Network Error";
+  if (state === "CASTER_UNREACHABLE") return "Caster Unreachable";
+  if (state === "CASTER_REJECTED") return "Caster Rejected";
+  if (state === "STREAM_STALE") return "RTCM Stream Stale";
+  if (state === "CONFIG_REQUIRED") return "Configuration Required";
+  if (state === "ERROR") return "RTK Error";
+  if (state === "DISCONNECTED") return "Disconnected";
+  if (state === "UNAVAILABLE") return "Unavailable";
   if (state === "CONNECTING") return "Connecting";
   if (state === "RELOADING") return "Reloading";
   if (state === "RECONNECT_WAIT") return "Reconnecting";
   if (state === "STARTING") return "Starting";
-  if (state === "CONNECTED") return "Connected";
-  if (state === "DISCONNECTED") return "Disconnected";
-  return state || "Unavailable";
+
+  // RTK Fixed/Float is green only while fresh corrections are present.
+  if (correctionsHealthy && (status.rtk_fixed || status.fix_type >= 6)) {
+    return "RTK Fixed";
+  }
+  if (correctionsHealthy && status.fix_type === 5) return "RTK Float";
+  if (correctionsHealthy) return "Corrections Active";
+  if (state === "CONNECTED") return "Connected — No Fresh Corrections";
+
+  return "No RTK Corrections";
+}
+
+function formatFixLabel(status: RtkStatusResponse | null): string {
+  if (!status) return "—";
+
+  const readable = String(status.fix_name || "NO_FIX")
+    .replace(/_/g, " ")
+    .toUpperCase();
+  const correctionsHealthy = Boolean(status.healthy && status.correction_fresh);
+
+  if (status.fix_type < 5 || !correctionsHealthy) {
+    return `${readable} — NO RTK`;
+  }
+
+  return readable;
 }
 
 export const RTKInjectionScreen: React.FC<Props> = ({
@@ -128,6 +160,20 @@ export const RTKInjectionScreen: React.FC<Props> = ({
     try {
       const nextStatus = await getRtkStatus();
       setStatus(nextStatus);
+
+      const nextState = String(nextStatus.status || "")
+        .trim()
+        .toUpperCase();
+      if (nextState === "AUTH_FAILED") {
+        setError(
+          nextStatus.last_error ||
+            "NTRIP authentication failed. Check mountpoint, username and password.",
+        );
+      } else if (nextState === "CONFIG_REQUIRED") {
+        setError("No persistent NTRIP configuration is saved on the Jetson.");
+      } else if (nextStatus.healthy && nextStatus.correction_fresh) {
+        setError(null);
+      }
     } catch (statusError) {
       console.warn("[RTKInjection] Failed to read RTK status:", statusError);
       setStatus(null);
@@ -206,7 +252,7 @@ export const RTKInjectionScreen: React.FC<Props> = ({
     setError(null);
 
     try {
-      const response = await updateRtkConfiguration({
+      const { update, outcome } = await applyNtripConfiguration({
         host,
         port,
         mountpoint,
@@ -215,22 +261,37 @@ export const RTKInjectionScreen: React.FC<Props> = ({
       });
 
       const savedConfiguration: ActiveRtkConfiguration = {
-        host: response.configuration.host,
-        port: response.configuration.port,
-        mountpoint: response.configuration.mountpoint,
-        username: response.configuration.username,
-        password_configured: response.configuration.password_configured,
-        caster_url: response.configuration.caster_url,
+        host: update.configuration.host,
+        port: update.configuration.port,
+        mountpoint: update.configuration.mountpoint,
+        username: update.configuration.username,
+        password_configured: update.configuration.password_configured,
+        caster_url: update.configuration.caster_url,
       };
 
       setActiveConfiguration(savedConfiguration);
-      setActiveProfileId(profile.id);
-      setFeedback(
-        response.message ||
-          "RTK configuration saved permanently. The rover is reconnecting automatically.",
-      );
+      setStatus(outcome.status);
 
-      await refreshStatus();
+      if (outcome.kind === "healthy") {
+        setActiveProfileId(profile.id);
+        setFeedback("RTCM corrections are active and fresh.");
+        Alert.alert(
+          "RTK Connected",
+          "Authenticated RTCM corrections are now flowing.",
+        );
+      } else if (outcome.kind === "failed") {
+        setActiveProfileId(null);
+        const failureMessage =
+          outcome.status.last_error ||
+          `RTK connection failed (${outcome.status.status}).`;
+        setError(failureMessage);
+        Alert.alert("RTK Connection Failed", failureMessage);
+      } else {
+        setActiveProfileId(null);
+        setFeedback(
+          "Configuration saved. The bridge is still connecting; status will continue updating.",
+        );
+      }
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -295,15 +356,29 @@ export const RTKInjectionScreen: React.FC<Props> = ({
   if (!visible) return null;
 
   const label = statusLabel(status, isConnected);
+  const statusState = String(status?.status || "")
+    .trim()
+    .toUpperCase();
   const isHealthy = Boolean(status?.healthy && status?.correction_fresh);
-  const isFixed = Boolean(status?.rtk_fixed || (status?.fix_type ?? 0) >= 6);
+  const isFixed = Boolean(
+    isHealthy && (status?.rtk_fixed || (status?.fix_type ?? 0) >= 6),
+  );
   const isErrorState = Boolean(
     isConnected &&
     status &&
-    !status.healthy &&
-    ["DISCONNECTED", "UNAVAILABLE", "ERROR"].includes(
-      String(status.status || "").toUpperCase(),
-    ),
+    [
+      "AUTH_FAILED",
+      "CONFIG_REQUIRED",
+      "DNS_FAILED",
+      "NETWORK_TIMEOUT",
+      "NETWORK_ERROR",
+      "CASTER_UNREACHABLE",
+      "CASTER_REJECTED",
+      "STREAM_STALE",
+      "DISCONNECTED",
+      "UNAVAILABLE",
+      "ERROR",
+    ].includes(statusState),
   );
 
   const pillStyle =
@@ -312,6 +387,12 @@ export const RTKInjectionScreen: React.FC<Props> = ({
       : isErrorState || !isConnected
         ? styles.pillDanger
         : styles.pillPending;
+
+  const rtkDotColor = isHealthy
+    ? colors.success
+    : isErrorState || !isConnected
+      ? colors.danger
+      : colors.accent;
 
   return (
     <View style={styles.overlay} pointerEvents="box-none">
@@ -322,10 +403,7 @@ export const RTKInjectionScreen: React.FC<Props> = ({
           </TouchableOpacity>
           <Text style={styles.title}>RTK INJECTION</Text>
           <View
-            style={[
-              styles.connectionDot,
-              { backgroundColor: isConnected ? colors.success : colors.danger },
-            ]}
+            style={[styles.connectionDot, { backgroundColor: rtkDotColor }]}
           />
         </View>
 
@@ -363,10 +441,8 @@ export const RTKInjectionScreen: React.FC<Props> = ({
                 onAddNew={handleAddNewProfile}
                 onEditProfile={handleEditProfile}
                 isConnecting={isSubmitting}
-                activeProfileId={activeProfileId}
-                isStreamRunning={Boolean(
-                  status?.healthy && status?.correction_fresh,
-                )}
+                activeProfileId={isHealthy ? activeProfileId : null}
+                isStreamRunning={isHealthy}
               />
             ) : (
               <NTRIPProfileEditor
@@ -378,9 +454,9 @@ export const RTKInjectionScreen: React.FC<Props> = ({
 
             <View style={styles.summaryGrid}>
               <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Fix</Text>
+                <Text style={styles.summaryLabel}>GNSS Fix</Text>
                 <Text style={styles.summaryValue}>
-                  {status?.fix_name ?? "—"}
+                  {formatFixLabel(status)}
                 </Text>
               </View>
               <View style={styles.summaryItem}>

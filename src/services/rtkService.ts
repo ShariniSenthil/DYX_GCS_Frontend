@@ -1,18 +1,15 @@
 /**
- * RTK service for the current rover backend.
+ * Production RTK/NTRIP API client.
  *
- * Current backend contract:
+ * Contract:
  *   GET  /api/rtk/config
  *   PUT  /api/rtk/config
  *   POST /api/rtk/reconnect
  *   GET  /api/rtk/status
  *
- * Selecting an NTRIP profile sends PUT /api/rtk/config once. The backend
- * persists the values and requests an immediate RTK bridge reconnect.
- *
- * This file also keeps a few legacy aliases and method signatures so the
- * existing Settings screen and RTK adapters continue to compile while the UI
- * is migrated to the new backend contract.
+ * A successful PUT means "configuration persisted and reload accepted".
+ * It does not mean the caster authenticated or RTCM is flowing. Only
+ * healthy=true + correction_fresh=true is treated as an active RTK stream.
  */
 
 import { apiGet, apiPost, apiPut } from './apiClient';
@@ -73,9 +70,11 @@ export interface ReconnectRtkResponse {
   reload: RtkReloadResult;
 }
 
-/** Exact response returned by GET /api/rtk/status. */
 export interface BackendRtkStatusResponse {
   healthy: boolean;
+  connected?: boolean;
+  configured?: boolean;
+  persistent?: boolean;
   status: string;
   correction_age_sec: number | null;
   correction_fresh: boolean;
@@ -85,14 +84,20 @@ export interface BackendRtkStatusResponse {
   satellites_visible: number;
   hdop: number | null;
   vdop: number | null;
+  total_bytes?: number;
+  total_chunks?: number;
+  last_error?: string | null;
+  last_error_code?: string | null;
+  retry_in_sec?: number | null;
+  mavros_subscribers?: number;
+  caster_host?: string | null;
+  caster_port?: number | null;
+  mountpoint?: string | null;
+  password_configured?: boolean;
   gps_updated_at: string | null;
   rtk_updated_at: string | null;
 }
 
-/**
- * Normalized RTK status used by the current UI plus compatibility fields used
- * by older SettingsScreen and telemetry adapters.
- */
 export interface RtkStatusResponse extends BackendRtkStatusResponse {
   mode: 'NTRIP';
   running: boolean;
@@ -106,8 +111,6 @@ export interface RtkStatusResponse extends BackendRtkStatusResponse {
   last_frame_age_s: number | null;
   last_error: string | null;
   last_process_error: string | null;
-
-  // Compatibility aliases for legacy callers.
   active?: boolean;
   connected?: boolean;
   source?: 'ntrip' | 'lora' | string | null;
@@ -130,6 +133,34 @@ export interface LoraStartRequest {
   baudrate?: number;
 }
 
+export type RtkConnectionOutcome =
+  | { kind: 'healthy'; status: RtkStatusResponse }
+  | { kind: 'failed'; status: RtkStatusResponse }
+  | { kind: 'pending'; status: RtkStatusResponse };
+
+const TERMINAL_FAILURE_STATES = new Set([
+  'AUTH_FAILED',
+  'CONFIG_REQUIRED',
+  'DNS_FAILED',
+  'NETWORK_TIMEOUT',
+  'NETWORK_ERROR',
+  'CASTER_UNREACHABLE',
+  'CASTER_REJECTED',
+  'STREAM_STALE',
+  'ERROR',
+  'UNAVAILABLE',
+]);
+
+export function isRtkStreamHealthy(status: RtkStatusResponse | null | undefined): boolean {
+  return Boolean(status?.healthy && status?.correction_fresh);
+}
+
+export function isRtkTerminalFailure(status: RtkStatusResponse): boolean {
+  return TERMINAL_FAILURE_STATES.has(
+    String(status.status || '').trim().toUpperCase(),
+  );
+}
+
 export async function getRtkConfiguration(): Promise<GetRtkConfigurationResponse> {
   return apiGet<GetRtkConfigurationResponse>(PX4_RTK.CONFIG);
 }
@@ -147,20 +178,13 @@ export async function reconnectRtk(): Promise<ReconnectRtkResponse> {
 export async function getRtkStatus(): Promise<RtkStatusResponse> {
   const raw = await apiGet<BackendRtkStatusResponse>(PX4_RTK.STATUS);
   const state = String(raw.status ?? 'UNAVAILABLE').trim().toUpperCase();
-
-  const running = ![
-    'UNAVAILABLE',
-    'DISCONNECTED',
-    'STOPPED',
-    'OFF',
-  ].includes(state);
-
   const streamHealthy = Boolean(raw.healthy && raw.correction_fresh);
 
   return {
     ...raw,
+    status: state,
     mode: 'NTRIP',
-    running,
+    running: streamHealthy,
     active_source: 'ntrip',
     desired_source: 'ntrip',
     lifecycle_state: state,
@@ -170,51 +194,73 @@ export async function getRtkStatus(): Promise<RtkStatusResponse> {
     last_valid_rtcm_age_s: raw.correction_age_sec,
     last_frame_age_s: raw.correction_age_sec,
     last_error:
-      !raw.healthy &&
-      !['STARTING', 'CONNECTING', 'RELOADING', 'RECONNECT_WAIT'].includes(state)
-        ? state
-        : null,
+      raw.last_error ??
+      (TERMINAL_FAILURE_STATES.has(state) ? state : null),
     last_process_error: null,
-
-    // Legacy aliases.
-    active: running,
+    active: streamHealthy,
     connected: streamHealthy,
     source: 'ntrip',
-    bytes_received: 0,
+    bytes_received: raw.total_bytes ?? 0,
     serial_open: false,
   };
 }
 
-/**
- * Compatibility wrapper for older callers.
- * It does not call a separate start endpoint. It saves the selected profile
- * through PUT /api/rtk/config; the backend reconnects automatically.
- */
+export async function waitForRtkOutcome(
+  timeoutMs = 20_000,
+  pollIntervalMs = 750,
+): Promise<RtkConnectionOutcome> {
+  const deadline = Date.now() + timeoutMs;
+  let latest = await getRtkStatus();
+
+  while (Date.now() < deadline) {
+    if (isRtkStreamHealthy(latest)) {
+      return { kind: 'healthy', status: latest };
+    }
+
+    if (isRtkTerminalFailure(latest)) {
+      return { kind: 'failed', status: latest };
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, pollIntervalMs);
+    });
+    latest = await getRtkStatus();
+  }
+
+  return { kind: 'pending', status: latest };
+}
+
+export async function applyNtripConfiguration(
+  request: UpdateRtkConfigurationRequest,
+): Promise<{
+  update: UpdateRtkConfigurationResponse;
+  outcome: RtkConnectionOutcome;
+}> {
+  const update = await updateRtkConfiguration(request);
+  const outcome = await waitForRtkOutcome();
+  return { update, outcome };
+}
+
 export async function startNtripStream(
   request: NtripStartRequest,
 ): Promise<RtkStatusResponse> {
   const username = request.username ?? request.user ?? '';
   const password = request.password ?? request.pass ?? '';
 
-  await updateRtkConfiguration({
-    host: request.host,
+  const { outcome } = await applyNtripConfiguration({
+    host: request.host.trim(),
     port: request.port,
-    mountpoint: request.mountpoint,
-    username,
+    mountpoint: request.mountpoint.trim().replace(/^\/+/, ''),
+    username: username.trim(),
     ...(password.trim() ? { password } : {}),
   });
 
-  return getRtkStatus();
+  return outcome.status;
 }
 
-/**
- * The current backend deliberately has no RTK stop endpoint. The explicit
- * return type prevents old callers from becoming Promise<never> at compile
- * time, while runtime use still reports the unsupported operation clearly.
- */
 export async function stopAllRtk(): Promise<RtkStatusResponse> {
   throw new Error(
-    'RTK stop is not supported by the current backend. Change the saved profile or use RTK reconnect.',
+    'RTK stop is not supported. The persistent bridge reconnects automatically.',
   );
 }
 
@@ -237,6 +283,8 @@ export default {
   updateRtkConfiguration,
   reconnectRtk,
   getRtkStatus,
+  waitForRtkOutcome,
+  applyNtripConfiguration,
   startNtripStream,
   stopAllRtk,
   stopNtripStream,
