@@ -37,7 +37,13 @@ import { useAuth } from "./src/hooks/useAuth";
 
 import GlobalCrashHandler from "./src/services/GlobalCrashHandler";
 
+import { apiGet } from "./src/services/apiClient";
+
+import { UnauthorizedError } from "./src/services/apiError";
+
 import { initializeBackendURL, setBackendURL } from "./src/config";
+
+import { PX4_AUTH } from "./src/config/px4Endpoints";
 
 import { getSavedBackendURL, saveBackendURL } from "./src/utils/backendStorage";
 
@@ -50,6 +56,8 @@ import { AUTH_ENABLED } from "./src/config/featureFlags";
 
 GlobalCrashHandler.initialize();
 
+type SessionValidationState = "checking" | "valid" | "invalid";
+
 // ── Authentication gate ──────────────────────────────────────────────────────
 
 function AuthGate({
@@ -57,13 +65,102 @@ function AuthGate({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, session, invalidateSession } = useAuth();
+  const [sessionValidation, setSessionValidation] =
+    useState<SessionValidationState>(AUTH_ENABLED ? "checking" : "valid");
+
+  /**
+   * Validate the saved token against the selected rover.
+   *
+   * Previously a stale token remained locally authenticated, so Socket.IO kept
+   * reconnecting with a rejected token until the operator explicitly logged out
+   * and logged in again. A real 401 now opens Login directly. Temporary network
+   * or Jetson startup failures never force logout and are retried later.
+   */
+  useEffect(() => {
+    if (!AUTH_ENABLED) {
+      setSessionValidation("valid");
+      return;
+    }
+
+    if (isLoading) {
+      setSessionValidation("checking");
+      return;
+    }
+
+    if (!session?.token) {
+      setSessionValidation("invalid");
+      return;
+    }
+
+    let mounted = true;
+    let validationInFlight = false;
+
+    const validateStoredSession = async (): Promise<void> => {
+      if (validationInFlight) {
+        return;
+      }
+
+      validationInFlight = true;
+
+      try {
+        await apiGet(PX4_AUTH.SESSION, {
+          timeoutMs: 8_000,
+          // Explicit header avoids a startup race with AuthContext token setup.
+          headers: {
+            "X-Rover-Token": session.token,
+          },
+        });
+
+        if (mounted) {
+          setSessionValidation("valid");
+        }
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        if (error instanceof UnauthorizedError) {
+          console.warn("[AuthGate] Saved backend session was rejected.");
+
+          setSessionValidation("invalid");
+
+          await invalidateSession(
+            "The saved rover login is no longer valid. Please log in again.",
+          );
+
+          return;
+        }
+
+        console.warn(
+          "[AuthGate] Session validation deferred until backend is reachable:",
+          error,
+        );
+        setSessionValidation("valid");
+      } finally {
+        validationInFlight = false;
+      }
+    };
+
+    setSessionValidation("checking");
+    void validateStoredSession();
+
+    // Detect server-side token invalidation while the app remains open.
+    const validationTimer = setInterval(() => {
+      void validateStoredSession();
+    }, 30_000);
+
+    return () => {
+      mounted = false;
+      clearInterval(validationTimer);
+    };
+  }, [isLoading, session?.token, invalidateSession]);
 
   if (!AUTH_ENABLED) {
     return <>{children}</>;
   }
 
-  if (isLoading) {
+  if (isLoading || (isAuthenticated && sessionValidation === "checking")) {
     return (
       <View
         style={{
@@ -78,11 +175,15 @@ function AuthGate({
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || sessionValidation === "invalid") {
     return <LoginScreen />;
   }
 
-  return <>{children}</>;
+  return (
+    <React.Fragment key={session?.token ?? "authenticated-session"}>
+      {children}
+    </React.Fragment>
+  );
 }
 
 // ── Main application content ─────────────────────────────────────────────────

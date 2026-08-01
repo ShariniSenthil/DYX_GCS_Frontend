@@ -42,6 +42,7 @@ import { apiPost, configureApiClient } from "../services/apiClient";
 
 import {
   configure as configureSocket,
+  disconnect as disconnectSocket,
   on as socketOn,
 } from "../services/socketClient";
 
@@ -76,8 +77,15 @@ export interface AuthContextValue {
   /** Login using the static backend username and password. */
   login: (username: string, password: string) => Promise<void>;
 
-  /** Explicitly end the current operator session. */
+  /** Explicitly log out and remove the saved session. */
   logout: () => Promise<void>;
+  /**
+   * Remove a token that the backend has explicitly rejected.
+   *
+   * This is different from a network failure. Wi-Fi loss or Jetson shutdown
+   * must not invalidate the saved login.
+   */
+  invalidateSession: (reason?: string) => Promise<void>;
 
   /** Retained for future password-change support. */
   changePassword: (
@@ -115,33 +123,59 @@ export function AuthProvider({
     await clearSession();
   }, []);
 
+  /**
+   * Called only when the backend explicitly rejects the token.
+   *
+   * Examples:
+   * - HTTP 401
+   * - Socket.IO unauthorized error
+   * - auth_revoked socket event
+   *
+   * Network timeout, Wi-Fi loss and Jetson restart do not call this function.
+   */
+  const invalidateSession = useCallback(
+    async (
+      reason = "The saved login is no longer valid. Please log in again.",
+    ): Promise<void> => {
+      console.warn("[AuthContext] Invalidating rejected session:", reason);
+
+      disconnectSocket();
+
+      setSession(null);
+
+      setLastError({
+        code: "session_revoked",
+        message: reason,
+      });
+
+      /*
+       * Remove the rejected token so application restart does not restore the
+       * same invalid token again.
+       *
+       * This does not remove the saved rover/backend URL.
+       */
+      await clearSession();
+    },
+    [],
+  );
+
   // ── REST token injection ──────────────────────────────────────────────────
 
   useEffect(() => {
     configureApiClient(
       () => session?.token ?? null,
 
-      /**
-       * Do not automatically log out on HTTP 401.
-       *
-       * A temporary backend restart, delayed service startup or connection
-       * issue must not delete the locally saved operator login.
-       */
       () => {
-        console.warn(
-          "[AuthContext] Authenticated request returned 401. " +
-            "The stored login session has been retained.",
+        /*
+         * The API client calls this callback only after receiving HTTP 401.
+         * A timeout, network error or Jetson shutdown does not come here.
+         */
+        void invalidateSession(
+          "The rover rejected the saved login. Please log in again.",
         );
-
-        setLastError({
-          code: "session_revoked",
-          message:
-            "The rover could not verify the saved session. " +
-            "The app will keep the login and retry after reconnection.",
-        });
       },
     );
-  }, [session]);
+  }, [session?.token, invalidateSession]);
 
   // ── Socket token injection ────────────────────────────────────────────────
 
@@ -218,19 +252,17 @@ export function AuthProvider({
           revokedEvent.reason,
         );
 
-        setLastError({
-          code: "session_revoked",
-          message:
-            "The backend rejected the current token. " +
-            "Your saved login has been retained.",
-        });
+        void invalidateSession(
+          revokedEvent.reason ||
+            "The backend rejected the current login. Please log in again.",
+        );
       },
 
       "auth-context-revoked",
     );
 
     return unsubscribe;
-  }, []);
+  }, [invalidateSession]);
 
   // ── Login ─────────────────────────────────────────────────────────────────
 
@@ -338,6 +370,8 @@ export function AuthProvider({
         });
       }
     } finally {
+      disconnectSocket();
+
       await clearLocalSession();
 
       console.log("[AuthContext] Operator logged out explicitly.");
@@ -434,6 +468,7 @@ export function AuthProvider({
       lastError,
       login,
       logout,
+      invalidateSession,
       changePassword,
     }),
 
@@ -444,6 +479,7 @@ export function AuthProvider({
       lastError,
       login,
       logout,
+      invalidateSession,
       changePassword,
     ],
   );

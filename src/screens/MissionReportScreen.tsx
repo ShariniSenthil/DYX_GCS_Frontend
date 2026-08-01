@@ -125,6 +125,35 @@ type WpStatus = {
   position_error_cm?: number; // Distance error in cm (was position_error_mm)
 };
 
+/**
+ * Calculate target-to-rover horizontal position error in millimetres.
+ * Kept local so MissionReportScreen does not depend on an incompatible
+ * calculateAccuracy return shape.
+ */
+const calculatePositionErrorMm = (
+  targetLat: number,
+  targetLon: number,
+  achievedLat: number,
+  achievedLon: number,
+): number => {
+  const earthRadiusM = 6_371_000;
+  const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
+
+  const lat1 = toRadians(targetLat);
+  const lat2 = toRadians(achievedLat);
+  const deltaLat = toRadians(achievedLat - targetLat);
+  const deltaLon = toRadians(achievedLon - targetLon);
+
+  const haversine =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+
+  const angularDistance =
+    2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+
+  return earthRadiusM * angularDistance * 1000;
+};
+
 const getRtkFailureMessage = (err: unknown, fallback: string) => {
   if (err instanceof Error) {
     const responseBody =
@@ -444,6 +473,158 @@ export default function MissionReportScreen({
     currentIndex,
   ]);
 
+  /**
+   * Final status map used by:
+   * - Mission Report table
+   * - Accuracy monitoring
+   * - Mission completion dialog
+   * - Export
+   * - Completed mission preservation
+   *
+   * All uploaded marking points begin as pending.
+   * The currently active point receives live rover-to-target accuracy.
+   * Terminal statuses are never overwritten by live telemetry.
+   */
+  const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
+    const next: Record<number, WpStatus> = {};
+
+    /**
+     * Ensure every uploaded marking point has a visible report row state.
+     */
+    for (const waypoint of waypoints) {
+      const existing = effectiveStatusMap[waypoint.sn] as WpStatus | undefined;
+
+      next[waypoint.sn] = existing ?? {
+        reached: false,
+        marked: false,
+        status: "pending",
+        remark: "Pending",
+      };
+    }
+
+    /**
+     * Live accuracy is calculated only for the current active point.
+     */
+    if (
+      effectiveCurrentIndex === null ||
+      effectiveCurrentIndex < 0 ||
+      !roverPosition
+    ) {
+      return next;
+    }
+
+    const activeWaypoint = waypoints[effectiveCurrentIndex];
+
+    if (!activeWaypoint) {
+      return next;
+    }
+
+    const serialNumber =
+      typeof activeWaypoint.sn === "number"
+        ? activeWaypoint.sn
+        : effectiveCurrentIndex + 1;
+
+    const existing = next[serialNumber] ?? {
+      status: "pending",
+    };
+
+    /**
+     * These statuses are final.
+     * Live rover movement must not change them.
+     */
+    const terminalStatuses = new Set<WpStatus["status"]>([
+      "completed",
+      "skipped",
+      "failed",
+      "aborted",
+      "stopped",
+      "mission_end",
+    ]);
+
+    if (existing.status && terminalStatuses.has(existing.status)) {
+      return next;
+    }
+
+    const targetLat = Number(activeWaypoint.lat);
+
+    const targetLon = Number(activeWaypoint.lon);
+
+    const achievedLat = Number(roverPosition.lat);
+    const achievedLon = Number(roverPosition.lng);
+
+    const coordinatesAreValid =
+      Number.isFinite(targetLat) &&
+      Number.isFinite(targetLon) &&
+      Number.isFinite(achievedLat) &&
+      Number.isFinite(achievedLon) &&
+      targetLat >= -90 &&
+      targetLat <= 90 &&
+      achievedLat >= -90 &&
+      achievedLat <= 90 &&
+      targetLon >= -180 &&
+      targetLon <= 180 &&
+      achievedLon >= -180 &&
+      achievedLon <= 180;
+
+    if (!coordinatesAreValid) {
+      return next;
+    }
+
+    const errorMm = calculatePositionErrorMm(
+      targetLat,
+      targetLon,
+      achievedLat,
+      achievedLon,
+    );
+
+    const accuracy = getAccuracyLevel(errorMm);
+
+    next[serialNumber] = {
+      ...existing,
+
+      /**
+       * Loading is the current/active state already supported by your table.
+       */
+      status:
+        !existing.status || existing.status === "pending"
+          ? "loading"
+          : existing.status,
+
+      reached: existing.reached === true || errorMm <= 30,
+
+      lat_achieved: achievedLat,
+      lon_achieved: achievedLon,
+
+      hrms:
+        typeof telemetry.hrms === "number" && Number.isFinite(telemetry.hrms)
+          ? telemetry.hrms
+          : undefined,
+
+      vrms:
+        typeof telemetry.vrms === "number" && Number.isFinite(telemetry.vrms)
+          ? telemetry.vrms
+          : undefined,
+
+      /**
+       * Existing Mission Report table stores error in centimetres.
+       */
+      position_error_cm: errorMm / 10,
+
+      accuracy_level: accuracy.level,
+
+      remark: "Live accuracy monitoring",
+    };
+
+    return next;
+  }, [
+    waypoints,
+    effectiveStatusMap,
+    effectiveCurrentIndex,
+    roverPosition,
+    telemetry.hrms,
+    telemetry.vrms,
+  ]);
+
   const effectiveWaitingForManual =
     waitingForManual ||
     px4WaitingForContinue ||
@@ -458,6 +639,7 @@ export default function MissionReportScreen({
   // Refs to store latest values for mission event handler (prevents stale closures)
   const waypointsRef = useRef(waypoints);
   const statusMapRef = useRef(statusMap);
+  const reportStatusMapRef = useRef<Record<number, WpStatus>>({});
   const missionStartTimeRef = useRef(missionStartTime);
   const missionEndTimeRef = useRef(missionEndTime);
   const isMissionActiveRef = useRef(isMissionActive);
@@ -473,6 +655,10 @@ export default function MissionReportScreen({
   useEffect(() => {
     statusMapRef.current = statusMap;
   }, [statusMap]);
+
+  useEffect(() => {
+    reportStatusMapRef.current = reportStatusMap;
+  }, [reportStatusMap]);
 
   useEffect(() => {
     missionStartTimeRef.current = missionStartTime;
@@ -1302,7 +1488,7 @@ export default function MissionReportScreen({
   // Using a stable ref callback that always has access to current values
   const preserveCurrentMission = useRef(() => {
     const wps = waypointsRef.current;
-    const sMap = statusMapRef.current;
+    const sMap = reportStatusMapRef.current;
     if (wps.length > 0 || Object.keys(sMap).length > 0) {
       console.log(
         "[MissionReportScreen] Preserving current mission data for export access",
@@ -1417,7 +1603,7 @@ export default function MissionReportScreen({
     // Otherwise show current mission data
     return {
       waypoints,
-      statusMap: effectiveStatusMap,
+      statusMap: reportStatusMap,
       missionMode,
       startTime: missionStartTime,
       endTime: missionEndTime,
@@ -1425,7 +1611,8 @@ export default function MissionReportScreen({
   }, [
     previousMissionData,
     isMissionActive,
-    effectiveStatusMap,
+    statusMap,
+    reportStatusMap,
     waypoints,
     missionMode,
     missionStartTime,
@@ -3615,15 +3802,16 @@ export default function MissionReportScreen({
         visible={showCompletionDialog}
         onDismiss={() => {
           console.log(
-            "[MissionReportScreen] 📋 Closing mission completion dialog",
+            "[MissionReportScreen] Closing mission completion dialog",
           );
+
           setShowCompletionDialog(false);
         }}
         onExport={handleExport}
         missionStats={getMissionStats()}
-        waypoints={waypoints}
-        statusMap={statusMap}
-        missionMode={missionMode}
+        waypoints={displayData.waypoints}
+        statusMap={displayData.statusMap}
+        missionMode={displayData.missionMode}
       />
 
       {/* Clear Logs After Export Dialog */}

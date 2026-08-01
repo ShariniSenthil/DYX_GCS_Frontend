@@ -55,7 +55,7 @@ import {
   startMission as startBackendMission,
   stopMission as stopBackendMission,
 } from "../services/missionApi";
-import { loadSession } from "../services/authStorage";
+import { useAuth } from "../context/AuthContext";
 import {
   isRobotStatusDebugEnabled,
   getRobotStatusDebug,
@@ -115,6 +115,58 @@ function getTelemetryGeneratedTime(payload: unknown): number | null {
   }
 
   return null;
+}
+
+function isUnauthorizedSocketError(error: unknown): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const source = error as {
+    message?: unknown;
+    code?: unknown;
+    data?: unknown;
+  };
+
+  const message =
+    typeof source.message === "string" ? source.message : String(error);
+
+  const code =
+    typeof source.code === "string" ? source.code : "";
+
+  let dataText = "";
+
+  if (typeof source.data === "string") {
+    dataText = source.data;
+  } else if (
+    source.data &&
+    typeof source.data === "object"
+  ) {
+    const data = source.data as Record<string, unknown>;
+
+    dataText = [
+      data.message,
+      data.reason,
+      data.error,
+      data.code,
+    ]
+      .filter((value) => value !== null && value !== undefined)
+      .map(String)
+      .join(" ");
+  }
+
+  const combined = `${message} ${code} ${dataText}`.toLowerCase();
+
+  return (
+    combined.includes("unauthorized") ||
+    combined.includes("unauthorised") ||
+    combined.includes("invalid token") ||
+    combined.includes("token invalid") ||
+    combined.includes("token expired") ||
+    combined.includes("authentication rejected") ||
+    combined.includes("authentication failed") ||
+    combined.includes("auth rejected")
+  );
 }
 
 // Verbose telemetry logging — disabled in production, enable locally for debugging.
@@ -1011,6 +1063,25 @@ export interface UseRoverTelemetryResult {
  * Manages Socket.IO connection and telemetry updates
  */
 export function useRoverTelemetry(): UseRoverTelemetryResult {
+  const {
+    session,
+    isLoading: authLoading,
+    isAuthenticated,
+    invalidateSession,
+  } = useAuth();
+
+  const authToken = AUTH_ENABLED
+    ? session?.token ?? null
+    : null;
+
+  const authReady =
+    !AUTH_ENABLED ||
+    (
+      !authLoading &&
+      isAuthenticated &&
+      Boolean(authToken)
+    );
+
   const [telemetrySnapshot, setTelemetrySnapshot] = useState<RoverTelemetry>(
     createDefaultTelemetry
   );
@@ -1061,7 +1132,22 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   );
   const lastStableFixTypeRef = useRef<number>(0);
   const connectSocketRef = useRef<() => void>(() => {});
+
+  /**
+   * Socket callbacks use refs so they always see the latest authentication
+   * state without recreating every event handler.
+   */
+  const authTokenRef = useRef<string | null>(authToken);
+  const authReadyRef = useRef(authReady);
+  const invalidateSessionRef = useRef(invalidateSession);
+
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    authTokenRef.current = authToken;
+    authReadyRef.current = authReady;
+    invalidateSessionRef.current = invalidateSession;
+  }, [authToken, authReady, invalidateSession]);
 
   const clearVisibleTelemetry = useCallback((): void => {
     const emptyTelemetry = createDefaultTelemetry();
@@ -1551,6 +1637,13 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   }, [clearReconnectTimer]);
 
   const scheduleReconnect = useCallback(() => {
+    if (
+      AUTH_ENABLED &&
+      !authReadyRef.current
+    ) {
+      return;
+    }
+
     if (reconnectTimerRef.current) {
       return;
     }
@@ -1634,13 +1727,46 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         const backendUrl = getHttpBase();
 
         // Auth token must be present before socket.connect() when AUTH_ENABLED.
-        const session = AUTH_ENABLED
-          ? await loadSession().catch(() => null)
-          : null;
-        const hasToken = Boolean(session?.token);
-        const socketConfig: any = {
+               /*
+         * Read the token from the live AuthContext ref.
+         *
+         * Do not reload it from AsyncStorage here. AuthContext is the active
+         * source of truth after login, logout and session invalidation.
+         */
+        const token = authTokenRef.current;
+
+        const hasToken = Boolean(token);
+
+        if (
+          AUTH_ENABLED &&
+          (
+            !authReadyRef.current ||
+            !token
+          )
+        ) {
+          telemetryDiagLog(
+            "Socket connection skipped: authentication is not ready",
+          );
+
+          setConnectionState("disconnected");
+
+          return;
+        }
+
+        const socketConfig: Partial<ManagerOptions & SocketOptions> = {
           ...SOCKET_CONFIG,
-          auth: hasToken ? { token: session!.token } : undefined,
+
+          /*
+           * Prevent io() from connecting before all event handlers have been
+           * registered.
+           */
+          autoConnect: false,
+
+          auth: token
+            ? {
+                token,
+              }
+            : undefined,
         };
 
         telemetryDiagLog("Socket connect attempt", {
@@ -1655,9 +1781,9 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           );
         }
 
-        const socket = io(
+          const socket = io(
           backendUrl,
-          socketConfig as Partial<ManagerOptions & SocketOptions>
+          socketConfig,
         );
         socketRef.current = socket;
 
@@ -1747,13 +1873,39 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
 
           console.error("[SOCKET] Connection error:", message);
 
-          if (
-            message.toLowerCase().includes("unauthorized") ||
-            message.toLowerCase().includes("unauthorised")
-          ) {
+          if (isUnauthorizedSocketError(error)) {
             console.error(
-              "[SOCKET] Authentication rejected. Log out and log in again."
+              "[SOCKET] Authentication rejected. Opening Login screen.",
             );
+
+            patchRobotStatusDebug({
+              connectionState: "error",
+              socketConnected: false,
+              rejectReason: message,
+            });
+
+            clearReconnectTimer();
+
+            /*
+             * Remove all listeners before disconnecting so the disconnect
+             * handler does not schedule another retry using the same rejected
+             * token.
+             */
+            socket.removeAllListeners();
+            socket.disconnect();
+
+            if (socketRef.current === socket) {
+              socketRef.current = null;
+            }
+
+            resetTelemetry();
+            setConnectionState("error");
+
+            void invalidateSessionRef.current(
+              "The rover rejected the saved login. Please log in again.",
+            );
+
+            return;
           }
 
           patchRobotStatusDebug({
@@ -1777,6 +1929,38 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           }
 
           scheduleReconnect();
+        });
+
+                socket.on("auth_revoked", (payload: unknown) => {
+          const event =
+            payload && typeof payload === "object"
+              ? payload as Record<string, unknown>
+              : {};
+
+          const reason =
+            typeof event.reason === "string"
+              ? event.reason
+              : typeof event.message === "string"
+                ? event.message
+                : "The backend revoked the current login.";
+
+          console.warn("[SOCKET] auth_revoked:", reason);
+
+          clearReconnectTimer();
+
+          socket.removeAllListeners();
+          socket.disconnect();
+
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+          }
+
+          resetTelemetry();
+          setConnectionState("error");
+
+          void invalidateSessionRef.current(
+            `${reason} Please log in again.`,
+          );
         });
 
         socket.on("disconnect", (reason: string) => {
@@ -2197,61 +2381,115 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
     // They are now refs and won't cause re-registrations
   }, [clearReconnectTimer, resetTelemetry, scheduleReconnect, teardownSocket]);
 
-  const reconnect = useCallback(() => {
+    const reconnect = useCallback(() => {
+    if (
+      AUTH_ENABLED &&
+      !authReadyRef.current
+    ) {
+      console.warn(
+        "[useRoverTelemetry] Reconnect skipped because authentication is not ready.",
+      );
+
+      return;
+    }
+
     clearReconnectTimer();
+
     backoffRef.current = INITIAL_BACKOFF_MS;
+
     connectSocketRef.current();
   }, [clearReconnectTimer]);
-
   useEffect(() => {
     connectSocketRef.current = connectSocket;
   }, [connectSocket]);
 
-  // Single initialization effect - no dependencies to prevent infinite loops
+    /**
+   * Component lifecycle cleanup.
+   *
+   * This effect runs only when the hook mounts and unmounts.
+   */
   useEffect(() => {
     mountedRef.current = true;
+
     telemetryDiagLog("useRoverTelemetry mounted", {
       backend: getHttpBase(),
       authEnabled: AUTH_ENABLED,
       offline: isOfflineMode(),
     });
-    connectSocketRef.current();
 
     return () => {
       mountedRef.current = false;
+
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
+
       if (connectDelayRef.current) {
         clearTimeout(connectDelayRef.current);
         connectDelayRef.current = null;
       }
+
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
       }
+
       if (gpsFixTypeDebounceRef.current) {
         clearTimeout(gpsFixTypeDebounceRef.current);
         gpsFixTypeDebounceRef.current = null;
       }
+
       if (missionStatusDebounceRef.current) {
         clearTimeout(missionStatusDebounceRef.current);
         missionStatusDebounceRef.current = null;
       }
+
       if (socketRef.current) {
         manualDisconnectRef.current = true;
         socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+
       if (pendingDispatchRef.current) {
         clearTimeout(pendingDispatchRef.current);
         pendingDispatchRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Authentication-aware socket lifecycle.
+   *
+   * This effect runs when:
+   * - saved authentication restoration finishes;
+   * - login creates a new token;
+   * - logout removes the token;
+   * - the backend rejects the current token.
+   */
+  useEffect(() => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    if (!authReady) {
+      teardownSocket();
+      setConnectionState("disconnected");
+      return;
+    }
+
+    clearReconnectTimer();
+    backoffRef.current = INITIAL_BACKOFF_MS;
+
+    connectSocketRef.current();
+  }, [
+    authReady,
+    authToken,
+    clearReconnectTimer,
+    teardownSocket,
+  ]);
+  
 
   const pushStatePatch = useCallback((patch: Partial<TelemetryState>) => {
     const baseState = mutableRef.current.telemetry.state;

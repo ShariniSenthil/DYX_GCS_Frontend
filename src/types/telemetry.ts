@@ -3,9 +3,8 @@
  * Matches the backend telemetry structure
  */
 
-import type { RtkUiState } from '../adapters/px4RtkUiStateAdapter';
+import type { RtkUiState } from "../adapters/px4RtkUiStateAdapter";
 
-// State
 export interface TelemetryState {
   armed: boolean;
   mode: string;
@@ -13,7 +12,6 @@ export interface TelemetryState {
   heartbeat_ts: number;
 }
 
-// Global position
 export interface TelemetryGlobal {
   lat: number;
   lon: number;
@@ -22,29 +20,37 @@ export interface TelemetryGlobal {
   satellites_visible: number;
 }
 
-// Battery
 export interface TelemetryBattery {
   voltage: number;
   current: number;
   percentage: number;
 }
 
-// RTK
 export interface TelemetryRtk {
   fix_type: number;
   baseline_age: number;
   base_linked: boolean;
 }
 
-// Mission
 export interface TelemetryMission {
   total_wp: number;
   current_wp: number;
   status: string;
   progress_pct: number;
+
+  /** Authoritative backend marking-point counters. */
+  active_point_index?: number | null;
+  active_point_number?: number | null;
+  active_point_state?: string | null;
+  completed_points?: number;
+  skipped_points?: number;
+  failed_points?: number;
+  remaining_points?: number;
+  navigation_point_count?: number;
+  loaded?: boolean;
+  ready?: boolean;
 }
 
-// Servo
 export interface ServoStatus {
   servo_id: number;
   active: boolean;
@@ -52,7 +58,6 @@ export interface ServoStatus {
   [key: string]: any;
 }
 
-// Network
 export interface NetworkData {
   connection_type: string;
   wifi_signal_strength: number;
@@ -62,7 +67,6 @@ export interface NetworkData {
   lora_connected: boolean;
 }
 
-// Complete telemetry
 export interface RoverTelemetry {
   state: TelemetryState;
   global: TelemetryGlobal;
@@ -78,25 +82,21 @@ export interface RoverTelemetry {
   attitude?: {
     yaw_deg: number;
   };
-  // New fields from Pixhawk NTUN (CurrentState)
-  wp_dist_cm?: number;    // Distance to waypoint in cm
-  xtrack_cm?: number;     // Crosstrack error in cm (lateral deviation)
-  wp_brg?: number;        // Bearing to waypoint in degrees
-  position_error_cm?: number; // Total position error = sqrt(wp_dist² + xtrack²) in cm
+  wp_dist_cm?: number;
+  xtrack_cm?: number;
+  wp_brg?: number;
+  position_error_cm?: number;
   gps_failsafe?: GpsFailsafeStatus;
-  distance_to_next_m?: number; // Backend mission distance to next waypoint in meters
+  distance_to_next_m?: number;
   fcu_connected?: boolean;
   gps_fix_name?: string;
   mission_state?: string;
   rpp_state_name?: string;
   rtk_stream_active?: boolean;
-  /** Discrete RTK UI state derived from GET /api/rtk/status. */
   rtk_ui_state?: RtkUiState;
-  /** MAVROS horizontal speed when backend provides it; otherwise use global.vel. */
   measured_speed_m_s?: number | null;
   along_track_speed_mps?: number | null;
   cross_track_speed_mps?: number | null;
-  // ── Joystick V2 telemetry fields ──────────────────────────────────────────
   joystick_state?: string | null;
   joystick_active?: boolean | null;
   joystick_owner_present?: boolean | null;
@@ -115,7 +115,6 @@ export interface RoverTelemetry {
   transport_error?: string | null;
 }
 
-// Telemetry envelope from backend
 export interface TelemetryEnvelope {
   timestamp?: number;
   state?: Partial<TelemetryState>;
@@ -131,23 +130,20 @@ export interface TelemetryEnvelope {
   attitude?: {
     yaw_deg: number;
   };
-  // New fields from Pixhawk NTUN (CurrentState)
   wp_dist_cm?: number;
   xtrack_cm?: number;
   wp_brg?: number;
-  position_error_cm?: number; // Total position error = sqrt(wp_dist² + xtrack²) in cm
-  distance_to_next_m?: number; // Backend mission distance to next waypoint in meters
+  position_error_cm?: number;
+  distance_to_next_m?: number;
   fcu_connected?: boolean;
   gps_fix_name?: string;
   mission_state?: string;
   rpp_state_name?: string;
   rtk_stream_active?: boolean;
-  /** Discrete RTK UI state derived from GET /api/rtk/status. */
   rtk_ui_state?: RtkUiState;
   measured_speed_m_s?: number | null;
   along_track_speed_mps?: number | null;
   cross_track_speed_mps?: number | null;
-  // ── Joystick V2 telemetry fields ──────────────────────────────────────────
   joystick_state?: string | null;
   joystick_active?: boolean | null;
   joystick_last_valid_cmd_age_ms?: number | null;
@@ -155,7 +151,6 @@ export interface TelemetryEnvelope {
   control_owner?: string | null;
 }
 
-// Service response
 export interface ServiceResponse {
   success: boolean;
   message?: string;
@@ -163,7 +158,6 @@ export interface ServiceResponse {
   [key: string]: any;
 }
 
-// Waypoint
 export interface Waypoint {
   id?: number;
   lat: number;
@@ -176,7 +170,6 @@ export interface Waypoint {
   [key: string]: any;
 }
 
-// Mission event
 export interface MissionEventData {
   timestamp?: string | number;
   message?: string;
@@ -188,26 +181,30 @@ export interface MissionEventData {
   [key: string]: any;
 }
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
-// GPS Failsafe types
-export type GpsFailsafeMode = 'disable' | 'strict' | 'relax';
+export type ConnectionState =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "error";
+
+export type GpsFailsafeMode = "disable" | "strict" | "relax";
 
 export interface GpsFailsafeStatus {
   mode: GpsFailsafeMode;
   triggered: boolean;
-  reason?: string;              // Human-readable trigger reason
-  fix_type?: number;            // GPS fix type (0-6, need 6 for RTK Fixed)
-  wp_dist_cm?: number;          // Distance to waypoint in cm (replaces accuracy_error_mm)
-  xtrack_cm?: number;           // Crosstrack error in cm (lateral deviation)
-  wp_brg?: number;              // Bearing to waypoint in degrees
-  requires_ack?: boolean;       // True if user acknowledgement needed (strict mode)
+  reason?: string;
+  fix_type?: number;
+  wp_dist_cm?: number;
+  xtrack_cm?: number;
+  wp_brg?: number;
+  requires_ack?: boolean;
   servo_suppressed: boolean;
-  action?: string;              // "none", "pause_hold", "suppress_servo", or "recovered"
-  timestamp?: string;           // ISO format timestamp
+  action?: string;
+  timestamp?: string;
 }
 
 export interface GpsFailsafeEvent {
-  wp_dist_cm: number;           // Distance to waypoint in cm (replaces accuracy_error_mm)
-  threshold_cm: number;         // Threshold in cm (6.0 cm)
+  wp_dist_cm: number;
+  threshold_cm: number;
   timestamp: number;
 }

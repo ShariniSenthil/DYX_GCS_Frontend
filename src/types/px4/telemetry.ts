@@ -1,59 +1,134 @@
 /**
- * 4WD_SERVER Telemetry types — mirror of server/models.py TelemetryData.
+ * 4WD rover telemetry types.
  *
- * All fields match the flat dict emitted by the backend telemetry socket
- * at ~10 Hz and returned by GET /api/telemetry/latest.
+ * The active backend sends both a nested production snapshot and flat
+ * compatibility fields on the `telemetry` Socket.IO event and
+ * GET /api/telemetry/latest.
  */
 
-// ── Flat telemetry payload ────────────────────────────────────────────────────
+export interface Px4VehicleTelemetry {
+  connected?: boolean;
+  armed?: boolean;
+  mode?: string;
+  heading_deg?: number | null;
+  ground_speed_mps?: number | null;
+}
 
-/** Flat telemetry dict from socket `telemetry` event and REST /api/telemetry/latest. */
+export interface Px4PositionTelemetry {
+  latitude?: number | null;
+  longitude?: number | null;
+  altitude_m?: number | null;
+  local_x_m?: number | null;
+  local_y_m?: number | null;
+}
+
+export interface Px4GpsTelemetry {
+  fix_type?: number;
+  fix_name?: string;
+  satellites_visible?: number;
+  horizontal_accuracy_m?: number | null;
+  vertical_accuracy_m?: number | null;
+  hdop?: number | null;
+  vdop?: number | null;
+  rtk_fixed?: boolean;
+}
+
+export interface Px4BatteryTelemetry {
+  voltage_v?: number | null;
+  current_a?: number | null;
+  remaining_percent?: number | null;
+}
+
+export interface Px4MissionTelemetry {
+  state?: string;
+  loaded?: boolean;
+  ready?: boolean;
+  total_points?: number;
+  navigation_point_count?: number;
+  active_point_index?: number | null;
+  active_point_number?: number | null;
+  active_point_state?: string | null;
+  completed_points?: number;
+  skipped_points?: number;
+  failed_points?: number;
+  remaining_points?: number;
+  progress_percent?: number;
+  marking_active?: boolean;
+}
+
+/** Payload from socket `telemetry` and REST `/api/telemetry/latest`. */
 export interface Px4TelemetryData {
-  // NED position
-  pos_n: number;
-  pos_e: number;
+  generated_at?: string | number;
+  revision?: number;
+
+  vehicle?: Px4VehicleTelemetry;
+  position?: Px4PositionTelemetry;
+  gps?: Px4GpsTelemetry;
+  battery?: Px4BatteryTelemetry;
+  mission?: Px4MissionTelemetry;
+
+  // NED/local position compatibility fields
+  pos_n?: number | null;
+  pos_e?: number | null;
+
   // Attitude
-  heading_ned_deg: number;
+  heading_deg?: number | null;
+  heading_ned_deg?: number | null;
+
   // Velocity
-  speed_m_s: number;
-  /** Horizontal speed from MAVROS velocity_local (preferred over speed_m_s when present). */
+  speed_m_s?: number | null;
+  speed_mps?: number | null;
   measured_speed_m_s?: number | null;
   along_track_speed_mps?: number | null;
   cross_track_speed_mps?: number | null;
-  // Path tracking
-  xtrack_m: number;
-  dist_to_goal_m: number;
-  // RPP state
-  rpp_state: number;
-  rpp_state_name: string;
-  // Vehicle state
-  armed: boolean;
-  mode: string;          // 'MANUAL' | 'OFFBOARD'
-  connected: boolean;
-  // Battery
-  battery_v: number;
-  battery_pct: number;
-  // GPS
-  gps_fix: number;
+
+  // Path tracking (optional on the current backend)
+  xtrack_m?: number | null;
+  dist_to_goal_m?: number | null;
+  dist_to_goal?: number | null;
+  wp_dist_cm?: number | null;
+
+  // RPP state (optional on the current backend)
+  rpp_state?: number | null;
+  rpp_state_name?: string | null;
+
+  // Vehicle compatibility fields
+  armed?: boolean;
+  mode?: string;
+  connected?: boolean;
+
+  // Battery compatibility fields
+  battery_v?: number | null;
+  battery_pct?: number | null;
+
+  // GPS compatibility fields
+  gps_fix?: number | null;
   gps_fix_name?: string;
-  gps_sat: number;
-  lat: number;
-  lon: number;
-  alt: number;
-  // Spray / marking
-  spraying: boolean;
-  marking_state: string;
-  commanded_on: boolean;
-  confirmed_off: boolean;
-  dash_feasible: boolean;
-  // Optional fields
+  gps_sat?: number | null;
+  lat?: number | null;
+  lon?: number | null;
+  alt?: number | null;
+  hrms?: number | null;
+  vrms?: number | null;
+
+  // Mission compatibility fields
+  mission_state?: string | null;
+  marking_active?: boolean;
+
+  // Spray / marking compatibility fields
+  spraying?: boolean;
+  marking_state?: string;
+  commanded_on?: boolean;
+  confirmed_off?: boolean;
+  dash_feasible?: boolean;
+
+  // Optional diagnostics
   imu_status?: string;
-  hrms?: number;
-  vrms?: number;
   pose_age_ms?: number;
   rpp_debug_fresh?: boolean;
-  timestamp?: number;
-  // ── Joystick V2 fields (optional, present when joystick controller is active) ──
+  timestamp?: number | string;
+
+  // Joystick V2 fields
   joystick_state?: string | null;
   joystick_active?: boolean | null;
   joystick_has_lease?: boolean | null;
@@ -66,45 +141,54 @@ export interface Px4TelemetryData {
 // ── Mission status (socket `mission_status` event) ───────────────────────────
 
 export type MissionState =
-  | 'idle'
-  | 'loading'
-  | 'arming'
-  | 'switching_offboard'
-  | 'running'
-  | 'paused'
-  | 'stopping'
-  | 'stopped'
-  | 'completed'
-  | 'error'
+  | "idle"
+  | "loading"
+  | "arming"
+  | "switching_offboard"
+  | "running"
+  | "paused"
+  | "stopping"
+  | "stopped"
+  | "completed"
+  | "error"
   | string;
 
-export interface Px4MissionStatus {
+export interface Px4MissionStatus extends Px4MissionTelemetry {
   state: MissionState;
-  rpp_state: number;
-  rpp_state_name: string;
-  dist_to_goal: number;
-  speed: number;
-  xtrack: number;
-  /** Present when a path is loaded. */
+  rpp_state?: number;
+  rpp_state_name?: string;
+  dist_to_goal?: number;
+  speed?: number;
+  xtrack?: number;
   path_name?: string;
   mission_id?: string;
-  /** Point mode specific */
   point_index?: number;
-  total_points?: number;
   expected_generation?: number;
   spray_mode?: string;
 }
 
-// ── Healthz response ──────────────────────────────────────────────────────────
+// ── Healthz response ─────────────────────────────────────────────────────────
 
 export interface Px4HealthzResponse {
-  ros_node?: boolean;
-  fcu_connected: boolean;
+  status?: string;
+  backend_online?: boolean;
+  ros_node_started?: boolean;
+  ros_connected?: boolean;
+
+  /** Current backend name. */
+  vehicle_connected?: boolean;
+  /** Compatibility alias added by the backend patch. */
+  fcu_connected?: boolean;
+
   armed: boolean;
   mode: string;
   mission_state?: MissionState | string | null;
+  hrms?: number | null;
+  vrms?: number | null;
+
   rpp_state?: number | null;
   pose_age_ms?: number | null;
+  backend_uptime_sec?: number;
   uptime_s?: number;
 }
 
