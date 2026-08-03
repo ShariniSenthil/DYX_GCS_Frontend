@@ -85,12 +85,14 @@ import { clearVerifiedMission } from "../services/verifiedMissionService";
 import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStatus,
+  getLoadedMissionPath,
   startMission,
   pauseMission,
   resumeMission,
   nextMissionPoint,
   skipMissionPoint,
   stopMission,
+  type LoadedPathPoint,
   type MissionRuntimeState,
 } from "../services/missionApi";
 
@@ -176,6 +178,20 @@ const getRtkFailureMessage = (err: unknown, fallback: string) => {
   return fallback;
 };
 
+type TrajectoryMapReference = {
+  /**
+   * GPS position corresponding to the first generated local trajectory point.
+   */
+  latitude: number;
+  longitude: number;
+
+  /**
+   * First generated local map coordinate.
+   */
+  x: number;
+  y: number;
+};
+
 interface MissionReportScreenProps {
   isVisible?: boolean;
 }
@@ -238,6 +254,13 @@ export default function MissionReportScreen({
 
   const [backendMission, setBackendMission] =
     useState<MissionRuntimeState | null>(null);
+
+  const [trajectoryPoints, setTrajectoryPoints] = useState<LoadedPathPoint[]>(
+    [],
+  );
+
+  const [trajectoryMapReference, setTrajectoryMapReference] =
+    useState<TrajectoryMapReference | null>(null);
 
   // STATUS DOWNGRADE GUARD: Defines priority order — higher index = more "final"
   // Once a waypoint reaches 'completed' or 'skipped', backend events cannot regress it
@@ -474,23 +497,14 @@ export default function MissionReportScreen({
   ]);
 
   /**
-   * Final status map used by:
-   * - Mission Report table
-   * - Accuracy monitoring
-   * - Mission completion dialog
-   * - Export
-   * - Completed mission preservation
+   * Mission Report uses only stored waypoint results.
    *
-   * All uploaded marking points begin as pending.
-   * The currently active point receives live rover-to-target accuracy.
-   * Terminal statuses are never overwritten by live telemetry.
+   * Live rover-to-target distance is displayed separately
+   * by DistanceToTargetCard and must not overwrite report accuracy.
    */
   const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
     const next: Record<number, WpStatus> = {};
 
-    /**
-     * Ensure every uploaded marking point has a visible report row state.
-     */
     for (const waypoint of waypoints) {
       const existing = effectiveStatusMap[waypoint.sn] as WpStatus | undefined;
 
@@ -502,128 +516,8 @@ export default function MissionReportScreen({
       };
     }
 
-    /**
-     * Live accuracy is calculated only for the current active point.
-     */
-    if (
-      effectiveCurrentIndex === null ||
-      effectiveCurrentIndex < 0 ||
-      !roverPosition
-    ) {
-      return next;
-    }
-
-    const activeWaypoint = waypoints[effectiveCurrentIndex];
-
-    if (!activeWaypoint) {
-      return next;
-    }
-
-    const serialNumber =
-      typeof activeWaypoint.sn === "number"
-        ? activeWaypoint.sn
-        : effectiveCurrentIndex + 1;
-
-    const existing = next[serialNumber] ?? {
-      status: "pending",
-    };
-
-    /**
-     * These statuses are final.
-     * Live rover movement must not change them.
-     */
-    const terminalStatuses = new Set<WpStatus["status"]>([
-      "completed",
-      "skipped",
-      "failed",
-      "aborted",
-      "stopped",
-      "mission_end",
-    ]);
-
-    if (existing.status && terminalStatuses.has(existing.status)) {
-      return next;
-    }
-
-    const targetLat = Number(activeWaypoint.lat);
-
-    const targetLon = Number(activeWaypoint.lon);
-
-    const achievedLat = Number(roverPosition.lat);
-    const achievedLon = Number(roverPosition.lng);
-
-    const coordinatesAreValid =
-      Number.isFinite(targetLat) &&
-      Number.isFinite(targetLon) &&
-      Number.isFinite(achievedLat) &&
-      Number.isFinite(achievedLon) &&
-      targetLat >= -90 &&
-      targetLat <= 90 &&
-      achievedLat >= -90 &&
-      achievedLat <= 90 &&
-      targetLon >= -180 &&
-      targetLon <= 180 &&
-      achievedLon >= -180 &&
-      achievedLon <= 180;
-
-    if (!coordinatesAreValid) {
-      return next;
-    }
-
-    const errorMm = calculatePositionErrorMm(
-      targetLat,
-      targetLon,
-      achievedLat,
-      achievedLon,
-    );
-
-    const accuracy = getAccuracyLevel(errorMm);
-
-    next[serialNumber] = {
-      ...existing,
-
-      /**
-       * Loading is the current/active state already supported by your table.
-       */
-      status:
-        !existing.status || existing.status === "pending"
-          ? "loading"
-          : existing.status,
-
-      reached: existing.reached === true || errorMm <= 30,
-
-      lat_achieved: achievedLat,
-      lon_achieved: achievedLon,
-
-      hrms:
-        typeof telemetry.hrms === "number" && Number.isFinite(telemetry.hrms)
-          ? telemetry.hrms
-          : undefined,
-
-      vrms:
-        typeof telemetry.vrms === "number" && Number.isFinite(telemetry.vrms)
-          ? telemetry.vrms
-          : undefined,
-
-      /**
-       * Existing Mission Report table stores error in centimetres.
-       */
-      position_error_cm: errorMm / 10,
-
-      accuracy_level: accuracy.level,
-
-      remark: "Live accuracy monitoring",
-    };
-
     return next;
-  }, [
-    waypoints,
-    effectiveStatusMap,
-    effectiveCurrentIndex,
-    roverPosition,
-    telemetry.hrms,
-    telemetry.vrms,
-  ]);
+  }, [waypoints, effectiveStatusMap]);
 
   const effectiveWaitingForManual =
     waitingForManual ||
@@ -646,6 +540,7 @@ export default function MissionReportScreen({
   const modeRef = useRef(mode);
   const missionModeRef = useRef(missionMode);
   const telemetryRef = useRef(telemetry);
+  const roverPositionRef = useRef(roverPosition);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -683,6 +578,10 @@ export default function MissionReportScreen({
   useEffect(() => {
     telemetryRef.current = telemetry;
   }, [telemetry]);
+
+  useEffect(() => {
+    roverPositionRef.current = roverPosition;
+  }, [roverPosition]);
 
   const showNotification = (
     type: "success" | "error" | "info",
@@ -738,6 +637,101 @@ export default function MissionReportScreen({
     }
   }, []);
 
+  const refreshTrajectoryPreview = useCallback(async (): Promise<void> => {
+    if (isOfflineMode()) {
+      setTrajectoryPoints([]);
+      setTrajectoryMapReference(null);
+      return;
+    }
+
+    try {
+      console.log(
+        "[MissionReportScreen] Fetching generated trajectory for main map...",
+      );
+
+      const response = await getLoadedMissionPath();
+
+      if (!response.success) {
+        setTrajectoryPoints([]);
+        setTrajectoryMapReference(null);
+        return;
+      }
+
+      /**
+       * The backend trajectory is in the local ENU/map frame:
+       * x = east
+       * y = north
+       */
+      const validPoints = Array.isArray(response.points)
+        ? response.points.filter(
+            (point) =>
+              typeof point.x === "number" &&
+              Number.isFinite(point.x) &&
+              typeof point.y === "number" &&
+              Number.isFinite(point.y),
+          )
+        : [];
+
+      setTrajectoryPoints(validPoints);
+
+      const firstPoint = validPoints[0];
+      const currentRover = roverPositionRef.current;
+
+      const referenceIsValid =
+        firstPoint !== undefined &&
+        typeof firstPoint.x === "number" &&
+        Number.isFinite(firstPoint.x) &&
+        typeof firstPoint.y === "number" &&
+        Number.isFinite(firstPoint.y) &&
+        currentRover !== null &&
+        Number.isFinite(currentRover.lat) &&
+        Number.isFinite(currentRover.lng) &&
+        currentRover.lat >= -90 &&
+        currentRover.lat <= 90 &&
+        currentRover.lng >= -180 &&
+        currentRover.lng <= 180 &&
+        !(currentRover.lat === 0 && currentRover.lng === 0);
+
+      if (referenceIsValid && currentRover) {
+        setTrajectoryMapReference({
+          latitude: currentRover.lat,
+          longitude: currentRover.lng,
+          x: firstPoint.x as number,
+          y: firstPoint.y as number,
+        });
+      } else {
+        setTrajectoryMapReference(null);
+      }
+
+      console.log("[MissionReportScreen] Main-map trajectory loaded:", {
+        frameId: response.frame_id,
+        displayedPoints: validPoints.length,
+        totalPoints: response.navigation_point_count,
+        previewTruncated: response.preview_truncated,
+        referenceGps: currentRover
+          ? {
+              latitude: currentRover.lat,
+              longitude: currentRover.lng,
+            }
+          : null,
+        referenceLocal: firstPoint
+          ? {
+              x: firstPoint.x,
+              y: firstPoint.y,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.warn(
+        "[MissionReportScreen] Generated trajectory unavailable:",
+        error instanceof Error ? error.message : String(error),
+      );
+
+      setTrajectoryPoints([]);
+      setTrajectoryMapReference(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isVisible) {
       return;
@@ -745,6 +739,25 @@ export default function MissionReportScreen({
 
     void refreshBackendMission();
   }, [isVisible, connectionState, refreshBackendMission]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    if (backendMission?.ready !== true) {
+      setTrajectoryPoints([]);
+      setTrajectoryMapReference(null);
+      return;
+    }
+
+    void refreshTrajectoryPreview();
+  }, [
+    isVisible,
+    backendMission?.ready,
+    backendMission?.navigation_point_count,
+    refreshTrajectoryPreview,
+  ]);
 
   const getLatestNtripProfile = async (): Promise<NTRIPProfile | null> => {
     const profiles = await getAllProfiles();
@@ -1041,6 +1054,9 @@ export default function MissionReportScreen({
           "Success",
           "Mission uploaded successfully!",
         );
+
+        await refreshBackendMission();
+        await refreshTrajectoryPreview();
       } else {
         console.error("[MissionReportScreen] Upload failed:", result.message);
         showNotification(
@@ -1246,29 +1262,53 @@ export default function MissionReportScreen({
     telemetry.rtk?.fix_type,
   ]);
 
-  // Calculate marked waypoints count from real-time statusMap
-  const markedCount = useMemo(() => {
-    const count = Object.values(effectiveStatusMap).filter(
-      (status) => status.status === "completed" || status.status === "marked",
-    ).length;
+  const missionProgressStats = useMemo(() => {
+    const totalPoints = waypoints.length;
 
-    // Debug logging for statusMap changes
-    if (Object.keys(effectiveStatusMap).length > 0) {
-      missionLog("[MissionReportScreen] StatusMap update:", {
-        totalStatuses: Object.keys(effectiveStatusMap).length,
-        markedCount: count,
-        statusMap: Object.entries(effectiveStatusMap).reduce(
-          (acc, [key, status]) => {
-            acc[key] = status.status;
-            return acc;
-          },
-          {} as Record<string, string | undefined>,
-        ),
-      });
+    if (totalPoints === 0) {
+      return {
+        markedPoints: 0,
+        currentPoint: 0,
+        totalPoints: 0,
+      };
     }
 
-    return count;
-  }, [effectiveStatusMap]);
+    const markedPoints = waypoints.reduce((count, waypoint) => {
+      const pointStatus = effectiveStatusMap[waypoint.sn]?.status;
+
+      const isMarked = pointStatus === "completed" || pointStatus === "marked";
+
+      return isMarked ? count + 1 : count;
+    }, 0);
+
+    const safeMarkedPoints = Math.min(markedPoints, totalPoints);
+
+    if (safeMarkedPoints >= totalPoints) {
+      return {
+        markedPoints: totalPoints,
+        currentPoint: totalPoints,
+        totalPoints,
+      };
+    }
+
+    const currentFromBackend =
+      effectiveCurrentIndex !== null && effectiveCurrentIndex >= 0
+        ? effectiveCurrentIndex + 1
+        : 1;
+
+    const currentFromMarked = safeMarkedPoints + 1;
+
+    const currentPoint = Math.min(
+      totalPoints,
+      Math.max(1, currentFromBackend, currentFromMarked),
+    );
+
+    return {
+      markedPoints: safeMarkedPoints,
+      currentPoint,
+      totalPoints,
+    };
+  }, [waypoints, effectiveStatusMap, effectiveCurrentIndex]);
 
   // Automatically derive currentIndex from statusMap to keep UI in sync
   // This fixes the issue where currentIndex gets stuck even though statusMap updates correctly
@@ -1619,6 +1659,101 @@ export default function MissionReportScreen({
     missionEndTime,
   ]);
 
+  /**
+   * Current marking point selected by Mission Progress.
+   */
+  const currentTargetWaypoint =
+    missionProgressStats.currentPoint > 0
+      ? (displayData.waypoints[missionProgressStats.currentPoint - 1] ?? null)
+      : null;
+
+  /**
+   * Full-speed rover-to-current-point GPS distance.
+   *
+   * This is display-only and does not affect rover navigation,
+   * marking tolerance, or mission progression.
+   */
+  const liveDistanceToCurrentPointM = useMemo<number | undefined>(() => {
+    if (!currentTargetWaypoint || !roverPosition) {
+      return undefined;
+    }
+
+    const targetLat = Number(currentTargetWaypoint.lat);
+
+    const targetLon = Number(currentTargetWaypoint.lon);
+
+    const roverLat = Number(roverPosition.lat);
+
+    const roverLon = Number(roverPosition.lng);
+
+    const coordinatesAreValid =
+      Number.isFinite(targetLat) &&
+      Number.isFinite(targetLon) &&
+      Number.isFinite(roverLat) &&
+      Number.isFinite(roverLon) &&
+      targetLat >= -90 &&
+      targetLat <= 90 &&
+      roverLat >= -90 &&
+      roverLat <= 90 &&
+      targetLon >= -180 &&
+      targetLon <= 180 &&
+      roverLon >= -180 &&
+      roverLon <= 180 &&
+      !(roverLat === 0 && roverLon === 0);
+
+    if (!coordinatesAreValid) {
+      return undefined;
+    }
+
+    const distanceMm = calculatePositionErrorMm(
+      targetLat,
+      targetLon,
+      roverLat,
+      roverLon,
+    );
+
+    return distanceMm / 1000;
+  }, [
+    currentTargetWaypoint?.lat,
+    currentTargetWaypoint?.lon,
+    roverPosition?.lat,
+    roverPosition?.lng,
+  ]);
+
+  /**
+   * Store the latest full-speed value without causing
+   * the distance card to render on every telemetry packet.
+   */
+  const latestDistanceToCurrentPointRef = useRef<number | undefined>(
+    liveDistanceToCurrentPointM,
+  );
+
+  useEffect(() => {
+    latestDistanceToCurrentPointRef.current = liveDistanceToCurrentPointM;
+  }, [liveDistanceToCurrentPointM]);
+
+  /**
+   * The visible card updates four times per second.
+   */
+  const [displayDistanceToCurrentPointM, setDisplayDistanceToCurrentPointM] =
+    useState<number | undefined>(liveDistanceToCurrentPointM);
+
+  useEffect(() => {
+    const publishDistance = () => {
+      setDisplayDistanceToCurrentPointM(
+        latestDistanceToCurrentPointRef.current,
+      );
+    };
+
+    publishDistance();
+
+    const interval = setInterval(publishDistance, 250);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
   const missionProgressRef = useMemo(
     () =>
       getMissionProgressRef(
@@ -1822,6 +1957,12 @@ export default function MissionReportScreen({
       setMissionStartTime(new Date());
       setMissionEndTime(null);
       setCurrentIndex(0);
+
+      /**
+       * Backend rebuilds the trajectory from the rover's current
+       * position when Start is pressed.
+       */
+      await refreshTrajectoryPreview();
 
       showNotification(
         "success",
@@ -2894,86 +3035,96 @@ export default function MissionReportScreen({
         // Get hrms from telemetry for accuracy fallback
         const hrms = telemetryRef.current.hrms;
 
-        // USE ACCURACY DATA: Primary data source from event.accuracy_error_mm (sent by backend at top level)
-        // Priority: 1) event.accuracy_error_mm (PRIMARY from backend), 2) hrms fallback
+        const rawAccuracyMm =
+          event.accuracy_error_mm ?? event.data?.accuracy_error_mm ?? null;
 
-        // PRIMARY: Backend accuracy_error_mm
-        const gpsFailsafeAccuracyMm = event.accuracy_error_mm ?? null;
+        const parsedAccuracyMm =
+          rawAccuracyMm !== null ? Number(rawAccuracyMm) : null;
 
-        // COMMENTED OUT METHODS (kept for reference):
-        // const positionErrorCmFromEvent = event.position_error_cm ?? event.data?.position_error_cm ?? null;
-        // const accuracyErrorMmFromEvent = event.accuracy_error_mm ?? event.data?.accuracy_error_mm ?? null;
-        // const positionErrorMm_METHOD2 = telemetryRef.current.position_error_cm != null ? telemetryRef.current.position_error_cm * 10 : null;
-        // const positionErrorMm_METHOD3 = positionErrorCmFromEvent != null ? positionErrorCmFromEvent * 10 : null;
-        // const positionErrorMm_METHOD4 = accuracyErrorMmFromEvent != null ? accuracyErrorMmFromEvent : null;
+        const backendAccuracyMm =
+          parsedAccuracyMm !== null &&
+          Number.isFinite(parsedAccuracyMm) &&
+          parsedAccuracyMm >= 0
+            ? parsedAccuracyMm
+            : null;
 
-        // Use backend accuracy as primary source
-        const backendAccuracyMm = gpsFailsafeAccuracyMm;
+        const isSkipped = String(markingStatus).toLowerCase() === "skipped";
 
-        // FALLBACK: hrms (meters) converted to mm if no GPS failsafe available
-        // const hrmsAccuracyMm = hrms != null && hrms > 0 ? hrms * 1000 : null;
-        // const backendAccuracyMm_FALLBACK = (positionErrorMm != null && positionErrorMm > 0)
-        //                              ? positionErrorMm
-        //                              : hrmsAccuracyMm;
-
-        let accuracyData: {
-          accuracy_level?: string;
-          position_error_cm?: number;
-        } = {};
-        if (backendAccuracyMm != null) {
-          // Use same thresholds as frontend: Excellent ≤30mm, Good 30-60mm, Poor >60mm
-          const accuracy = getAccuracyLevel(backendAccuracyMm);
-          accuracyData = {
-            accuracy_level: accuracy.level,
-            position_error_cm: backendAccuracyMm / 10, // Convert mm to cm for consistency with WaypointsTable
-          };
-          const source = "event_accuracy_error_mm";
-          console.log(
-            `[MissionReportScreen] 📊 Backend accuracy for WP ${statusKey} (marked): ${backendAccuracyMm.toFixed(1)}mm (${accuracy.label}) [source: ${source}]`,
-          );
-        } else {
-          console.log(
-            `[MissionReportScreen] ⚠️ No backend accuracy for WP ${statusKey} (marked), sources checked:`,
-            {
-              event_accuracy_error_mm: event.accuracy_error_mm,
-              // telemetry_position_error_cm: telemetryRef.current.position_error_cm,
-              // event_position_error_cm: event.position_error_cm,
-              // hrms: hrms,
-            },
-          );
-        }
-
-        // Move prevEntry read and changed check inside functional updater
-        // to read fresh state from `prev` instead of stale `statusMapRef.current`
         setStatusMap((prev) => {
           const prevEntry = prev[statusKey];
-          const nextEntry = {
-            ...(prevEntry || {}),
-            marked: true,
-            status: markingStatus === "skipped" ? "skipped" : "completed",
+
+          /**
+           * Once a completed point has a valid accuracy,
+           * later events must not replace it.
+           */
+          const hasFrozenAccuracy =
+            prevEntry?.status === "completed" &&
+            typeof prevEntry.position_error_cm === "number" &&
+            Number.isFinite(prevEntry.position_error_cm);
+
+          const accuracyData:
+            | {
+                accuracy_level: string;
+                position_error_cm: number;
+              }
+            | Record<string, never> =
+            !isSkipped && !hasFrozenAccuracy && backendAccuracyMm !== null
+              ? {
+                  accuracy_level: getAccuracyLevel(backendAccuracyMm).level,
+
+                  /**
+                   * Mission Report currently stores this
+                   * field in centimetres.
+                   */
+                  position_error_cm: backendAccuracyMm / 10,
+                }
+              : {};
+
+          const nextEntry: WpStatus = {
+            ...(prevEntry ?? {}),
+
+            marked: !isSkipped,
+
+            status: isSkipped ? "skipped" : "completed",
+
             timestamp,
-            pile: event.pile ?? prevEntry?.pile,
-            rowNo: event.rowNo ?? event.row_no ?? prevEntry?.rowNo,
+
+            pile: event.pile ?? event.data?.pile ?? prevEntry?.pile,
+
+            rowNo:
+              event.rowNo ??
+              event.row_no ??
+              event.data?.rowNo ??
+              event.data?.row_no ??
+              prevEntry?.rowNo,
+
             remark:
               event.remark ??
-              (markingStatus === "skipped" ? "Skipped" : prevEntry?.remark),
+              event.data?.remark ??
+              (isSkipped ? "Skipped" : "Marked"),
+
             ...accuracyData,
-          } as WpStatus;
+          };
 
           const changed =
             !prevEntry ||
             prevEntry.status !== nextEntry.status ||
             prevEntry.marked !== nextEntry.marked ||
+            prevEntry.timestamp !== nextEntry.timestamp ||
             prevEntry.pile !== nextEntry.pile ||
             prevEntry.rowNo !== nextEntry.rowNo ||
             prevEntry.remark !== nextEntry.remark ||
             prevEntry.accuracy_level !== nextEntry.accuracy_level ||
             prevEntry.position_error_cm !== nextEntry.position_error_cm;
 
-          if (changed) {
-            return { ...prev, [statusKey]: nextEntry };
+          if (!changed) {
+            return prev;
           }
-          return prev;
+
+          return {
+            ...prev,
+            [statusKey]: nextEntry,
+          };
         });
 
         const statusEmoji = markingStatus === "skipped" ? "⏭️" : "✅";
@@ -3528,6 +3679,8 @@ export default function MissionReportScreen({
       <View style={styles.absoluteMapContainer}>
         <MissionMap
           waypoints={displayData.waypoints}
+          trajectoryPoints={trajectoryPoints}
+          trajectoryReference={trajectoryMapReference}
           roverLat={mapProps.roverLat}
           roverLon={mapProps.roverLon}
           heading={mapProps.heading}
@@ -3577,10 +3730,9 @@ export default function MissionReportScreen({
           }
         >
           <MissionProgressCard
-            waypoints={displayData.waypoints}
-            currentIndex={effectiveCurrentIndex}
-            markedCount={markedCount}
-            isMissionActive={effectiveMissionActive}
+            markedCount={missionProgressStats.markedPoints}
+            currentPoint={missionProgressStats.currentPoint}
+            totalPoints={missionProgressStats.totalPoints}
             onClose={() => setPanelVisible("missionProgress", false)}
           />
         </DraggableCard>
@@ -3623,7 +3775,7 @@ export default function MissionReportScreen({
         >
           <DistanceToTargetCard
             isMissionActive={effectiveMissionActive}
-            distanceToNextM={telemetry.distance_to_next_m}
+            distanceToNextM={displayDistanceToCurrentPointM}
           />
         </DraggableCard>
       )}

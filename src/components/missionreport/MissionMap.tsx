@@ -1,35 +1,68 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { MAPBOX_ACCESS_TOKEN, MAPBOX_JS_URL, MAPBOX_CSS_URL, MAPBOX_STYLE_SATELLITE, MAPBOX_STYLE_STREETS, MAPBOX_STYLE_DARK } from '../../config/mapboxConfig';
-import { MapBottomControlsBar } from '../shared/MapBottomControlsBar';
-import type { Waypoint } from './types';
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { View, StyleSheet } from "react-native";
+import { WebView } from "react-native-webview";
+import {
+  MAPBOX_ACCESS_TOKEN,
+  MAPBOX_JS_URL,
+  MAPBOX_CSS_URL,
+  MAPBOX_STYLE_SATELLITE,
+  MAPBOX_STYLE_STREETS,
+  MAPBOX_STYLE_DARK,
+} from "../../config/mapboxConfig";
+import { MapBottomControlsBar } from "../shared/MapBottomControlsBar";
+import type { Waypoint } from "./types";
+import type { LoadedPathPoint } from "../../services/missionApi";
 
 interface Props {
   roverLat?: number;
   roverLon?: number;
   waypoints?: Waypoint[];
+
+  /**
+   * Generated backend trajectory in local ENU coordinates:
+   * x = east
+   * y = north
+   */
+  trajectoryPoints?: LoadedPathPoint[];
+
+  /**
+   * GPS/local reference calculated once by MissionReportScreen.
+   */
+  trajectoryReference?: {
+    latitude: number;
+    longitude: number;
+    x: number;
+    y: number;
+  } | null;
+
   heading?: number | null;
   activeWaypointIndex?: number | null;
-  // TRAIL DISABLED: trailPoints prop commented out
-  // trailPoints?: Array<{ latitude: number; longitude: number; opacity?: number; timestamp?: number }>;
-  armed?: boolean;        // For dynamic color: armed = green
+
+  armed?: boolean;
   rtkFixType?: number;
-  /** Full-bleed map — no rounded corners on the WebView */
+
+  /** Full-screen map without rounded corners. */
   edgeToEdge?: boolean;
-  isVisible?: boolean;     // When false, pauses Mapbox rendering to save GPU/CPU
-  // Status map keyed by waypoint.sn → drives completion color on markers
-  statusMap?: Record<number, { status?: string } & Record<string, any>>;
+
+  /** Pauses Mapbox activity while the tab is hidden. */
+  isVisible?: boolean;
+
+  statusMap?: Record<
+    number,
+    {
+      status?: string;
+    } & Record<string, any>
+  >;
 }
 
 const MissionMapBase: React.FC<Props> = ({
-  roverLat = 0.0,
-  roverLon = 0.0,
+  roverLat = 0,
+  roverLon = 0,
   waypoints = [],
+  trajectoryPoints = [],
+  trajectoryReference = null,
   heading = null,
   activeWaypointIndex = null,
-  // TRAIL DISABLED: trailPoints prop commented out
-  // trailPoints = [],
   armed = false,
   rtkFixType = 0,
   edgeToEdge = false,
@@ -37,13 +70,20 @@ const MissionMapBase: React.FC<Props> = ({
   statusMap,
 }) => {
   const webViewRef = useRef<WebView | null>(null);
+
   const [mapReady, setMapReady] = useState(false);
-  const [mapStyle, setMapStyle] = useState<'satellite' | 'streets' | 'dark'>('satellite');
+
+  const [mapStyle, setMapStyle] = useState<"satellite" | "streets" | "dark">(
+    "satellite",
+  );
+
   const mapInitializedRef = useRef(false);
 
   // Ref so waypoints injection reads latest active index without re-triggering a full reload
   const activeWaypointIndexRef = useRef(activeWaypointIndex);
-  useEffect(() => { activeWaypointIndexRef.current = activeWaypointIndex; }, [activeWaypointIndex]);
+  useEffect(() => {
+    activeWaypointIndexRef.current = activeWaypointIndex;
+  }, [activeWaypointIndex]);
 
   // Store initial rover data for one-time HTML generation
   const initialRoverData = useRef({
@@ -57,7 +97,9 @@ const MissionMapBase: React.FC<Props> = ({
   // WAYPOINTS DEFERRED: HTML shell has empty waypoints; data injected after WebView loads.
   // This avoids blocking the JS thread with JSON.stringify on 400+ waypoints during render.
   const mapHTML = useMemo(() => {
-    console.log('[MissionMap] Generating map HTML shell (waypoints deferred to injectedJavaScript)');
+    console.log(
+      "[MissionMap] Generating map HTML shell (waypoints deferred to injectedJavaScript)",
+    );
 
     const roverData = JSON.stringify(initialRoverData.current);
 
@@ -102,6 +144,11 @@ const MissionMapBase: React.FC<Props> = ({
     });
 
     let roverMarker = null;
+
+    let generatedTrajectoryData = {
+      type: 'FeatureCollection',
+      features: []
+    };
 
     // Live rover position — updated via injected JS so centerOnRover always uses current coords
     let liveRoverPos = roverData.hasPosition ? { lat: roverData.lat, lon: roverData.lon } : null;
@@ -227,6 +274,99 @@ const MissionMapBase: React.FC<Props> = ({
       }
 
       // Waypoint points — native GL circle layer with data-driven color.
+            // Generated backend trajectory.
+      // Purple line and purple dots are drawn below original marking points.
+      if (!map.getSource('generated-trajectory')) {
+        map.addSource('generated-trajectory', {
+          type: 'geojson',
+          data: generatedTrajectoryData
+        });
+      }
+
+      if (!map.getLayer('generated-trajectory-line')) {
+        map.addLayer({
+          id: 'generated-trajectory-line',
+          type: 'line',
+          source: 'generated-trajectory',
+          filter: [
+            '==',
+            ['get', 'kind'],
+            'line'
+          ],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round'
+          },
+          paint: {
+          'line-color': '#A855F7',
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            15,
+            2,
+            19,
+            3,
+            22,
+            4,
+            24,
+            5
+          ],
+          'line-opacity': 1
+        }
+        });
+      }
+
+      if (!map.getLayer('generated-trajectory-points')) {
+  map.addLayer({
+    id: 'generated-trajectory-points',
+    type: 'circle',
+    source: 'generated-trajectory',
+    filter: [
+      '==',
+      ['get', 'kind'],
+      'point'
+    ],
+    paint: {
+      'circle-color': '#F0ABFC',
+
+      /**
+       * At low zoom, generated points are extremely close together.
+       * Keep the dots small so they do not form a wavy bead chain.
+       */
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        15,
+        0.5,
+        18,
+        1,
+        21,
+        2,
+        24,
+        3
+      ],
+
+      'circle-opacity': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        15,
+        0.25,
+        18,
+        0.5,
+        20,
+        0.85,
+        22,
+        1
+      ],
+
+      'circle-stroke-width': 0
+    }
+  });
+}
+
       // completed (feature-state) > active (feature-state) > start > end > normal.
       if (!map.getSource('mission-points')) {
         // Top-level numeric feature id (set in buildPointsFC) is used directly by
@@ -389,6 +529,37 @@ const MissionMapBase: React.FC<Props> = ({
     window.centerOnRover = centerOnRover;
     window.fitToMission = fitToMission;
     window.setMapStyle = setMapStyle;
+        window.loadGeneratedTrajectory = function(data) {
+      try {
+        generatedTrajectoryData =
+          data &&
+          data.type === 'FeatureCollection'
+            ? data
+            : {
+                type: 'FeatureCollection',
+                features: []
+              };
+
+        const source =
+          map.getSource('generated-trajectory');
+
+        if (source) {
+          source.setData(
+            generatedTrajectoryData
+          );
+        }
+
+        console.log(
+          '[MissionMap] Generated trajectory loaded:',
+          generatedTrajectoryData.features.length
+        );
+      } catch (e) {
+        console.error(
+          '[MissionMap] Generated trajectory load error:',
+          e
+        );
+      }
+    };
 
     map.on('style.load', function() {
       ensureMissionLayers();
@@ -479,6 +650,133 @@ const MissionMapBase: React.FC<Props> = ({
   // Memoize source prop to avoid new object reference every render
   const mapSource = useMemo(() => ({ html: mapHTML }), [mapHTML]);
 
+  /**
+   * Convert backend local ENU points into GPS coordinates only
+   * for visualization on the Mapbox map.
+   *
+   * This does not affect rover navigation.
+   */
+  const generatedTrajectoryGeoJson = useMemo(() => {
+    const emptyGeoJson = {
+      type: "FeatureCollection" as const,
+      features: [],
+    };
+
+    if (!trajectoryReference) {
+      return emptyGeoJson;
+    }
+
+    const referenceLatitude = trajectoryReference.latitude;
+
+    const referenceLongitude = trajectoryReference.longitude;
+
+    const referenceX = trajectoryReference.x;
+
+    const referenceY = trajectoryReference.y;
+
+    const metresPerDegreeLatitude = 111_320;
+
+    const metresPerDegreeLongitude = Math.max(
+      1,
+      111_320 * Math.cos((referenceLatitude * Math.PI) / 180),
+    );
+
+    const coordinates = trajectoryPoints
+      .filter(
+        (
+          point,
+        ): point is LoadedPathPoint & {
+          x: number;
+          y: number;
+        } =>
+          typeof point.x === "number" &&
+          Number.isFinite(point.x) &&
+          typeof point.y === "number" &&
+          Number.isFinite(point.y),
+      )
+      .map((point) => {
+        const eastOffsetM = point.x - referenceX;
+
+        const northOffsetM = point.y - referenceY;
+
+        const latitude =
+          referenceLatitude + northOffsetM / metresPerDegreeLatitude;
+
+        const longitude =
+          referenceLongitude + eastOffsetM / metresPerDegreeLongitude;
+
+        return [longitude, latitude];
+      })
+      .filter(
+        (coordinate) =>
+          Number.isFinite(coordinate[0]) &&
+          Number.isFinite(coordinate[1]) &&
+          coordinate[0] >= -180 &&
+          coordinate[0] <= 180 &&
+          coordinate[1] >= -90 &&
+          coordinate[1] <= 90,
+      );
+
+    const features: any[] = [];
+
+    if (coordinates.length >= 2) {
+      features.push({
+        type: "Feature",
+        properties: {
+          kind: "line",
+        },
+        geometry: {
+          type: "LineString",
+          coordinates,
+        },
+      });
+    }
+
+    /**
+     * Add every generated interpolation point as a purple dot.
+     * Backend preview is already limited, so this remains GPU-rendered
+     * through one GeoJSON source instead of thousands of React markers.
+     */
+    /**
+     * Keep the full LineString, but do not draw a large circle
+     * for every 50 mm interpolation point.
+     *
+     * Maximum visible dots: approximately 400.
+     * This changes only the display, not the rover trajectory.
+     */
+    const visiblePointStep = Math.max(1, Math.ceil(coordinates.length / 400));
+
+    coordinates.forEach((coordinate, index) => {
+      const isFirstPoint = index === 0;
+
+      const isLastPoint = index === coordinates.length - 1;
+
+      const shouldDisplay =
+        isFirstPoint || isLastPoint || index % visiblePointStep === 0;
+
+      if (!shouldDisplay) {
+        return;
+      }
+
+      features.push({
+        type: "Feature",
+        properties: {
+          kind: "point",
+          index,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: coordinate,
+        },
+      });
+    });
+
+    return {
+      type: "FeatureCollection" as const,
+      features,
+    };
+  }, [trajectoryPoints, trajectoryReference]);
+
   // Inject waypoints after WebView loads AND when waypoints change
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
@@ -500,7 +798,7 @@ const MissionMapBase: React.FC<Props> = ({
     const waypointsArray = waypoints.map((wp, idx) => {
       const wpStatus = statusMap?.[wp.sn];
       const isCompleted =
-        wpStatus?.status === 'completed' || wpStatus?.status === 'skipped';
+        wpStatus?.status === "completed" || wpStatus?.status === "skipped";
       return {
         id: wp.sn,
         uniqueId: `wp-${idx}-${wp.sn}`,
@@ -530,6 +828,42 @@ const MissionMapBase: React.FC<Props> = ({
   }, [mapReady, waypoints]); // activeWaypointIndex handled by the dedicated setActiveWaypoint effect below
 
   // Pause/resume Mapbox rendering when visibility changes
+
+  // Draw generated trajectory directly on the main Mapbox display.
+  useEffect(() => {
+    if (!mapReady || !webViewRef.current) {
+      return;
+    }
+
+    const trajectoryJson = JSON.stringify(generatedTrajectoryGeoJson);
+
+    webViewRef.current.injectJavaScript(`
+      (function() {
+        try {
+          if (
+            window.loadGeneratedTrajectory
+          ) {
+            window.loadGeneratedTrajectory(
+              ${trajectoryJson}
+            );
+          }
+        } catch(e) {
+          console.error(
+            '[MissionMap] Trajectory injection error:',
+            e
+          );
+        }
+      })();
+
+      true;
+    `);
+
+    console.log(
+      "[MissionMap] Injected generated trajectory:",
+      generatedTrajectoryGeoJson.features.length,
+      "features",
+    );
+  }, [mapReady, generatedTrajectoryGeoJson]);
   // This stops tile loading, marker animation, and continuous redraws when hidden
   useEffect(() => {
     if (!mapReady || !webViewRef.current) return;
@@ -573,7 +907,7 @@ const MissionMapBase: React.FC<Props> = ({
     if (!mapReady || !webViewRef.current || mapInitializedRef.current) return;
     if (!Number.isFinite(roverLat) || !Number.isFinite(roverLon)) return;
 
-    console.log('[MissionMap] Initializing rover marker');
+    console.log("[MissionMap] Initializing rover marker");
     mapInitializedRef.current = true;
 
     const initScript = `
@@ -612,7 +946,7 @@ const MissionMapBase: React.FC<Props> = ({
 
             roverMarker = new RoverMarker([${roverLon}, ${roverLat}], { iconSVG: roverIconSVG, heading: rotation });
             roverMarker.addTo(map);
-            roverMarker.setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(\`<strong>Rover</strong><br>Heading: ${heading !== null ? heading.toFixed(1) + '°' : 'N/A'}<br>Lat: ${roverLat.toFixed(7)}<br>Lon: ${roverLon.toFixed(7)}\`));
+            roverMarker.setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(\`<strong>Rover</strong><br>Heading: ${heading !== null ? heading.toFixed(1) + "°" : "N/A"}<br>Lat: ${roverLat.toFixed(7)}<br>Lon: ${roverLon.toFixed(7)}\`));
           }
         } catch (e) {
           console.error('Rover marker init error:', e);
@@ -645,7 +979,7 @@ const MissionMapBase: React.FC<Props> = ({
             true;
           `);
         } catch (e) {
-          console.error('[MissionMap] WebView cleanup injection failed:', e);
+          console.error("[MissionMap] WebView cleanup injection failed:", e);
         }
       }
     };
@@ -653,9 +987,15 @@ const MissionMapBase: React.FC<Props> = ({
 
   // Update active waypoint highlight when index changes
   useEffect(() => {
-    if (!mapReady || !webViewRef.current || activeWaypointIndex === undefined || activeWaypointIndex === null) return;
+    if (
+      !mapReady ||
+      !webViewRef.current ||
+      activeWaypointIndex === undefined ||
+      activeWaypointIndex === null
+    )
+      return;
     webViewRef.current.injectJavaScript(
-      `(function() { if (window.setActiveWaypoint) window.setActiveWaypoint(${activeWaypointIndex}); })(); true;`
+      `(function() { if (window.setActiveWaypoint) window.setActiveWaypoint(${activeWaypointIndex}); })(); true;`,
     );
   }, [activeWaypointIndex, mapReady]);
 
@@ -666,13 +1006,13 @@ const MissionMapBase: React.FC<Props> = ({
     if (!waypoints || waypoints.length === 0) return;
     const completedFlags = waypoints.map(
       (wp) =>
-        statusMap?.[wp.sn]?.status === 'completed' ||
-        statusMap?.[wp.sn]?.status === 'skipped'
+        statusMap?.[wp.sn]?.status === "completed" ||
+        statusMap?.[wp.sn]?.status === "skipped",
     );
     webViewRef.current.injectJavaScript(
       `(function() { if (window.updateWaypointStatuses) window.updateWaypointStatuses(${JSON.stringify(
-        completedFlags
-      )}); })(); true;`
+        completedFlags,
+      )}); })(); true;`,
     );
   }, [statusMap, mapReady, waypoints]);
 
@@ -681,20 +1021,32 @@ const MissionMapBase: React.FC<Props> = ({
   useEffect(() => {
     if (!isVisible) return; // Don't inject JS when tab is hidden
     if (!mapReady || !webViewRef.current || !mapInitializedRef.current) {
-      if (Math.random() < 0.05) { // Log 5% of skipped updates for debugging
-        console.log('[MissionMap] Skipping rover update - mapReady:', mapReady, 'webViewRef:', !!webViewRef.current, 'mapInit:', mapInitializedRef.current);
+      if (Math.random() < 0.05) {
+        // Log 5% of skipped updates for debugging
+        console.log(
+          "[MissionMap] Skipping rover update - mapReady:",
+          mapReady,
+          "webViewRef:",
+          !!webViewRef.current,
+          "mapInit:",
+          mapInitializedRef.current,
+        );
       }
       return;
     }
     if (!Number.isFinite(roverLat) || !Number.isFinite(roverLon)) {
       if (Math.random() < 0.05) {
-        console.log('[MissionMap] Skipping rover update - invalid position:', roverLat, roverLon);
+        console.log(
+          "[MissionMap] Skipping rover update - invalid position:",
+          roverLat,
+          roverLon,
+        );
       }
       return;
     }
 
     // Calculate rover status based on armed state and RTK fix type
-    const status = armed ? 'armed' : (rtkFixType >= 5 ? 'rtk' : 'disarmed');
+    const status = armed ? "armed" : rtkFixType >= 5 ? "rtk" : "disarmed";
 
     const updateScript = `
       (function() {
@@ -730,7 +1082,11 @@ const MissionMapBase: React.FC<Props> = ({
 
   const handleToggleMapStyle = () => {
     // Cycle: satellite (default) → streets → dark → satellite
-    const order: Array<'satellite' | 'streets' | 'dark'> = ['satellite', 'streets', 'dark'];
+    const order: Array<"satellite" | "streets" | "dark"> = [
+      "satellite",
+      "streets",
+      "dark",
+    ];
     const newStyle = order[(order.indexOf(mapStyle) + 1) % order.length];
     setMapStyle(newStyle);
     injectMapJs(`window.setMapStyle('${newStyle}'); true;`);
@@ -741,11 +1097,15 @@ const MissionMapBase: React.FC<Props> = ({
       <WebView
         ref={webViewRef}
         source={mapSource}
-        style={{ flex: 1, borderRadius: edgeToEdge ? 0 : 12, backgroundColor: '#1e293b' }}
+        style={{
+          flex: 1,
+          borderRadius: edgeToEdge ? 0 : 12,
+          backgroundColor: "#1e293b",
+        }}
         onMessage={(event) => {
           try {
             const message = JSON.parse(event.nativeEvent.data);
-            if (message.type === 'mapReady') {
+            if (message.type === "mapReady") {
               setMapReady(true);
               // Fix: Mapbox initializes before WebView layout finalizes.
               // resize() forces Mapbox to re-measure its container,
@@ -771,28 +1131,33 @@ const MissionMapBase: React.FC<Props> = ({
               }, 300);
             }
           } catch (error) {
-            console.error('WebView message error:', error);
+            console.error("WebView message error:", error);
           }
         }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
-        startInLoadingState={false}  // PERFORMANCE: Don't show loading indicator, faster init
+        startInLoadingState={false} // PERFORMANCE: Don't show loading indicator, faster init
         scalesPageToFit={false}
-        androidLayerType="hardware"  // ANDROID: Force hardware acceleration
-        cacheEnabled={true}  // PERFORMANCE: Enable caching
-        cacheMode="LOAD_DEFAULT"  // Use cache when available
+        androidLayerType="hardware" // ANDROID: Force hardware acceleration
+        cacheEnabled={true} // PERFORMANCE: Enable caching
+        cacheMode="LOAD_DEFAULT" // Use cache when available
       />
 
       <MapBottomControlsBar
         mapStyle={mapStyle}
         disabled={!mapReady}
         onToggleMapStyle={handleToggleMapStyle}
-        onFitMission={() => injectMapJs('window.fitToMission(); true;')}
-        onCenterRover={() => injectMapJs('window.centerOnRover(); true;')}
-        onZoomIn={() => injectMapJs('if (typeof map !== "undefined") { map.zoomIn(); } true;')}
-        onZoomOut={() => injectMapJs('if (typeof map !== "undefined") { map.zoomOut(); } true;')}
+        onFitMission={() => injectMapJs("window.fitToMission(); true;")}
+        onCenterRover={() => injectMapJs("window.centerOnRover(); true;")}
+        onZoomIn={() =>
+          injectMapJs('if (typeof map !== "undefined") { map.zoomIn(); } true;')
+        }
+        onZoomOut={() =>
+          injectMapJs(
+            'if (typeof map !== "undefined") { map.zoomOut(); } true;',
+          )
+        }
       />
-
     </View>
   );
 };
@@ -801,8 +1166,8 @@ const styles = StyleSheet.create({
   mapContainer: {
     flex: 1,
     borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#1e293b',
+    overflow: "hidden",
+    backgroundColor: "#1e293b",
   },
 });
 
