@@ -219,60 +219,236 @@ export const PathPlanMap: React.FC<Props> = ({
       heading != null && Number.isFinite(heading) ? heading : 0;
 
     const updateScript = `
-    (function() {
-      const lat = ${roverLat};
-      const lon = ${roverLon};
-      const heading = ${roverHeading};
+(function() {
+  const lat = ${roverLat};
+  const lon = ${roverLon};
+  const heading = ${roverHeading};
 
-      if (!roverMarker) {
-        const size = 56;
+  if (!roverMarker) {
+    const size = 84;
 
-        const roverIconSVG =
-          '<svg width="' + size + '" height="' + size +
-          '" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
-          '<g style="transform:rotate(' + heading +
-          'deg);transform-origin:50px 50px;">' +
-          '<rect x="15" y="15" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
-          '<rect x="73" y="15" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
-          '<rect x="15" y="65" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
-          '<rect x="73" y="65" width="12" height="20" rx="2" fill="#2d2d2d"/>' +
-          '<rect x="30" y="25" width="40" height="50" rx="3" fill="#f4d03f" stroke="#d4af37" stroke-width="2"/>' +
-          '<line x1="50" y1="25" x2="50" y2="5" stroke="#e74c3c" stroke-width="4"/>' +
-          '<polygon points="50,0 43,10 57,10" fill="#e74c3c"/>' +
-          '</g></svg>';
+    const roverIconSVG = \`
+      <svg
+        width="\${size}"
+        height="\${size}"
+        viewBox="0 0 100 100"
+        xmlns="http://www.w3.org/2000/svg"
+        style="
+          transform: rotate(\${heading}deg);
+          transform-origin: 50% 50%;
+          will-change: transform;
+        "
+      >
+        <g id="wheels">
+          <rect
+            x="15"
+            y="15"
+            width="12"
+            height="20"
+            rx="2"
+            fill="#2d2d2d"
+            stroke="#000"
+            stroke-width="1"
+          />
+          <rect
+            x="17"
+            y="17"
+            width="8"
+            height="16"
+            rx="1"
+            fill="#4a4a4a"
+          />
 
-        const roverEl = document.createElement('div');
-        roverEl.style.width = size + 'px';
-        roverEl.style.height = size + 'px';
-        roverEl.innerHTML = roverIconSVG;
+          <rect
+            x="73"
+            y="15"
+            width="12"
+            height="20"
+            rx="2"
+            fill="#2d2d2d"
+            stroke="#000"
+            stroke-width="1"
+          />
+          <rect
+            x="75"
+            y="17"
+            width="8"
+            height="16"
+            rx="1"
+            fill="#4a4a4a"
+          />
 
-        roverMarker = new mapboxgl.Marker({
-          element: roverEl,
-          anchor: 'center'
-        })
-          .setLngLat([lon, lat])
-          .addTo(map);
-      } else {
-        roverMarker.setLngLat([lon, lat]);
+          <rect
+            x="15"
+            y="65"
+            width="12"
+            height="20"
+            rx="2"
+            fill="#2d2d2d"
+            stroke="#000"
+            stroke-width="1"
+          />
+          <rect
+            x="17"
+            y="67"
+            width="8"
+            height="16"
+            rx="1"
+            fill="#4a4a4a"
+          />
 
-        const markerEl = roverMarker.getElement();
-        const svgGroup = markerEl.querySelector('svg g');
+          <rect
+            x="73"
+            y="65"
+            width="12"
+            height="20"
+            rx="2"
+            fill="#2d2d2d"
+            stroke="#000"
+            stroke-width="1"
+          />
+          <rect
+            x="75"
+            y="67"
+            width="8"
+            height="16"
+            rx="1"
+            fill="#4a4a4a"
+          />
+        </g>
 
-        if (svgGroup) {
-          svgGroup.style.transform =
-            'rotate(' + heading + 'deg)';
-          svgGroup.style.transformOrigin = '50px 50px';
-        }
-      }
+        <rect
+          id="rover-body"
+          x="30"
+          y="25"
+          width="40"
+          height="50"
+          rx="3"
+          fill="#f4d03f"
+          stroke="#d4af37"
+          stroke-width="2"
+        />
 
-      roverData.hasPosition = true;
-      roverData.lat = lat;
-      roverData.lon = lon;
-      roverData.heading = heading;
-    })();
+        <rect
+          x="32"
+          y="27"
+          width="36"
+          height="15"
+          rx="2"
+          fill="#e8b923"
+        />
 
-    true;
-  `;
+        <rect
+          x="37"
+          y="37"
+          width="10"
+          height="6"
+          rx="1"
+          fill="#5a5a5a"
+        />
+
+        <rect
+          x="53"
+          y="37"
+          width="10"
+          height="6"
+          rx="1"
+          fill="#5a5a5a"
+        />
+
+        <rect
+          x="35"
+          y="50"
+          width="30"
+          height="4"
+          rx="1"
+          fill="#7a7a7a"
+        />
+
+        <rect
+          x="33"
+          y="60"
+          width="15"
+          height="10"
+          rx="1"
+          fill="#f9e79f"
+          stroke="#d4af37"
+          stroke-width="1"
+        />
+
+        <rect
+          x="52"
+          y="60"
+          width="15"
+          height="10"
+          rx="1"
+          fill="#f9e79f"
+          stroke="#d4af37"
+          stroke-width="1"
+        />
+
+        <g id="heading-arrow">
+          <line
+            x1="50"
+            y1="25"
+            x2="50"
+            y2="5"
+            stroke="#e74c3c"
+            stroke-width="4"
+            stroke-linecap="round"
+          />
+          <polygon
+            points="50,0 43,10 57,10"
+            fill="#e74c3c"
+          />
+        </g>
+      </svg>
+    \`;
+
+    const roverEl = document.createElement('div');
+
+    roverEl.style.width = size + 'px';
+    roverEl.style.height = size + 'px';
+    roverEl.style.willChange = 'transform';
+    roverEl.innerHTML = roverIconSVG;
+
+    roverMarker = new mapboxgl.Marker({
+      element: roverEl,
+      anchor: 'center'
+    })
+      .setLngLat([lon, lat])
+      .addTo(map);
+
+  } else {
+    roverMarker.setLngLat([lon, lat]);
+
+    const markerEl = roverMarker.getElement();
+
+    const svg = markerEl.querySelector('svg');
+
+    if (svg) {
+      svg.style.transform =
+        'rotate(' + heading + 'deg)';
+
+      svg.style.transformOrigin = '50% 50%';
+
+      /*
+       * Do not animate heading.
+       * The heading already arrives continuously
+       * from the rover.
+       */
+      svg.style.transition = 'none';
+    }
+  }
+
+  roverData.hasPosition = true;
+  roverData.lat = lat;
+  roverData.lon = lon;
+  roverData.heading = heading;
+})();
+
+true;
+`;
 
     webViewRef.current.injectJavaScript(updateScript);
   }, [isVisible, mapReady, roverPosition?.lat, roverPosition?.lon, heading]);
