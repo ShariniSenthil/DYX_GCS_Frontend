@@ -26,7 +26,11 @@ export function isPx4Payload(data: unknown): data is Px4TelemetryData {
     "vehicle" in d ||
     "position" in d ||
     "gps" in d ||
-    "mission" in d ||
+    "accuracy" in d ||
+    "accuracy_available" in d ||
+    "cross_track_error_mm" in d ||
+    "front_back_error_mm" in d ||
+    "radial_error_mm" in d ||
     "pos_n" in d ||
     "pos_e" in d ||
     ("lat" in d && "lon" in d) ||
@@ -78,6 +82,7 @@ export function toRoverTelemetry(
   const gps = flat.gps;
   const batterySection = flat.battery;
   const missionSection = flat.mission;
+  const accuracySection = flat.accuracy;
 
   const connected = safeBool(flat.connected ?? vehicle?.connected);
 
@@ -202,6 +207,90 @@ export function toRoverTelemetry(
     gps?.vertical_accuracy_m,
   );
 
+  const crossTrackErrorMm = firstOptionalNum(
+  flat.cross_track_error_mm,
+  accuracySection?.cross_track_error_mm,
+);
+
+const crossTrackAbsMm = firstOptionalNum(
+  flat.cross_track_abs_mm,
+  accuracySection?.cross_track_abs_mm,
+  crossTrackErrorMm !== null
+    ? Math.abs(crossTrackErrorMm)
+    : null,
+);
+
+const frontBackErrorMm = firstOptionalNum(
+  flat.front_back_error_mm,
+  accuracySection?.front_back_error_mm,
+);
+
+const frontBackAbsMm = firstOptionalNum(
+  flat.front_back_abs_mm,
+  accuracySection?.front_back_abs_mm,
+  frontBackErrorMm !== null
+    ? Math.abs(frontBackErrorMm)
+    : null,
+);
+
+const radialErrorMm = firstOptionalNum(
+  flat.radial_error_mm,
+  accuracySection?.radial_error_mm,
+);
+
+const closestRadialErrorMm = firstOptionalNum(
+  flat.closest_radial_error_mm,
+  accuracySection?.closest_radial_error_mm,
+);
+
+const accuracyTargetMm = firstOptionalNum(
+  flat.accuracy_target_mm,
+  accuracySection?.accuracy_target_mm,
+);
+
+const testToleranceMm = firstOptionalNum(
+  flat.test_tolerance_mm,
+  accuracySection?.test_tolerance_mm,
+);
+
+const crossTrackSide = String(
+  flat.cross_track_side ??
+    accuracySection?.cross_track_side ??
+    "UNKNOWN",
+);
+
+const frontBackPosition = String(
+  flat.front_back_position ??
+    accuracySection?.front_back_position ??
+    "UNKNOWN",
+);
+
+const accuracyStatus = String(
+  flat.accuracy_status ??
+    accuracySection?.accuracy_status ??
+    "UNAVAILABLE",
+);
+
+const accuracyPass = safeBool(
+  flat.accuracy_pass ??
+    accuracySection?.accuracy_pass,
+  false,
+);
+
+const withinTestTolerance = safeBool(
+  flat.within_test_tolerance ??
+    accuracySection?.within_test_tolerance,
+  false,
+);
+
+const accuracyAvailable = safeBool(
+  flat.accuracy_available ??
+    accuracySection?.available,
+  crossTrackErrorMm !== null &&
+    frontBackErrorMm !== null &&
+    radialErrorMm !== null,
+);
+
   return {
     state,
     global,
@@ -219,6 +308,55 @@ export function toRoverTelemetry(
     mission_state: mission.status,
     rpp_state_name: flat.rpp_state_name ?? undefined,
     xtrack_cm: safeNum(flat.xtrack_m) * 100,
+    accuracy: {
+  available: accuracyAvailable,
+
+  goal_number: firstOptionalNum(
+    accuracySection?.goal_number,
+  ),
+
+  cross_track_error_mm: crossTrackErrorMm,
+  cross_track_abs_mm: crossTrackAbsMm,
+  cross_track_side: crossTrackSide,
+
+  front_back_error_mm: frontBackErrorMm,
+  front_back_abs_mm: frontBackAbsMm,
+  front_back_position: frontBackPosition,
+
+  radial_error_mm: radialErrorMm,
+  closest_radial_error_mm:
+    closestRadialErrorMm,
+
+  accuracy_target_mm: accuracyTargetMm,
+  test_tolerance_mm: testToleranceMm,
+
+  accuracy_status: accuracyStatus,
+  accuracy_pass: accuracyPass,
+  within_test_tolerance:
+    withinTestTolerance,
+},
+
+accuracy_available: accuracyAvailable,
+
+cross_track_error_mm: crossTrackErrorMm,
+cross_track_abs_mm: crossTrackAbsMm,
+cross_track_side: crossTrackSide,
+
+front_back_error_mm: frontBackErrorMm,
+front_back_abs_mm: frontBackAbsMm,
+front_back_position: frontBackPosition,
+
+radial_error_mm: radialErrorMm,
+closest_radial_error_mm:
+  closestRadialErrorMm,
+
+accuracy_target_mm: accuracyTargetMm,
+test_tolerance_mm: testToleranceMm,
+
+accuracy_status: accuracyStatus,
+accuracy_pass: accuracyPass,
+within_test_tolerance:
+  withinTestTolerance,
     distance_to_next_m: (() => {
       const distanceM = firstOptionalNum(
         flat.dist_to_goal_m,

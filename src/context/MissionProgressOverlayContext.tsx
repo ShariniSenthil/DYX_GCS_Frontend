@@ -4,20 +4,22 @@ import React, {
   useContext,
   useMemo,
   useState,
-} from 'react';
+} from "react";
 
 export type MissionProgressPanelKey =
-  | 'robotStatus'
-  | 'missionProgress'
-  | 'distanceToTarget'
-  | 'systemStatus'
-  | 'missionControls'
-  | 'bottom';
+  | "robotStatus"
+  | "missionProgress"
+  | "distanceToTarget"
+  | "accuracyMonitor"
+  | "systemStatus"
+  | "missionControls"
+  | "bottom";
 
 export interface MissionProgressPanelVisibility {
   robotStatus: boolean;
   missionProgress: boolean;
   distanceToTarget: boolean;
+  accuracyMonitor: boolean;
   systemStatus: boolean;
   missionControls: boolean;
   bottom: boolean;
@@ -27,6 +29,7 @@ const DEFAULT_PANEL_VISIBILITY: MissionProgressPanelVisibility = {
   robotStatus: true,
   missionProgress: true,
   distanceToTarget: true,
+  accuracyMonitor: true,
   systemStatus: true,
   missionControls: true,
   bottom: true,
@@ -37,7 +40,9 @@ interface MissionProgressOverlayContextValue {
   setIsWidgetMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   toggleWidgetMenu: () => void;
   panelVisibility: MissionProgressPanelVisibility;
-  setPanelVisibility: React.Dispatch<React.SetStateAction<MissionProgressPanelVisibility>>;
+  setPanelVisibility: React.Dispatch<
+    React.SetStateAction<MissionProgressPanelVisibility>
+  >;
   togglePanel: (key: MissionProgressPanelKey) => void;
   setPanelVisible: (key: MissionProgressPanelKey, visible: boolean) => void;
 }
@@ -51,9 +56,8 @@ export function MissionProgressOverlayProvider({
   children: React.ReactNode;
 }) {
   const [isWidgetMenuOpen, setIsWidgetMenuOpen] = useState(false);
-  const [panelVisibility, setPanelVisibility] = useState<MissionProgressPanelVisibility>(
-    DEFAULT_PANEL_VISIBILITY,
-  );
+  const [panelVisibility, setPanelVisibility] =
+    useState<MissionProgressPanelVisibility>(DEFAULT_PANEL_VISIBILITY);
 
   const toggleWidgetMenu = useCallback(() => {
     setIsWidgetMenuOpen((open) => !open);
@@ -80,7 +84,13 @@ export function MissionProgressOverlayProvider({
       togglePanel,
       setPanelVisible,
     }),
-    [isWidgetMenuOpen, panelVisibility, togglePanel, setPanelVisible, toggleWidgetMenu],
+    [
+      isWidgetMenuOpen,
+      panelVisibility,
+      togglePanel,
+      setPanelVisible,
+      toggleWidgetMenu,
+    ],
   );
 
   return (
@@ -93,7 +103,9 @@ export function MissionProgressOverlayProvider({
 export function useMissionProgressOverlay() {
   const ctx = useContext(MissionProgressOverlayContext);
   if (!ctx) {
-    throw new Error('useMissionProgressOverlay must be used within MissionProgressOverlayProvider');
+    throw new Error(
+      "useMissionProgressOverlay must be used within MissionProgressOverlayProvider",
+    );
   }
   return ctx;
 }
@@ -109,6 +121,7 @@ export function migrateLegacyPanelVisibility(uiState: {
   isRobotStatusVisible?: boolean;
   isMissionProgressVisible?: boolean;
   isDistanceToTargetVisible?: boolean;
+  isAccuracyMonitorVisible?: boolean;
   isSystemStatusVisible?: boolean;
   isMissionControlsVisible?: boolean;
   isBottomTableVisible?: boolean;
@@ -124,6 +137,9 @@ export function migrateLegacyPanelVisibility(uiState: {
   if (uiState.isDistanceToTargetVisible !== undefined) {
     next.distanceToTarget = uiState.isDistanceToTargetVisible;
   }
+  if (uiState.isAccuracyMonitorVisible !== undefined) {
+    next.accuracyMonitor = uiState.isAccuracyMonitorVisible;
+  }
   if (uiState.isSystemStatusVisible !== undefined) {
     next.systemStatus = uiState.isSystemStatusVisible;
   }
@@ -138,6 +154,7 @@ export function migrateLegacyPanelVisibility(uiState: {
     next.robotStatus = uiState.isLeftPanelVisible;
     next.missionProgress = uiState.isLeftPanelVisible;
     next.distanceToTarget = uiState.isLeftPanelVisible;
+    next.accuracyMonitor = uiState.isLeftPanelVisible;
   }
   if (uiState.isRightPanelVisible !== undefined) {
     next.systemStatus = uiState.isRightPanelVisible;

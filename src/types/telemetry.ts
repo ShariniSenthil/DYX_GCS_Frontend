@@ -51,6 +51,29 @@ export interface TelemetryMission {
   ready?: boolean;
 }
 
+export interface TelemetryAccuracy {
+  available: boolean;
+  goal_number?: number | null;
+
+  cross_track_error_mm?: number | null;
+  cross_track_abs_mm?: number | null;
+  cross_track_side?: string | null;
+
+  front_back_error_mm?: number | null;
+  front_back_abs_mm?: number | null;
+  front_back_position?: string | null;
+
+  radial_error_mm?: number | null;
+  closest_radial_error_mm?: number | null;
+
+  accuracy_target_mm?: number | null;
+  test_tolerance_mm?: number | null;
+
+  accuracy_status?: string | null;
+  accuracy_pass?: boolean;
+  within_test_tolerance?: boolean;
+}
+
 export interface ServoStatus {
   servo_id: number;
   active: boolean;
@@ -88,6 +111,27 @@ export interface RoverTelemetry {
   position_error_cm?: number;
   gps_failsafe?: GpsFailsafeStatus;
   distance_to_next_m?: number;
+  accuracy?: TelemetryAccuracy;
+
+accuracy_available?: boolean;
+
+cross_track_error_mm?: number | null;
+cross_track_abs_mm?: number | null;
+cross_track_side?: string | null;
+
+front_back_error_mm?: number | null;
+front_back_abs_mm?: number | null;
+front_back_position?: string | null;
+
+radial_error_mm?: number | null;
+closest_radial_error_mm?: number | null;
+
+accuracy_target_mm?: number | null;
+test_tolerance_mm?: number | null;
+
+accuracy_status?: string | null;
+accuracy_pass?: boolean;
+within_test_tolerance?: boolean;
   fcu_connected?: boolean;
   gps_fix_name?: string;
   mission_state?: string;
@@ -135,6 +179,27 @@ export interface TelemetryEnvelope {
   wp_brg?: number;
   position_error_cm?: number;
   distance_to_next_m?: number;
+  accuracy?: Partial<TelemetryAccuracy>;
+
+accuracy_available?: boolean;
+
+cross_track_error_mm?: number | null;
+cross_track_abs_mm?: number | null;
+cross_track_side?: string | null;
+
+front_back_error_mm?: number | null;
+front_back_abs_mm?: number | null;
+front_back_position?: string | null;
+
+radial_error_mm?: number | null;
+closest_radial_error_mm?: number | null;
+
+accuracy_target_mm?: number | null;
+test_tolerance_mm?: number | null;
+
+accuracy_status?: string | null;
+accuracy_pass?: boolean;
+within_test_tolerance?: boolean;
   fcu_connected?: boolean;
   gps_fix_name?: string;
   mission_state?: string;

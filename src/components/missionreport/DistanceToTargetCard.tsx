@@ -6,62 +6,95 @@ import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 
 interface Props {
   isMissionActive?: boolean;
-  distanceToNextM?: number | null;
+
+  /**
+   * Backend radial distance to the exact
+   * active marking coordinate.
+   */
+  overallAccuracyMm?: number | null;
+
+  /**
+   * Backend accuracy availability flag.
+   */
+  accuracyAvailable?: boolean;
+
+  /**
+   * Backend status:
+   * ACCURACY_PASS
+   * TEST_PROCEED_BAND
+   * OUTSIDE_TOLERANCE
+   * UNAVAILABLE
+   */
+  accuracyStatus?: string | null;
+
   dragGesture?: any;
   isDraggingActive?: boolean;
 }
 
-function getValidDistance(distanceM: number | null | undefined): number | null {
-  if (
-    typeof distanceM !== "number" ||
-    !Number.isFinite(distanceM) ||
-    distanceM < 0
-  ) {
+function validMillimetres(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return null;
   }
 
-  return distanceM;
+  return value;
 }
 
-function formatDistance(distanceM: number | null): string {
-  if (distanceM === null) {
+function formatMillimetres(value: number | null): string {
+  if (value === null) {
     return "--";
   }
 
-  if (distanceM >= 1000) {
-    return `${(distanceM / 1000).toFixed(2)} km`;
+  /**
+   * Do not round the backend measurement.
+   * Remove only its decimal portion.
+   *
+   * 18.96 -> 18 mm
+   * 128.7 -> 128 mm
+   */
+  return `${Math.trunc(value)} mm`;
+}
+
+function formatStatus(value: string | null | undefined): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
+
+  if (!normalized || normalized === "UNAVAILABLE") {
+    return "WAITING FOR ACCURACY";
   }
 
-  if (distanceM >= 1) {
-    return `${distanceM.toFixed(2)} m`;
-  }
-
-  return `${(distanceM * 100).toFixed(1)} cm`;
+  return normalized.replace(/_/g, " ");
 }
 
 export const DistanceToTargetCard: React.FC<Props> = ({
   isMissionActive = false,
-  distanceToNextM,
+  overallAccuracyMm,
+  accuracyAvailable = false,
+  accuracyStatus,
   dragGesture,
   isDraggingActive = false,
 }) => {
-  const validDistance = useMemo(
-    () => getValidDistance(distanceToNextM),
-    [distanceToNextM]
+  const validAccuracy = useMemo(
+    () => validMillimetres(overallAccuracyMm),
+    [overallAccuracyMm],
   );
 
-  /*
-   * Display distance only while the mission is active.
-   * This prevents a previous mission's final distance from remaining visible.
-   */
-  const displayedDistance = isMissionActive ? validDistance : null;
+  const displayedAccuracy =
+    isMissionActive && accuracyAvailable ? validAccuracy : null;
 
-  const distanceText = useMemo(
-    () => formatDistance(displayedDistance),
-    [displayedDistance]
+  const accuracyText = useMemo(
+    () => formatMillimetres(displayedAccuracy),
+    [displayedAccuracy],
   );
 
-  const isLive = isMissionActive && displayedDistance !== null;
+  const isLive =
+    isMissionActive && accuracyAvailable && displayedAccuracy !== null;
+
+  const statusText = !isMissionActive
+    ? "MISSION NOT ACTIVE"
+    : !isLive
+      ? "WAITING FOR ACCURACY"
+      : formatStatus(accuracyStatus);
 
   return (
     <GestureDetector gesture={dragGesture}>
@@ -72,21 +105,15 @@ export const DistanceToTargetCard: React.FC<Props> = ({
 
         <View style={styles.body}>
           <View style={styles.valueColumn}>
-            <Text style={styles.label}>DISTANCE TO TARGET</Text>
+            <Text style={styles.label}>OVERALL ACCURACY</Text>
 
             <View style={styles.labelDivider} />
 
             <Text style={[styles.value, isLive && styles.valueLive]}>
-              {distanceText}
+              {accuracyText}
             </Text>
 
-            <Text style={styles.statusText}>
-              {isLive
-                ? "LIVE TARGET DISTANCE"
-                : isMissionActive
-                ? "WAITING FOR TARGET"
-                : "MISSION NOT ACTIVE"}
-            </Text>
+            <Text style={styles.statusText}>{statusText}</Text>
           </View>
 
           <View
@@ -145,7 +172,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "600",
     letterSpacing: 1.2,
-    textTransform: "uppercase",
   },
 
   labelDivider: {

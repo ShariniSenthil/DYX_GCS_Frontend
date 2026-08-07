@@ -56,6 +56,38 @@ export interface Px4MissionTelemetry {
   marking_active?: boolean;
 }
 
+export interface Px4AccuracyTelemetry {
+  available?: boolean;
+  source?: string | null;
+  goal_number?: number | null;
+
+  cross_track_error_m?: number | null;
+  cross_track_error_mm?: number | null;
+  cross_track_abs_mm?: number | null;
+  cross_track_side?: string | null;
+
+  front_back_error_m?: number | null;
+  front_back_error_mm?: number | null;
+  front_back_abs_mm?: number | null;
+  front_back_position?: string | null;
+
+  radial_error_m?: number | null;
+  radial_error_mm?: number | null;
+
+  closest_radial_error_m?: number | null;
+  closest_radial_error_mm?: number | null;
+
+  accuracy_target_m?: number | null;
+  accuracy_target_mm?: number | null;
+
+  test_tolerance_m?: number | null;
+  test_tolerance_mm?: number | null;
+
+  accuracy_status?: string | null;
+  accuracy_pass?: boolean;
+  within_test_tolerance?: boolean;
+}
+
 /** Payload from socket `telemetry` and REST `/api/telemetry/latest`. */
 export interface Px4TelemetryData {
   generated_at?: string | number;
@@ -66,6 +98,7 @@ export interface Px4TelemetryData {
   gps?: Px4GpsTelemetry;
   battery?: Px4BatteryTelemetry;
   mission?: Px4MissionTelemetry;
+  accuracy?: Px4AccuracyTelemetry;
 
   // NED/local position compatibility fields
   pos_n?: number | null;
@@ -136,6 +169,27 @@ export interface Px4TelemetryData {
   joystick_deadman?: boolean | null;
   joystick_stop_reason?: string | null;
   control_owner?: string | null;
+
+
+  accuracy_available?: boolean;
+
+  cross_track_error_mm?: number | null;
+  cross_track_abs_mm?: number | null;
+  cross_track_side?: string | null;
+
+  front_back_error_mm?: number | null;
+  front_back_abs_mm?: number | null;
+  front_back_position?: string | null;
+
+  radial_error_mm?: number | null;
+  closest_radial_error_mm?: number | null;
+
+  accuracy_target_mm?: number | null;
+  test_tolerance_mm?: number | null;
+
+  accuracy_status?: string | null;
+  accuracy_pass?: boolean;
+  within_test_tolerance?: boolean;
 }
 
 // ── Mission status (socket `mission_status` event) ───────────────────────────

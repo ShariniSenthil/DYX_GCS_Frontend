@@ -85,6 +85,48 @@ const DISCONNECTED_TELEMETRY: RoverTelemetry = {
   wp_brg: undefined,
   position_error_cm: undefined,
   distance_to_next_m: undefined,
+  accuracy: {
+    available: false,
+    goal_number: null,
+
+    cross_track_error_mm: null,
+    cross_track_abs_mm: null,
+    cross_track_side: null,
+
+    front_back_error_mm: null,
+    front_back_abs_mm: null,
+    front_back_position: null,
+
+    radial_error_mm: null,
+    closest_radial_error_mm: null,
+
+    accuracy_target_mm: null,
+    test_tolerance_mm: null,
+
+    accuracy_status: null,
+    accuracy_pass: false,
+    within_test_tolerance: false,
+  },
+
+  accuracy_available: false,
+
+  cross_track_error_mm: null,
+  cross_track_abs_mm: null,
+  cross_track_side: null,
+
+  front_back_error_mm: null,
+  front_back_abs_mm: null,
+  front_back_position: null,
+
+  radial_error_mm: null,
+  closest_radial_error_mm: null,
+
+  accuracy_target_mm: null,
+  test_tolerance_mm: null,
+
+  accuracy_status: null,
+  accuracy_pass: false,
+  within_test_tolerance: false,
 };
 
 export interface TelemetryContextValue {

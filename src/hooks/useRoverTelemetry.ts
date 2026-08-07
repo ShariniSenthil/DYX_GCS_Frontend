@@ -245,7 +245,49 @@ const createDefaultTelemetry = (): RoverTelemetry => ({
   xtrack_cm: undefined,
   wp_brg: undefined,
   position_error_cm: undefined, // Total position error = sqrt(wp_dist² + xtrack²)
-  distance_to_next_m: undefined, // Backend mission distance to next waypoint in meters
+  distance_to_next_m: undefined,
+  accuracy: {
+  available: false,
+  goal_number: null,
+
+  cross_track_error_mm: null,
+  cross_track_abs_mm: null,
+  cross_track_side: null,
+
+  front_back_error_mm: null,
+  front_back_abs_mm: null,
+  front_back_position: null,
+
+  radial_error_mm: null,
+  closest_radial_error_mm: null,
+
+  accuracy_target_mm: null,
+  test_tolerance_mm: null,
+
+  accuracy_status: null,
+  accuracy_pass: false,
+  within_test_tolerance: false,
+},
+
+accuracy_available: false,
+
+cross_track_error_mm: null,
+cross_track_abs_mm: null,
+cross_track_side: null,
+
+front_back_error_mm: null,
+front_back_abs_mm: null,
+front_back_position: null,
+
+radial_error_mm: null,
+closest_radial_error_mm: null,
+
+accuracy_target_mm: null,
+test_tolerance_mm: null,
+
+accuracy_status: null,
+accuracy_pass: false,
+within_test_tolerance: false,
 });
 
 // Helper: POST to PX4 service endpoint through authenticated apiClient.
@@ -1266,6 +1308,71 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
     if (envelope.distance_to_next_m !== undefined) {
       next.distance_to_next_m = envelope.distance_to_next_m;
     }
+    if (envelope.accuracy) {
+  next.accuracy = {
+    available: next.accuracy?.available ?? false,
+    ...next.accuracy,
+    ...envelope.accuracy,
+  };
+}
+
+if (envelope.accuracy_available !== undefined) {
+  next.accuracy_available = envelope.accuracy_available;
+}
+
+if (envelope.cross_track_error_mm !== undefined) {
+  next.cross_track_error_mm = envelope.cross_track_error_mm;
+}
+
+if (envelope.cross_track_abs_mm !== undefined) {
+  next.cross_track_abs_mm = envelope.cross_track_abs_mm;
+}
+
+if (envelope.cross_track_side !== undefined) {
+  next.cross_track_side = envelope.cross_track_side;
+}
+
+if (envelope.front_back_error_mm !== undefined) {
+  next.front_back_error_mm = envelope.front_back_error_mm;
+}
+
+if (envelope.front_back_abs_mm !== undefined) {
+  next.front_back_abs_mm = envelope.front_back_abs_mm;
+}
+
+if (envelope.front_back_position !== undefined) {
+  next.front_back_position = envelope.front_back_position;
+}
+
+if (envelope.radial_error_mm !== undefined) {
+  next.radial_error_mm = envelope.radial_error_mm;
+}
+
+if (envelope.closest_radial_error_mm !== undefined) {
+  next.closest_radial_error_mm =
+    envelope.closest_radial_error_mm;
+}
+
+if (envelope.accuracy_target_mm !== undefined) {
+  next.accuracy_target_mm = envelope.accuracy_target_mm;
+}
+
+if (envelope.test_tolerance_mm !== undefined) {
+  next.test_tolerance_mm = envelope.test_tolerance_mm;
+}
+
+if (envelope.accuracy_status !== undefined) {
+  next.accuracy_status = envelope.accuracy_status;
+}
+
+if (envelope.accuracy_pass !== undefined) {
+  next.accuracy_pass = envelope.accuracy_pass;
+}
+
+if (envelope.within_test_tolerance !== undefined) {
+  next.within_test_tolerance =
+    envelope.within_test_tolerance;
+}
     if (envelope.fcu_connected !== undefined) {
       next.fcu_connected = envelope.fcu_connected;
     }
@@ -1362,6 +1469,97 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
       changed = changed || prev.position_error_cm !== next.position_error_cm;
     if (envelope.distance_to_next_m !== undefined)
       changed = changed || prev.distance_to_next_m !== next.distance_to_next_m;
+    if (envelope.accuracy) {
+  changed =
+    changed ||
+    !shallowEqual(prev.accuracy, next.accuracy);
+}
+
+if (envelope.accuracy_available !== undefined) {
+  changed =
+    changed ||
+    prev.accuracy_available !== next.accuracy_available;
+}
+
+if (envelope.cross_track_error_mm !== undefined) {
+  changed =
+    changed ||
+    prev.cross_track_error_mm !== next.cross_track_error_mm;
+}
+
+if (envelope.cross_track_abs_mm !== undefined) {
+  changed =
+    changed ||
+    prev.cross_track_abs_mm !== next.cross_track_abs_mm;
+}
+
+if (envelope.cross_track_side !== undefined) {
+  changed =
+    changed ||
+    prev.cross_track_side !== next.cross_track_side;
+}
+
+if (envelope.front_back_error_mm !== undefined) {
+  changed =
+    changed ||
+    prev.front_back_error_mm !== next.front_back_error_mm;
+}
+
+if (envelope.front_back_abs_mm !== undefined) {
+  changed =
+    changed ||
+    prev.front_back_abs_mm !== next.front_back_abs_mm;
+}
+
+if (envelope.front_back_position !== undefined) {
+  changed =
+    changed ||
+    prev.front_back_position !== next.front_back_position;
+}
+
+if (envelope.radial_error_mm !== undefined) {
+  changed =
+    changed ||
+    prev.radial_error_mm !== next.radial_error_mm;
+}
+
+if (envelope.closest_radial_error_mm !== undefined) {
+  changed =
+    changed ||
+    prev.closest_radial_error_mm !==
+      next.closest_radial_error_mm;
+}
+
+if (envelope.accuracy_target_mm !== undefined) {
+  changed =
+    changed ||
+    prev.accuracy_target_mm !== next.accuracy_target_mm;
+}
+
+if (envelope.test_tolerance_mm !== undefined) {
+  changed =
+    changed ||
+    prev.test_tolerance_mm !== next.test_tolerance_mm;
+}
+
+if (envelope.accuracy_status !== undefined) {
+  changed =
+    changed ||
+    prev.accuracy_status !== next.accuracy_status;
+}
+
+if (envelope.accuracy_pass !== undefined) {
+  changed =
+    changed ||
+    prev.accuracy_pass !== next.accuracy_pass;
+}
+
+if (envelope.within_test_tolerance !== undefined) {
+  changed =
+    changed ||
+    prev.within_test_tolerance !==
+      next.within_test_tolerance;
+}
     if (envelope.fcu_connected !== undefined)
       changed = changed || prev.fcu_connected !== next.fcu_connected;
     if (envelope.gps_fix_name !== undefined)
@@ -1545,8 +1743,43 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
         vrms: adapted.vrms,
         imu_status: adapted.imu_status,
         distance_to_next_m: adapted.distance_to_next_m,
-        xtrack_cm: adapted.xtrack_cm,
-        attitude: adapted.attitude,
+xtrack_cm: adapted.xtrack_cm,
+
+accuracy: adapted.accuracy,
+accuracy_available: adapted.accuracy_available,
+
+cross_track_error_mm:
+  adapted.cross_track_error_mm,
+cross_track_abs_mm:
+  adapted.cross_track_abs_mm,
+cross_track_side:
+  adapted.cross_track_side,
+
+front_back_error_mm:
+  adapted.front_back_error_mm,
+front_back_abs_mm:
+  adapted.front_back_abs_mm,
+front_back_position:
+  adapted.front_back_position,
+
+radial_error_mm:
+  adapted.radial_error_mm,
+closest_radial_error_mm:
+  adapted.closest_radial_error_mm,
+
+accuracy_target_mm:
+  adapted.accuracy_target_mm,
+test_tolerance_mm:
+  adapted.test_tolerance_mm,
+
+accuracy_status:
+  adapted.accuracy_status,
+accuracy_pass:
+  adapted.accuracy_pass,
+within_test_tolerance:
+  adapted.within_test_tolerance,
+
+attitude: adapted.attitude,
         fcu_connected: adapted.fcu_connected,
         gps_fix_name: adapted.gps_fix_name,
         rpp_state_name: adapted.rpp_state_name,
@@ -2113,15 +2346,32 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
           );
 
           console.log("[TELEMETRY] Adapted values", {
-            lat: adapted.global.lat,
-            lon: adapted.global.lon,
-            battery: adapted.battery.percentage,
-            satellites: adapted.global.satellites_visible,
-            fixType: adapted.rtk.fix_type,
-            mode: adapted.state.mode,
-            fcuConnected: adapted.fcu_connected,
-          });
+  lat: adapted.global.lat,
+  lon: adapted.global.lon,
+  battery: adapted.battery.percentage,
+  satellites: adapted.global.satellites_visible,
+  fixType: adapted.rtk.fix_type,
+  mode: adapted.state.mode,
+  fcuConnected: adapted.fcu_connected,
 
+  accuracyAvailable:
+    adapted.accuracy_available,
+
+  overallMm:
+    adapted.radial_error_mm,
+
+  alongMm:
+    adapted.front_back_error_mm,
+
+  crossMm:
+    adapted.cross_track_error_mm,
+
+  alongPosition:
+    adapted.front_back_position,
+
+  crossSide:
+    adapted.cross_track_side,
+});
           const envelope: TelemetryEnvelope = {
             timestamp: generatedAt,
 
@@ -2143,11 +2393,55 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
 
             imu_status: adapted.imu_status,
 
-            distance_to_next_m: adapted.distance_to_next_m,
+distance_to_next_m: adapted.distance_to_next_m,
 
-            xtrack_cm: adapted.xtrack_cm,
+xtrack_cm: adapted.xtrack_cm,
 
-            attitude: adapted.attitude,
+accuracy: adapted.accuracy,
+
+accuracy_available:
+  adapted.accuracy_available,
+
+cross_track_error_mm:
+  adapted.cross_track_error_mm,
+
+cross_track_abs_mm:
+  adapted.cross_track_abs_mm,
+
+cross_track_side:
+  adapted.cross_track_side,
+
+front_back_error_mm:
+  adapted.front_back_error_mm,
+
+front_back_abs_mm:
+  adapted.front_back_abs_mm,
+
+front_back_position:
+  adapted.front_back_position,
+
+radial_error_mm:
+  adapted.radial_error_mm,
+
+closest_radial_error_mm:
+  adapted.closest_radial_error_mm,
+
+accuracy_target_mm:
+  adapted.accuracy_target_mm,
+
+test_tolerance_mm:
+  adapted.test_tolerance_mm,
+
+accuracy_status:
+  adapted.accuracy_status,
+
+accuracy_pass:
+  adapted.accuracy_pass,
+
+within_test_tolerance:
+  adapted.within_test_tolerance,
+
+attitude: adapted.attitude,
 
             fcu_connected: adapted.fcu_connected,
 

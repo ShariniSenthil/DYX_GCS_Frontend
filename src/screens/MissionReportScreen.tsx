@@ -17,8 +17,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 import { Toast } from "../components/shared/Toast";
 import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard";
-import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
 import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
+import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
+import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
 import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
 import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
 import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
@@ -132,29 +133,6 @@ type WpStatus = {
  * Kept local so MissionReportScreen does not depend on an incompatible
  * calculateAccuracy return shape.
  */
-const calculatePositionErrorMm = (
-  targetLat: number,
-  targetLon: number,
-  achievedLat: number,
-  achievedLon: number,
-): number => {
-  const earthRadiusM = 6_371_000;
-  const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
-
-  const lat1 = toRadians(targetLat);
-  const lat2 = toRadians(achievedLat);
-  const deltaLat = toRadians(achievedLat - targetLat);
-  const deltaLon = toRadians(achievedLon - targetLon);
-
-  const haversine =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-
-  const angularDistance =
-    2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-
-  return earthRadiusM * angularDistance * 1000;
-};
 
 const getRtkFailureMessage = (err: unknown, fallback: string) => {
   if (err instanceof Error) {
@@ -221,10 +199,15 @@ export default function MissionReportScreen({
   const { upload: uploadVerifiedWaypoints } = useVerifiedMissionUpload();
   const {
     verifiedProgressMap,
+
     currentTargetIndex: verifiedTargetIndex,
+
     missionTerminal: verifiedTerminal,
+
     waitingForContinue: verifiedWaiting,
+
     resetProgress: resetVerifiedProgress,
+
     clearMissionTerminal: clearVerifiedTerminal,
   } = useVerifiedMissionProgress(
     socket,
@@ -350,9 +333,12 @@ export default function MissionReportScreen({
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isBottomTableExpanded, setIsBottomTableExpanded] = useState(false);
+
   const [robotPanelHeight, setRobotPanelHeight] = useState(0);
+
   const [missionProgressPanelHeight, setMissionProgressPanelHeight] =
     useState(0);
+
   const [systemPanelHeight, setSystemPanelHeight] = useState(0);
   const { panelVisibility, setPanelVisibility, setPanelVisible } =
     useMissionProgressOverlay();
@@ -360,6 +346,7 @@ export default function MissionReportScreen({
     robotStatus: isRobotStatusVisible,
     missionProgress: isMissionProgressVisible,
     distanceToTarget: isDistanceToTargetVisible,
+    accuracyMonitor: isAccuracyMonitorVisible,
     systemStatus: isSystemStatusVisible,
     missionControls: isMissionControlsVisible,
     bottom: isBottomTableVisible,
@@ -462,6 +449,32 @@ export default function MissionReportScreen({
     .toUpperCase();
 
   /**
+   * Live accuracy must depend on the backend mission state,
+   * not the locally persisted isMissionActive value.
+   */
+  const accuracyMissionActive =
+    telemetryMissionActive ||
+    ["RUNNING", "PAUSED", "ARMING", "SWITCHING_OFFBOARD", "LOADING"].includes(
+      backendMissionState,
+    );
+
+  const accuracyDataAvailable =
+    connectionState === "connected" &&
+    accuracyMissionActive &&
+    telemetry.accuracy_available === true &&
+    typeof telemetry.front_back_error_mm === "number" &&
+    Number.isFinite(telemetry.front_back_error_mm) &&
+    typeof telemetry.cross_track_error_mm === "number" &&
+    Number.isFinite(telemetry.cross_track_error_mm);
+
+  const overallAccuracyDataAvailable =
+    connectionState === "connected" &&
+    accuracyMissionActive &&
+    telemetry.accuracy_available === true &&
+    typeof telemetry.radial_error_mm === "number" &&
+    Number.isFinite(telemetry.radial_error_mm);
+
+  /**
    * Controls whether the main button displays
    * NO MISSION or START.
    */
@@ -481,13 +494,19 @@ export default function MissionReportScreen({
 
   const isBackendMissionPaused = backendMissionState === "PAUSED";
 
-  const effectiveCurrentIndex = useMemo(() => {
+  /**
+   * Current marking-point index selected from
+   * the currently active mission workflow.
+   */
+  const effectiveCurrentIndex = useMemo<number | null>(() => {
     if (verifiedCtx.isLoaded && verifiedTargetIndex !== null) {
       return verifiedTargetIndex;
     }
+
     if (POINT_MISSION_ENABLED && px4CurrentPointIndex !== null) {
       return px4CurrentPointIndex;
     }
+
     return currentIndex;
   }, [
     verifiedCtx.isLoaded,
@@ -1659,101 +1678,6 @@ export default function MissionReportScreen({
     missionEndTime,
   ]);
 
-  /**
-   * Current marking point selected by Mission Progress.
-   */
-  const currentTargetWaypoint =
-    missionProgressStats.currentPoint > 0
-      ? (displayData.waypoints[missionProgressStats.currentPoint - 1] ?? null)
-      : null;
-
-  /**
-   * Full-speed rover-to-current-point GPS distance.
-   *
-   * This is display-only and does not affect rover navigation,
-   * marking tolerance, or mission progression.
-   */
-  const liveDistanceToCurrentPointM = useMemo<number | undefined>(() => {
-    if (!currentTargetWaypoint || !roverPosition) {
-      return undefined;
-    }
-
-    const targetLat = Number(currentTargetWaypoint.lat);
-
-    const targetLon = Number(currentTargetWaypoint.lon);
-
-    const roverLat = Number(roverPosition.lat);
-
-    const roverLon = Number(roverPosition.lng);
-
-    const coordinatesAreValid =
-      Number.isFinite(targetLat) &&
-      Number.isFinite(targetLon) &&
-      Number.isFinite(roverLat) &&
-      Number.isFinite(roverLon) &&
-      targetLat >= -90 &&
-      targetLat <= 90 &&
-      roverLat >= -90 &&
-      roverLat <= 90 &&
-      targetLon >= -180 &&
-      targetLon <= 180 &&
-      roverLon >= -180 &&
-      roverLon <= 180 &&
-      !(roverLat === 0 && roverLon === 0);
-
-    if (!coordinatesAreValid) {
-      return undefined;
-    }
-
-    const distanceMm = calculatePositionErrorMm(
-      targetLat,
-      targetLon,
-      roverLat,
-      roverLon,
-    );
-
-    return distanceMm / 1000;
-  }, [
-    currentTargetWaypoint?.lat,
-    currentTargetWaypoint?.lon,
-    roverPosition?.lat,
-    roverPosition?.lng,
-  ]);
-
-  /**
-   * Store the latest full-speed value without causing
-   * the distance card to render on every telemetry packet.
-   */
-  const latestDistanceToCurrentPointRef = useRef<number | undefined>(
-    liveDistanceToCurrentPointM,
-  );
-
-  useEffect(() => {
-    latestDistanceToCurrentPointRef.current = liveDistanceToCurrentPointM;
-  }, [liveDistanceToCurrentPointM]);
-
-  /**
-   * The visible card updates four times per second.
-   */
-  const [displayDistanceToCurrentPointM, setDisplayDistanceToCurrentPointM] =
-    useState<number | undefined>(liveDistanceToCurrentPointM);
-
-  useEffect(() => {
-    const publishDistance = () => {
-      setDisplayDistanceToCurrentPointM(
-        latestDistanceToCurrentPointRef.current,
-      );
-    };
-
-    publishDistance();
-
-    const interval = setInterval(publishDistance, 250);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, []);
-
   const missionProgressRef = useMemo(
     () =>
       getMissionProgressRef(
@@ -2575,18 +2499,18 @@ export default function MissionReportScreen({
       isRobotStatusVisible,
       isMissionProgressVisible,
       isDistanceToTargetVisible,
+      isAccuracyMonitorVisible,
       isSystemStatusVisible,
       isMissionControlsVisible,
       isBottomTableVisible,
       isBottomTableExpanded,
-    }).catch((error) => {
-      console.error("[MissionReportScreen] Failed to persist UI state:", error);
     });
   }, [
     currentIndex,
     mode,
     isRobotStatusVisible,
     isMissionProgressVisible,
+    isAccuracyMonitorVisible,
     isDistanceToTargetVisible,
     isSystemStatusVisible,
     isMissionControlsVisible,
@@ -2909,8 +2833,24 @@ export default function MissionReportScreen({
           const hrms = telemetryRef.current.hrms;
           const vrms = telemetryRef.current.vrms;
 
-          const gpsFailsafeAccuracyMm = event.accuracy_error_mm ?? null;
-          const backendAccuracyMm = gpsFailsafeAccuracyMm;
+          const rawBackendAccuracyMm =
+            event.radial_error_mm ??
+            event.accuracy_error_mm ??
+            event.data?.radial_error_mm ??
+            event.data?.accuracy_error_mm ??
+            telemetryRef.current.radial_error_mm ??
+            telemetryRef.current.accuracy?.radial_error_mm ??
+            null;
+
+          const parsedBackendAccuracyMm =
+            rawBackendAccuracyMm !== null ? Number(rawBackendAccuracyMm) : null;
+
+          const backendAccuracyMm =
+            parsedBackendAccuracyMm !== null &&
+            Number.isFinite(parsedBackendAccuracyMm) &&
+            parsedBackendAccuracyMm >= 0
+              ? parsedBackendAccuracyMm
+              : null;
 
           let accuracyData: {
             accuracy_level?: string;
@@ -3764,9 +3704,29 @@ export default function MissionReportScreen({
         </View>
       )}
 
-      {isManualDriveVisible ? (
-        <ManualDrivePanel onClose={closeManualDrivePanel} />
-      ) : null}
+      {isAccuracyMonitorVisible && (
+        <DraggableCard
+          style={styles.floatingAccuracyMonitorPanel}
+          handleType="custom"
+        >
+          <AccuracyMonitorCard
+            isMissionActive={accuracyMissionActive}
+            alongSideMm={
+              accuracyDataAvailable ? telemetry.front_back_error_mm : null
+            }
+            alongSidePosition={
+              accuracyDataAvailable ? telemetry.front_back_position : null
+            }
+            crossTrackMm={
+              accuracyDataAvailable ? telemetry.cross_track_error_mm : null
+            }
+            crossTrackSide={
+              accuracyDataAvailable ? telemetry.cross_track_side : null
+            }
+            onClose={() => setPanelVisible("accuracyMonitor", false)}
+          />
+        </DraggableCard>
+      )}
 
       {isDistanceToTargetVisible && (
         <DraggableCard
@@ -3774,8 +3734,12 @@ export default function MissionReportScreen({
           handleType="custom"
         >
           <DistanceToTargetCard
-            isMissionActive={effectiveMissionActive}
-            distanceToNextM={displayDistanceToCurrentPointM}
+            isMissionActive={accuracyMissionActive}
+            accuracyAvailable={overallAccuracyDataAvailable}
+            overallAccuracyMm={
+              overallAccuracyDataAvailable ? telemetry.radial_error_mm : null
+            }
+            accuracyStatus={telemetry.accuracy_status}
           />
         </DraggableCard>
       )}
@@ -4017,12 +3981,29 @@ const styles = StyleSheet.create({
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     zIndex: 1000,
   },
+
   floatingQuickNtripPanel: {
     position: "absolute",
     left: MISSION_PROGRESS_LAYOUT.EDGE,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     zIndex: 999,
   },
+
+  floatingAccuracyMonitorPanel: {
+    position: "absolute",
+    left: MISSION_PROGRESS_LAYOUT.EDGE,
+    width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
+
+    /**
+     * Initial position only.
+     * The operator can long-press and drag
+     * it anywhere after rendering.
+     */
+    bottom: MISSION_PROGRESS_LAYOUT.BOTTOM_INSET + 126,
+
+    zIndex: 1000,
+  },
+
   floatingDistanceToTargetPanel: {
     position: "absolute",
     left: MISSION_PROGRESS_LAYOUT.EDGE,

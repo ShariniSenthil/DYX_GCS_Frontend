@@ -566,6 +566,7 @@ class PersistentStorageService {
       isRobotStatusVisible?: boolean;
       isMissionProgressVisible?: boolean;
       isDistanceToTargetVisible?: boolean;
+      isAccuracyMonitorVisible?: boolean;
       isSystemStatusVisible?: boolean;
       isMissionControlsVisible?: boolean;
       isBottomTableVisible?: boolean;
@@ -602,11 +603,22 @@ class PersistentStorageService {
         mode: null as string | null,
         uiState: null as {
           currentIndex?: number | null;
-          mode?: 'AUTO' | 'MANUAL' | 'CONTINUOUS' | 'DASH';
-          isLeftPanelVisible?: boolean;
-          isRightPanelVisible?: boolean;
+          mode?: "AUTO" | "MANUAL" | "CONTINUOUS" | "DASH";
+
+          isRobotStatusVisible?: boolean;
+          isMissionProgressVisible?: boolean;
+          isDistanceToTargetVisible?: boolean;
+          isAccuracyMonitorVisible?: boolean;
+          isSystemStatusVisible?: boolean;
+          isMissionControlsVisible?: boolean;
           isBottomTableVisible?: boolean;
           isBottomTableExpanded?: boolean;
+
+          /** @deprecated legacy — migrated to split panels on load */
+          isLeftPanelVisible?: boolean;
+
+          /** @deprecated legacy — migrated to split panels on load */
+          isRightPanelVisible?: boolean;
         } | null,
       };
 
@@ -921,6 +933,7 @@ class PersistentStorageService {
     isRobotStatusVisible?: boolean;
     isMissionProgressVisible?: boolean;
     isDistanceToTargetVisible?: boolean;
+    isAccuracyMonitorVisible?: boolean;
     isSystemStatusVisible?: boolean;
     isMissionControlsVisible?: boolean;
     isBottomTableVisible?: boolean;
@@ -950,6 +963,7 @@ class PersistentStorageService {
     isRobotStatusVisible?: boolean;
     isMissionProgressVisible?: boolean;
     isDistanceToTargetVisible?: boolean;
+    isAccuracyMonitorVisible?: boolean;
     isSystemStatusVisible?: boolean;
     isMissionControlsVisible?: boolean;
     isBottomTableVisible?: boolean;

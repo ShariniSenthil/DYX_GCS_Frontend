@@ -1,22 +1,30 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, TouchableWithoutFeedback } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
-import { SettingsScreen } from '../../screens/SettingsScreen';
-import { useRover } from '../../context/RoverContext';
-import { ModeSelectionDialog } from '../pathplan/ModeSelectionDialog';
-import { DashConfigDialog } from '../pathplan/DashConfigDialog';
-import { setMissionMode as setBackendMissionMode } from '../../services/missionModeService';
-import { LayerControlsPanel } from '../pathplan/LayerControlsPanel';
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Modal,
+  TouchableWithoutFeedback,
+} from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { colors } from "../../theme/colors";
+import { SettingsScreen } from "../../screens/SettingsScreen";
+import { useRover } from "../../context/RoverContext";
+import { ModeSelectionDialog } from "../pathplan/ModeSelectionDialog";
+import { DashConfigDialog } from "../pathplan/DashConfigDialog";
+import { setMissionMode as setBackendMissionMode } from "../../services/missionModeService";
+import { LayerControlsPanel } from "../pathplan/LayerControlsPanel";
 import {
   MissionProgressPanelKey,
   useMissionProgressOverlayOptional,
-} from '../../context/MissionProgressOverlayContext';
-import { MISSION_PROGRESS_LAYOUT } from '../../constants/missionProgressLayout';
+} from "../../context/MissionProgressOverlayContext";
+import { MISSION_PROGRESS_LAYOUT } from "../../constants/missionProgressLayout";
 
 interface Props {
-  activeTab: 'Dashboard' | 'Marking Plan' | 'Mission Progress';
-  onTabChange: (tab: 'Dashboard' | 'Marking Plan' | 'Mission Progress') => void;
+  activeTab: "Dashboard" | "Marking Plan" | "Mission Progress";
+  onTabChange: (tab: "Dashboard" | "Marking Plan" | "Mission Progress") => void;
 }
 
 type WidgetMenuItem = {
@@ -26,28 +34,55 @@ type WidgetMenuItem = {
 };
 
 const WIDGET_MENU_ITEMS: WidgetMenuItem[] = [
-  { key: 'robotStatus', label: 'Robot Status', icon: 'robot' },
-  { key: 'missionProgress', label: 'Mission Progress', icon: 'chart-donut' },
-  { key: 'distanceToTarget', label: 'Distance to Target', icon: 'crosshairs-gps' },
-  { key: 'systemStatus', label: 'System Status', icon: 'pulse' },
-  { key: 'missionControls', label: 'Mission Controls', icon: 'rocket-launch' },
-  { key: 'bottom', label: 'Mission Points Table', icon: 'table-large' },
+  {
+    key: "robotStatus",
+    label: "Robot Status",
+    icon: "robot",
+  },
+  {
+    key: "missionProgress",
+    label: "Mission Progress",
+    icon: "chart-donut",
+  },
+  {
+    key: "distanceToTarget",
+    label: "Distance to Target",
+    icon: "crosshairs-gps",
+  },
+  {
+    key: "accuracyMonitor",
+    label: "Accuracy Monitor",
+    icon: "crosshairs-gps",
+  },
+  {
+    key: "systemStatus",
+    label: "System Status",
+    icon: "pulse",
+  },
+  {
+    key: "missionControls",
+    label: "Mission Controls",
+    icon: "rocket-launch",
+  },
+  {
+    key: "bottom",
+    label: "Mission Points Table",
+    icon: "table-large",
+  },
 ];
 
 const VEHICLE_STATUS_CARD_HEIGHT = 345;
 const WIDGET_DROPDOWN_TOP = MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE;
 const WIDGET_DROPDOWN_LEFT = MISSION_PROGRESS_LAYOUT.EDGE;
 
-const AppHeaderInner: React.FC<Props> = ({
-  activeTab,
-  onTabChange,
-}) => {
+const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
   // Only destructure what AppHeader actually uses — not telemetry.
   // Note: useRover() still triggers re-renders on every telemetry tick because
   // it subscribes to the full context. Phase 2 (context split) will fix this.
   const { missionMode, setMissionMode } = useRover();
   const mpOverlay = useMissionProgressOverlayOptional();
-  const showMissionProgressWidget = activeTab === 'Mission Progress' && mpOverlay != null;
+  const showMissionProgressWidget =
+    activeTab === "Mission Progress" && mpOverlay != null;
 
   const [showSettings, setShowSettings] = useState(false);
   const [showModeDialog, setShowModeDialog] = useState(false);
@@ -55,18 +90,18 @@ const AppHeaderInner: React.FC<Props> = ({
 
   const getModeIcon = (mode: string): string => {
     switch (mode.toLowerCase()) {
-      case 'dgps mark':
-        return 'star-three-points-outline';
-      case 'interval spray':
-        return '💧';
-      case 'survey':
-        return '🗺️';
-      case 'manual control':
-        return '🎮';
-      case 'custom':
-        return '⚙️';
+      case "dgps mark":
+        return "star-three-points-outline";
+      case "interval spray":
+        return "💧";
+      case "survey":
+        return "🗺️";
+      case "manual control":
+        return "🎮";
+      case "custom":
+        return "⚙️";
       default:
-        return '🎯';
+        return "🎯";
     }
   };
 
@@ -74,23 +109,23 @@ const AppHeaderInner: React.FC<Props> = ({
     setMissionMode(mode);
     setShowModeDialog(false);
 
-    if (mode === 'Dash') {
+    if (mode === "Dash") {
       setShowDashConfigDialog(true);
       return;
     }
 
-    let backendMode: 'auto' | 'continuous' | 'dash' = 'auto';
-    if (mode === 'Continuous') {
-      backendMode = 'continuous';
+    let backendMode: "auto" | "continuous" | "dash" = "auto";
+    if (mode === "Continuous") {
+      backendMode = "continuous";
     }
 
     try {
       const result = await setBackendMissionMode({ mode: backendMode });
       if (!result.success) {
-        console.error('[AppHeader] Failed to set mode:', result.error);
+        console.error("[AppHeader] Failed to set mode:", result.error);
       }
     } catch (error) {
-      console.error('[AppHeader] Error setting mode:', error);
+      console.error("[AppHeader] Error setting mode:", error);
     }
   };
 
@@ -98,24 +133,29 @@ const AppHeaderInner: React.FC<Props> = ({
     setShowDashConfigDialog(false);
     try {
       const result = await setBackendMissionMode({
-        mode: 'dash',
+        mode: "dash",
         dash_servo_on_time: onTime,
         dash_servo_off_time: offTime,
       });
       if (!result.success) {
-        console.error('[AppHeader] Failed to set dash mode config:', result.error);
+        console.error(
+          "[AppHeader] Failed to set dash mode config:",
+          result.error,
+        );
       }
     } catch (error) {
-      console.error('[AppHeader] Error setting dash mode config:', error);
+      console.error("[AppHeader] Error setting dash mode config:", error);
     }
   };
 
   const handleDashConfigCancel = () => {
-    setMissionMode('DGPS Mark');
+    setMissionMode("DGPS Mark");
     setShowDashConfigDialog(false);
   };
 
-  const renderTab = (tab: 'Dashboard' | 'Marking Plan' | 'Mission Progress') => {
+  const renderTab = (
+    tab: "Dashboard" | "Marking Plan" | "Mission Progress",
+  ) => {
     const isActive = activeTab === tab;
     return (
       <TouchableOpacity
@@ -141,7 +181,7 @@ const AppHeaderInner: React.FC<Props> = ({
         <View style={styles.leftSection}>
           <View style={styles.logoContainer}>
             <Image
-              source={require('../../../assets/rover-icon.png')}
+              source={require("../../../assets/rover-icon.png")}
               style={styles.logoImage}
               resizeMode="contain"
             />
@@ -171,7 +211,9 @@ const AppHeaderInner: React.FC<Props> = ({
           statusBarTranslucent
           onRequestClose={() => mpOverlay.setIsWidgetMenuOpen(false)}
         >
-          <TouchableWithoutFeedback onPress={() => mpOverlay.setIsWidgetMenuOpen(false)}>
+          <TouchableWithoutFeedback
+            onPress={() => mpOverlay.setIsWidgetMenuOpen(false)}
+          >
             <View style={styles.widgetModalBackdrop}>
               <TouchableWithoutFeedback onPress={() => undefined}>
                 <View style={styles.widgetDropdownMenu}>
@@ -192,7 +234,7 @@ const AppHeaderInner: React.FC<Props> = ({
                           <MaterialCommunityIcons
                             name={item.icon}
                             size={18}
-                            color={isSelected ? '#67E8F9' : '#94A3B8'}
+                            color={isSelected ? "#67E8F9" : "#94A3B8"}
                             style={styles.widgetMenuItemIcon}
                           />
                           <Text
@@ -218,9 +260,9 @@ const AppHeaderInner: React.FC<Props> = ({
       {/* Center: Tab Navigation Capsule */}
       <View style={styles.centerSection} pointerEvents="box-none">
         <View style={styles.tabContainer}>
-          {renderTab('Dashboard')}
-          {renderTab('Marking Plan')}
-          {renderTab('Mission Progress')}
+          {renderTab("Dashboard")}
+          {renderTab("Marking Plan")}
+          {renderTab("Mission Progress")}
         </View>
       </View>
 
@@ -235,7 +277,14 @@ const AppHeaderInner: React.FC<Props> = ({
           accessibilityRole="button"
         >
           <Text style={styles.modeCapsuleLabel}>MODE</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              marginTop: 1,
+            }}
+          >
             <MaterialCommunityIcons name="near-me" size={12} color="#67E8F9" />
             <Text style={styles.modeCapsuleValue}>{missionMode}</Text>
           </View>
@@ -251,12 +300,19 @@ const AppHeaderInner: React.FC<Props> = ({
           accessibilityRole="button"
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="cog-outline" size={18} color="#E5F1FF" />
+          <MaterialCommunityIcons
+            name="cog-outline"
+            size={18}
+            color="#E5F1FF"
+          />
         </TouchableOpacity>
       </View>
 
       {/* Settings Screen Modal */}
-      <SettingsScreen visible={showSettings} onClose={() => setShowSettings(false)} />
+      <SettingsScreen
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
 
       {/* Mode Selection Dialog */}
       <ModeSelectionDialog
@@ -280,34 +336,34 @@ const AppHeaderInner: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   header: {
-    position: 'absolute',
+    position: "absolute",
     top: 14,
     left: 14,
     right: 14,
     height: 58,
-    backgroundColor: 'transparent',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: "transparent",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     zIndex: 1000,
   },
   headerLeftCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
-    position: 'relative',
+    position: "relative",
     zIndex: 1002,
   },
   leftSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#07111be6',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#07111be6",
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
+    borderColor: "rgba(103, 232, 249, 0.15)",
     borderRadius: 14,
     paddingHorizontal: 14,
     height: 48,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
@@ -317,44 +373,44 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 10,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   logoImage: {
     width: 28,
     height: 28,
   },
   title: {
-    color: '#E5F1FF',
+    color: "#E5F1FF",
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   subtitle: {
-    color: '#9FBEE3',
+    color: "#9FBEE3",
     fontSize: 8,
-    fontWeight: '500',
+    fontWeight: "500",
     marginTop: 0,
   },
   centerSection: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
     right: 0,
-    alignItems: 'center',
-    pointerEvents: 'box-none',
+    alignItems: "center",
+    pointerEvents: "box-none",
   },
   tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#07111be6',
+    flexDirection: "row",
+    backgroundColor: "#07111be6",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
+    borderColor: "rgba(103, 232, 249, 0.15)",
     padding: 2,
-    pointerEvents: 'auto',
+    pointerEvents: "auto",
     height: 48,
-    alignItems: 'center',
-    shadowColor: '#000',
+    alignItems: "center",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
@@ -364,104 +420,104 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     height: 42,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   tabActive: {
-    backgroundColor: 'rgba(103, 232, 249, 0.08)',
+    backgroundColor: "rgba(103, 232, 249, 0.08)",
   },
   tabText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#94A3B8',
+    fontWeight: "600",
+    color: "#94A3B8",
   },
   tabTextActive: {
-    color: '#67E8F9',
+    color: "#67E8F9",
   },
   activeIndicatorContainer: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 3,
     left: 0,
     right: 0,
-    alignItems: 'center',
+    alignItems: "center",
   },
   activeUnderline: {
     width: 14,
     height: 2.5,
-    backgroundColor: '#67E8F9',
+    backgroundColor: "#67E8F9",
     borderRadius: 1.25,
   },
   rightSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#07111be6',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#07111be6",
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.15)',
+    borderColor: "rgba(103, 232, 249, 0.15)",
     borderRadius: 14,
     paddingHorizontal: 12,
     height: 48,
     gap: 8,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 5,
   },
   modeCapsuleBtn: {
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingRight: 8,
   },
   modeCapsuleLabel: {
-    color: '#94A3B8',
+    color: "#94A3B8",
     fontSize: 8,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.5,
   },
   modeCapsuleValue: {
-    color: '#E5F1FF',
+    color: "#E5F1FF",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   rightDivider: {
     width: 1,
     height: 20,
-    backgroundColor: 'rgba(103, 232, 249, 0.15)',
+    backgroundColor: "rgba(103, 232, 249, 0.15)",
     marginHorizontal: 4,
   },
   settingsCapsuleBtn: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
   widgetModalBackdrop: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   widgetDropdownMenu: {
-    position: 'absolute',
+    position: "absolute",
     top: WIDGET_DROPDOWN_TOP,
     left: WIDGET_DROPDOWN_LEFT,
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     height: VEHICLE_STATUS_CARD_HEIGHT,
     zIndex: 1002,
-    backgroundColor: '#07111be6',
+    backgroundColor: "#07111be6",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(103,232,249,0.15)',
+    borderColor: "rgba(103,232,249,0.15)",
     padding: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
   },
   widgetDropdownTitle: {
-    color: '#67E8F9',
+    color: "#67E8F9",
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
     paddingBottom: 10,
   },
@@ -470,30 +526,30 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   widgetMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     minHeight: 42,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.1)',
-    backgroundColor: 'rgba(8, 16, 26, 0.9)',
+    borderColor: "rgba(103, 232, 249, 0.1)",
+    backgroundColor: "rgba(8, 16, 26, 0.9)",
     paddingHorizontal: 12,
   },
   widgetMenuItemSelected: {
-    borderColor: 'rgba(103, 232, 249, 0.55)',
-    backgroundColor: 'rgba(103, 232, 249, 0.14)',
+    borderColor: "rgba(103, 232, 249, 0.55)",
+    backgroundColor: "rgba(103, 232, 249, 0.14)",
   },
   widgetMenuItemIcon: {
     marginRight: 10,
   },
   widgetMenuItemLabel: {
     flex: 1,
-    color: '#94A3B8',
+    color: "#94A3B8",
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   widgetMenuItemLabelSelected: {
-    color: '#67E8F9',
+    color: "#67E8F9",
   },
 });
 
