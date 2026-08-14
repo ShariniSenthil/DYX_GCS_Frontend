@@ -2152,11 +2152,24 @@ export default function MissionReportScreen({
 
       console.error("[MissionReportScreen] Mission start failed:", error);
 
-      // Re-read the status because the backend remains the source
-      // of truth after any failed command.
+      /*
+       * Backend remains the source of truth.
+       * Refresh immediately so the diagnostic fields on the
+       * screen also reflect the failed Start attempt.
+       */
       void refreshBackendMission();
 
-      showNotification("error", "Start Failed", message, 5000);
+      showNotification("error", "Mission Start Blocked", message, 8000);
+
+      /*
+       * Field-test requirement:
+       * Don't make the operator guess why Start failed.
+       */
+      Alert.alert("Mission Start Blocked", message, [
+        {
+          text: "OK",
+        },
+      ]);
 
       return {
         success: false,
