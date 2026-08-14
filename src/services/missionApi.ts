@@ -30,6 +30,10 @@ export type MissionExtensionMode =
   | "ENABLE"
   | "DISABLE";
 
+export type MissionExecutionMode =
+  | "AUTO"
+  | "MANUAL";
+
 export interface MissionUploadOptions {
   file: DocumentPickerAsset;
 
@@ -90,6 +94,8 @@ export interface MissionRuntimeState {
 
   extension_mode?:
     MissionExtensionMode;
+
+  execution_mode?: MissionExecutionMode;
 
   dummy_point_distance_m?:
     number | null;
@@ -334,6 +340,26 @@ Promise<MissionControlResponse> {
   );
 }
 
+export async function setMissionExecutionMode(
+  executionMode: MissionExecutionMode,
+): Promise<MissionControlResponse> {
+  if (
+    executionMode !== "AUTO" &&
+    executionMode !== "MANUAL"
+  ) {
+    throw new Error(
+      "Mission execution mode must be AUTO or MANUAL.",
+    );
+  }
+
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.EXECUTION_MODE,
+    {
+      execution_mode: executionMode,
+    },
+  );
+}
+
 export async function startMission():
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
@@ -404,6 +430,7 @@ export default {
   getLoadedMissionPath,
   getMissionDownloadUrl,
   prepareMission,
+  setMissionExecutionMode,
   startMission,
   pauseMission,
   resumeMission,

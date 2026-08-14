@@ -48,6 +48,7 @@ export interface Px4MissionTelemetry {
   active_point_index?: number | null;
   active_point_number?: number | null;
   active_point_state?: string | null;
+  execution_mode?: "AUTO" | "MANUAL";
   completed_points?: number;
   skipped_points?: number;
   failed_points?: number;
@@ -201,6 +202,7 @@ export type MissionState =
   | "switching_offboard"
   | "running"
   | "paused"
+  | "waiting_for_next"
   | "stopping"
   | "stopped"
   | "completed"

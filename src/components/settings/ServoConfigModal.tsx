@@ -1,16 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from "react";
+
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
   ActivityIndicator,
   Alert,
-} from 'react-native';
-import { colors } from '../../theme/colors';
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 interface ServoConfig {
   servo_channel: number;
@@ -24,10 +23,22 @@ interface ServoConfig {
 
 interface ServoConfigModalProps {
   visible: boolean;
+
   currentConfig: ServoConfig;
+
   onClose: () => void;
-  onSave: (config: ServoConfig) => Promise<{ success: boolean; message?: string }>;
-  onTest: (config: Omit<ServoConfig, 'servo_enabled'>) => Promise<{ success: boolean; message?: string; status?: string }>;
+
+  onSave: (config: ServoConfig) => Promise<{
+    success: boolean;
+    message?: string;
+  }>;
+
+  // Kept for compatibility with SettingsScreen.
+  onTest?: (config: Omit<ServoConfig, "servo_enabled">) => Promise<{
+    success: boolean;
+    message?: string;
+    status?: string;
+  }>;
 }
 
 export const ServoConfigModal: React.FC<ServoConfigModalProps> = ({
@@ -35,405 +46,230 @@ export const ServoConfigModal: React.FC<ServoConfigModalProps> = ({
   currentConfig,
   onClose,
   onSave,
-  onTest,
 }) => {
-  // Local state for config values
-  const [channel, setChannel] = useState(currentConfig.servo_channel);
-  const [pwmOn, setPwmOn] = useState(currentConfig.servo_pwm_on);
-  const [pwmOff, setPwmOff] = useState(currentConfig.servo_pwm_off);
-  const [delayBefore, setDelayBefore] = useState(currentConfig.servo_delay_before);
-  const [sprayDuration, setSprayDuration] = useState(currentConfig.servo_spray_duration);
-  const [delayAfter, setDelayAfter] = useState(currentConfig.servo_delay_after);
-  const [enabled, setEnabled] = useState(currentConfig.servo_enabled);
+  const [pressPwmText, setPressPwmText] = useState(
+    String(currentConfig.servo_pwm_on),
+  );
 
-  // Local state for input text values (can be empty for typing)
-  const [channelText, setChannelText] = useState(String(currentConfig.servo_channel));
-  const [pwmOnText, setPwmOnText] = useState(String(currentConfig.servo_pwm_on));
-  const [pwmOffText, setPwmOffText] = useState(String(currentConfig.servo_pwm_off));
-  const [delayBeforeText, setDelayBeforeText] = useState(String(currentConfig.servo_delay_before));
-  const [sprayDurationText, setSprayDurationText] = useState(String(currentConfig.servo_spray_duration));
-  const [delayAfterText, setDelayAfterText] = useState(String(currentConfig.servo_delay_after));
+  const [releasePwmText, setReleasePwmText] = useState(
+    String(currentConfig.servo_pwm_off),
+  );
 
-  // UI state
-  const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [testResult, setTestResult] = useState<'pass' | 'fail' | null>(null);
+
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Update local state when currentConfig changes
   useEffect(() => {
-    if (visible) {
-      setChannel(currentConfig.servo_channel);
-      setPwmOn(currentConfig.servo_pwm_on);
-      setPwmOff(currentConfig.servo_pwm_off);
-      setDelayBefore(currentConfig.servo_delay_before);
-      setSprayDuration(currentConfig.servo_spray_duration);
-      setDelayAfter(currentConfig.servo_delay_after);
-      setEnabled(currentConfig.servo_enabled);
-      setChannelText(String(currentConfig.servo_channel));
-      setPwmOnText(String(currentConfig.servo_pwm_on));
-      setPwmOffText(String(currentConfig.servo_pwm_off));
-      setDelayBeforeText(String(currentConfig.servo_delay_before));
-      setSprayDurationText(String(currentConfig.servo_spray_duration));
-      setDelayAfterText(String(currentConfig.servo_delay_after));
-      setTestResult(null);
-      setSaveSuccess(false);
+    if (!visible) {
+      return;
     }
-  }, [visible, currentConfig]);
 
-  const handleTest = async () => {
-    setIsTesting(true);
-    setTestResult(null);
+    setPressPwmText(String(currentConfig.servo_pwm_on));
 
-    try {
-      const result = await onTest({
-        servo_channel: channel,
-        servo_pwm_on: pwmOn,
-        servo_pwm_off: pwmOff,
-        servo_delay_before: delayBefore,
-        servo_spray_duration: sprayDuration,
-        servo_delay_after: delayAfter,
-      });
+    setReleasePwmText(String(currentConfig.servo_pwm_off));
 
-      if (result.success) {
-        setTestResult('pass');
-      } else {
-        setTestResult('fail');
-        Alert.alert('Test Failed', result.message || 'Servo test failed');
-      }
-    } catch (error) {
-      setTestResult('fail');
-      Alert.alert('Test Error', 'Failed to test servo configuration');
-    } finally {
-      setIsTesting(false);
+    setSaveSuccess(false);
+  }, [visible, currentConfig.servo_pwm_on, currentConfig.servo_pwm_off]);
+
+  const parsePwm = (text: string, label: string): number | null => {
+    const value = Number.parseInt(text, 10);
+
+    if (!Number.isFinite(value) || value < 1000 || value > 2000) {
+      Alert.alert("Invalid PWM", `${label} must be between 1000 and 2000 µs.`);
+
+      return null;
     }
+
+    return value;
+  };
+
+  const adjustPwm = (
+    currentText: string,
+    setter: (value: string) => void,
+    amount: number,
+  ) => {
+    const current = Number.parseInt(currentText, 10);
+
+    const safeCurrent = Number.isFinite(current) ? current : 1500;
+
+    const next = Math.max(1000, Math.min(2000, safeCurrent + amount));
+
+    setter(String(next));
   };
 
   const handleSave = async () => {
+    const pressPwm = parsePwm(pressPwmText, "Press PWM");
+
+    if (pressPwm === null) {
+      return;
+    }
+
+    const releasePwm = parsePwm(releasePwmText, "Release PWM");
+
+    if (releasePwm === null) {
+      return;
+    }
+
     setIsSaving(true);
     setSaveSuccess(false);
 
     try {
-      const result = await onSave({
-        servo_channel: channel,
-        servo_pwm_on: pwmOn,
-        servo_pwm_off: pwmOff,
-        servo_delay_before: delayBefore,
-        servo_spray_duration: sprayDuration,
-        servo_delay_after: delayAfter,
-        servo_enabled: enabled,
+      const response = await onSave({
+        ...currentConfig,
+
+        // Existing frontend names are retained
+        // here. SettingsScreen converts them
+        // into the new backend API names.
+        servo_pwm_on: pressPwm,
+        servo_pwm_off: releasePwm,
       });
 
-      if (result.success) {
-        setSaveSuccess(true);
-        // Auto-close after 1 second to show "OK" feedback
-        setTimeout(() => {
-          onClose();
-        }, 1000);
-      } else {
-        Alert.alert('Save Failed', result.message || 'Failed to save servo configuration');
+      if (!response.success) {
+        Alert.alert(
+          "Save Failed",
+          response.message || "Failed to update spray PWM.",
+        );
+
+        return;
       }
+
+      setSaveSuccess(true);
+
+      setTimeout(() => {
+        onClose();
+      }, 700);
     } catch (error) {
-      Alert.alert('Save Error', 'Failed to save servo configuration');
+      Alert.alert(
+        "Save Error",
+        error instanceof Error ? error.message : "Failed to update spray PWM.",
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleIncrement = (
-    setter: React.Dispatch<React.SetStateAction<number>>,
-    textSetter: React.Dispatch<React.SetStateAction<string>>,
-    value: number,
-    step: number,
-    max: number
-  ) => {
-    const newValue = Math.min(max, value + step);
-    setter(newValue);
-    textSetter(String(newValue));
-  };
-
-  const handleDecrement = (
-    setter: React.Dispatch<React.SetStateAction<number>>,
-    textSetter: React.Dispatch<React.SetStateAction<string>>,
-    value: number,
-    step: number,
-    min: number
-  ) => {
-    const newValue = Math.max(min, value - step);
-    setter(newValue);
-    textSetter(String(newValue));
-  };
-
   return (
-    <Modal visible={visible} animationType="slide" transparent={true}>
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={onClose}
+    >
       <View style={styles.overlay}>
         <View style={styles.container}>
-          {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>⚙️ Servo Configuration</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
+            <View>
+              <Text style={styles.title}>Spray Servo Configuration</Text>
+
+              <Text style={styles.subtitle}>PX4 AUX5 • Actuator Set 1</Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={onClose}
+              disabled={isSaving}
+              style={styles.closeButton}
+            >
+              <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Content */}
-          <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
-            {/* Enable/Disable Toggle */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Servo Control</Text>
-              <View style={styles.toggleRow}>
-                <Text style={styles.label}>Enable Servo</Text>
-                <View style={styles.toggleButtons}>
-                  <TouchableOpacity
-                    style={[styles.toggleButton, enabled && styles.toggleButtonActive]}
-                    onPress={() => setEnabled(true)}
-                  >
-                    <Text style={[styles.toggleButtonText, enabled && styles.toggleButtonTextActive]}>
-                      ENABLE
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.toggleButton, !enabled && styles.toggleButtonActive]}
-                    onPress={() => setEnabled(false)}
-                  >
-                    <Text style={[styles.toggleButtonText, !enabled && styles.toggleButtonTextActive]}>
-                      DISABLE
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoTitle}>Hardware mapping</Text>
 
-            {/* Servo Channel */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Servo Channel (1-16)</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setChannel, setChannelText, channel, 1, 1)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={channelText}
-                  onChangeText={(text) => {
-                    setChannelText(text);
-                    if (text !== '' && !isNaN(parseInt(text))) {
-                      setChannel(Math.max(1, Math.min(16, parseInt(text))));
-                    }
-                  }}
-                  keyboardType="number-pad"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setChannel, setChannelText, channel, 1, 16)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            <Text style={styles.infoText}>
+              AUX5 is fixed by the rover backend. Only PRESS and RELEASE PWM
+              values are configurable here.
+            </Text>
 
-            {/* PWM ON */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>PWM ON (0-3000)</Text>
-              <Text style={styles.description}>Pulse width for servo ON position</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setPwmOn, setPwmOnText, pwmOn, 100, 0)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={pwmOnText}
-                  onChangeText={(text) => {
-                    setPwmOnText(text);
-                    if (text !== '' && !isNaN(parseInt(text))) {
-                      setPwmOn(Math.max(0, Math.min(3000, parseInt(text))));
-                    }
-                  }}
-                  keyboardType="number-pad"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setPwmOn, setPwmOnText, pwmOn, 100, 3000)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            <Text style={styles.infoText}>
+              Current spray duration:{" "}
+              {currentConfig.servo_spray_duration.toFixed(2)}s
+            </Text>
+          </View>
 
-            {/* PWM OFF */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>PWM OFF (0-3000)</Text>
-              <Text style={styles.description}>Pulse width for servo OFF position</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setPwmOff, setPwmOffText, pwmOff, 100, 0)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={pwmOffText}
-                  onChangeText={(text) => {
-                    setPwmOffText(text);
-                    if (text !== '' && !isNaN(parseInt(text))) {
-                      setPwmOff(Math.max(0, Math.min(3000, parseInt(text))));
-                    }
-                  }}
-                  keyboardType="number-pad"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setPwmOff, setPwmOffText, pwmOff, 100, 3000)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>PRESS PWM</Text>
 
-            {/* Delay Before */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Delay Before (0-30s)</Text>
-              <Text style={styles.description}>Wait time before activating servo</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setDelayBefore, setDelayBeforeText, delayBefore, 0.5, 0)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={delayBeforeText}
-                  onChangeText={(text) => {
-                    setDelayBeforeText(text);
-                    if (text !== '' && text !== '.' && !isNaN(parseFloat(text))) {
-                      setDelayBefore(Math.max(0, Math.min(30, parseFloat(text))));
-                    }
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setDelayBefore, setDelayBeforeText, delayBefore, 0.5, 30)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            <Text style={styles.description}>
+              Servo position used while spraying. Valid range: 1000–2000 µs.
+            </Text>
 
-            {/* Spray Duration */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Spray Duration (0-30s)</Text>
-              <Text style={styles.description}>How long to keep servo ON</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setSprayDuration, setSprayDurationText, sprayDuration, 0.2, 0)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={sprayDurationText}
-                  onChangeText={(text) => {
-                    setSprayDurationText(text);
-                    if (text !== '' && text !== '.' && !isNaN(parseFloat(text))) {
-                      setSprayDuration(Math.max(0, Math.min(30, parseFloat(text))));
-                    }
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setSprayDuration, setSprayDurationText, sprayDuration, 0.2, 30)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Delay After */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Delay After (0-30s)</Text>
-              <Text style={styles.description}>Wait time after deactivating servo</Text>
-              <View style={styles.inputRow}>
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleDecrement(setDelayAfter, setDelayAfterText, delayAfter, 0.5, 0)}
-                >
-                  <Text style={styles.incrementText}>−</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={delayAfterText}
-                  onChangeText={(text) => {
-                    setDelayAfterText(text);
-                    if (text !== '' && text !== '.' && !isNaN(parseFloat(text))) {
-                      setDelayAfter(Math.max(0, Math.min(30, parseFloat(text))));
-                    }
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-                <TouchableOpacity
-                  style={styles.incrementButton}
-                  onPress={() => handleIncrement(setDelayAfter, setDelayAfterText, delayAfter, 0.5, 30)}
-                >
-                  <Text style={styles.incrementText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-
-          {/* Footer Actions */}
-          <View style={styles.footer}>
-            {/* Test Result Indicator */}
-            {testResult && (
-              <View style={[styles.testResult, testResult === 'pass' ? styles.testPass : styles.testFail]}>
-                <Text style={styles.testResultText}>
-                  {testResult === 'pass' ? '✅ TEST PASSED' : '❌ TEST FAILED'}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.buttonRow}>
-              {/* Test Config Button */}
+            <View style={styles.inputRow}>
               <TouchableOpacity
-                style={[styles.actionButton, styles.testButton]}
-                onPress={handleTest}
-                disabled={isTesting || isSaving}
+                style={styles.adjustButton}
+                onPress={() => adjustPwm(pressPwmText, setPressPwmText, -10)}
               >
-                {isTesting ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text style={styles.actionButtonText}>🧪 Test Config</Text>
-                )}
+                <Text style={styles.adjustText}>−</Text>
               </TouchableOpacity>
 
-              {/* Save Config Button */}
+              <TextInput
+                style={styles.input}
+                value={pressPwmText}
+                onChangeText={(text) =>
+                  setPressPwmText(text.replace(/[^0-9]/g, ""))
+                }
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+
               <TouchableOpacity
-                style={[styles.actionButton, styles.saveButton, saveSuccess && styles.saveButtonSuccess]}
-                onPress={handleSave}
-                disabled={isTesting || isSaving}
+                style={styles.adjustButton}
+                onPress={() => adjustPwm(pressPwmText, setPressPwmText, 10)}
               >
-                {isSaving ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : saveSuccess ? (
-                  <Text style={styles.actionButtonText}>✅ OK</Text>
-                ) : (
-                  <Text style={styles.actionButtonText}>💾 Save Config</Text>
-                )}
+                <Text style={styles.adjustText}>+</Text>
               </TouchableOpacity>
             </View>
           </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>RELEASE PWM</Text>
+
+            <Text style={styles.description}>
+              Safe servo position after spraying. Valid range: 1000–2000 µs.
+            </Text>
+
+            <View style={styles.inputRow}>
+              <TouchableOpacity
+                style={styles.adjustButton}
+                onPress={() =>
+                  adjustPwm(releasePwmText, setReleasePwmText, -10)
+                }
+              >
+                <Text style={styles.adjustText}>−</Text>
+              </TouchableOpacity>
+
+              <TextInput
+                style={styles.input}
+                value={releasePwmText}
+                onChangeText={(text) =>
+                  setReleasePwmText(text.replace(/[^0-9]/g, ""))
+                }
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+
+              <TouchableOpacity
+                style={styles.adjustButton}
+                onPress={() => adjustPwm(releasePwmText, setReleasePwmText, 10)}
+              >
+                <Text style={styles.adjustText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.saveButton, saveSuccess && styles.successButton]}
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.saveText}>
+                {saveSuccess ? "✓ SAVED" : "SAVE PWM"}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -443,191 +279,139 @@ export const ServoConfigModal: React.FC<ServoConfigModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  container: {
-    width: '95%',
-    height: '95%',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.3)',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    backgroundColor: '#002244',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(103, 232, 249, 0.3)',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    fontSize: 24,
-    color: colors.text,
-    fontWeight: 'bold',
-  },
-  content: {
-    flex: 1,
-  },
-  scrollContent: {
+    backgroundColor: "rgba(0,0,0,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 24,
   },
-  section: {
-    backgroundColor: '#2a2a2a',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
+
+  container: {
+    width: "100%",
+    maxWidth: 520,
+    backgroundColor: "#111827",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(103, 232, 249, 0.2)',
+    borderColor: "#334155",
+    padding: 20,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 8,
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18,
   },
-  description: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 12,
+
+  title: {
+    color: "#ffffff",
+    fontSize: 19,
+    fontWeight: "700",
   },
+
+  subtitle: {
+    color: "#94a3b8",
+    marginTop: 4,
+    fontSize: 12,
+  },
+
+  closeButton: {
+    padding: 8,
+  },
+
+  closeText: {
+    color: "#cbd5e1",
+    fontSize: 20,
+  },
+
+  infoBox: {
+    backgroundColor: "#172033",
+    borderWidth: 1,
+    borderColor: "#334155",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+
+  infoTitle: {
+    color: "#67e8f9",
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+
+  infoText: {
+    color: "#cbd5e1",
+    fontSize: 13,
+    marginTop: 3,
+  },
+
+  field: {
+    marginBottom: 18,
+  },
+
   label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
+    color: "#ffffff",
+    fontWeight: "700",
+    marginBottom: 4,
   },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+
+  description: {
+    color: "#94a3b8",
+    fontSize: 12,
+    marginBottom: 10,
   },
-  toggleButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  toggleButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 2,
-    borderColor: '#4a5568',
-  },
-  toggleButtonActive: {
-    backgroundColor: '#10b981',
-    borderColor: '#10b981',
-  },
-  toggleButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#94a3b8',
-  },
-  toggleButtonTextActive: {
-    color: colors.text,
-  },
+
   inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
+
+  adjustButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: "#1e293b",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#475569",
+  },
+
+  adjustText: {
+    color: "#ffffff",
+    fontSize: 24,
+  },
+
   input: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 2,
-    borderColor: '#4a5568',
-    borderRadius: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#475569",
+    backgroundColor: "#0f172a",
+    color: "#ffffff",
+    textAlign: "center",
     fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
+    fontWeight: "700",
   },
-  incrementButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    backgroundColor: '#1a75d2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#059669',
-  },
-  incrementText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  footer: {
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    backgroundColor: '#002244',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(103, 232, 249, 0.3)',
-  },
-  testResult: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  testPass: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    borderWidth: 1,
-    borderColor: '#10b981',
-  },
-  testFail: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    borderWidth: 1,
-    borderColor: '#ef4444',
-  },
-  testResultText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  testButton: {
-    backgroundColor: '#7c3aed',
-  },
+
   saveButton: {
-    backgroundColor: '#10b981',
+    minHeight: 50,
+    borderRadius: 11,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  saveButtonSuccess: {
-    backgroundColor: '#059669',
+
+  successButton: {
+    backgroundColor: "#059669",
   },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.text,
+
+  saveText: {
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: 15,
   },
 });
+
+export default ServoConfigModal;

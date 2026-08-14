@@ -69,6 +69,9 @@ export const PX4_MISSION = {
   // Active mission.csv.
   FILE: "/api/mission/file",
 
+  // Mission execution mode.
+  EXECUTION_MODE: "/api/mission/execution-mode",
+
   // Mission controls.
   START: "/api/mission/start",
   PAUSE: "/api/mission/pause",
@@ -155,6 +158,7 @@ export const PX4_RTK = {
 
 export const PX4_SPRAY = {
   STATUS: "/api/spray/status",
+  CONFIG: "/api/spray/config",
   ON: "/api/spray/on",
   OFF: "/api/spray/off",
   ENABLE: "/api/spray/enable",

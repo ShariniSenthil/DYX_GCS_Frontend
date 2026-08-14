@@ -87,6 +87,7 @@ import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStatus,
   getLoadedMissionPath,
+  setMissionExecutionMode,
   startMission,
   pauseMission,
   resumeMission,
@@ -435,6 +436,7 @@ export default function MissionReportScreen({
     return [
       "running",
       "paused",
+      "waiting_for_next",
       "arming",
       "switching_offboard",
       "loading",
@@ -481,16 +483,17 @@ export default function MissionReportScreen({
   const hasUploadedMission = backendMission?.loaded === true;
 
   /**
-   * AUTO mode is the only operational mode for now.
+   * AUTO and MANUAL are both autonomous OFFBOARD
+   * mission execution modes.
    *
-   * MANUAL remains visible and selectable, but cannot
-   * start until backend manual-mode support is added.
+   * MANUAL means the backend waits for NEXT after
+   * each completed marking point.
    */
   const canStartMission =
     connectionState === "connected" &&
     hasUploadedMission &&
     backendMission?.ready === true &&
-    mode === "AUTO";
+    (mode === "AUTO" || mode === "MANUAL");
 
   const isBackendMissionPaused = backendMissionState === "PAUSED";
 
@@ -539,6 +542,10 @@ export default function MissionReportScreen({
   }, [waypoints, effectiveStatusMap]);
 
   const effectiveWaitingForManual =
+    backendMissionState === "WAITING_FOR_NEXT" ||
+    String(telemetry.mission?.status ?? "")
+      .trim()
+      .toUpperCase() === "WAITING_FOR_NEXT" ||
     waitingForManual ||
     px4WaitingForContinue ||
     (verifiedCtx.isLoaded && verifiedWaiting);
@@ -639,6 +646,20 @@ export default function MissionReportScreen({
       }
 
       setBackendMission(response.mission);
+
+      const executionMode = String(response.mission.execution_mode ?? "")
+        .trim()
+        .toUpperCase();
+
+      if (executionMode === "AUTO" || executionMode === "MANUAL") {
+        setMode(executionMode);
+      }
+
+      setWaitingForManual(
+        String(response.mission.state ?? "")
+          .trim()
+          .toUpperCase() === "WAITING_FOR_NEXT",
+      );
 
       console.log("[MissionReportScreen] Backend mission status:", {
         state: response.mission.state,
@@ -1778,6 +1799,54 @@ export default function MissionReportScreen({
     // trailPointsRef.current = [];
   };
 
+  const handleSetExecutionMode = async (newMode: "AUTO" | "MANUAL") => {
+    try {
+      console.log("[MissionReportScreen] Setting execution mode:", newMode);
+
+      const response = await setMissionExecutionMode(newMode);
+
+      if (!response.success) {
+        return {
+          success: false,
+          message:
+            response.mission?.message || "Backend rejected execution mode.",
+        };
+      }
+
+      setBackendMission(response.mission);
+
+      setMode(newMode);
+
+      setWaitingForManual(
+        String(response.mission?.state ?? "")
+          .trim()
+          .toUpperCase() === "WAITING_FOR_NEXT",
+      );
+
+      console.log("[MissionReportScreen] Execution mode accepted:", {
+        executionMode: response.mission?.execution_mode,
+
+        state: response.mission?.state,
+      });
+
+      return response;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to set mission execution mode.";
+
+      console.error("[MissionReportScreen] Execution mode failed:", error);
+
+      void refreshBackendMission();
+
+      return {
+        success: false,
+        message,
+      };
+    }
+  };
+
   const handleStart = async () => {
     if (!mountedRef.current) {
       return {
@@ -1793,11 +1862,9 @@ export default function MissionReportScreen({
       // have been prepared successfully.
       if (!canStartMission) {
         const message =
-          mode === "MANUAL"
-            ? "Manual mission mode will be enabled after backend manual-mode support is implemented."
-            : backendMission?.loaded === true
-              ? "The mission file is stored, but its trajectory is not ready."
-              : "Upload and prepare a mission before starting.";
+          backendMission?.loaded === true
+            ? "The mission file is stored, but its trajectory is not ready."
+            : "Upload and prepare a mission before starting.";
 
         showNotification("error", "Mission Not Ready", message, 4000);
 
@@ -1853,6 +1920,31 @@ export default function MissionReportScreen({
           message,
         };
       }
+
+      if (mode !== "AUTO" && mode !== "MANUAL") {
+        const message = "Select AUTO or MANUAL before starting.";
+
+        showNotification("error", "Invalid Mission Mode", message);
+
+        return {
+          success: false,
+          message,
+        };
+      }
+
+      /**
+       * Set execution mode immediately before START.
+       * This guarantees backend and frontend agree
+       * even after reconnect/reload.
+       */
+      const modeResponse = await setMissionExecutionMode(mode);
+
+      setBackendMission(modeResponse.mission);
+
+      console.log(
+        "[MissionReportScreen] Start execution mode confirmed:",
+        modeResponse.mission?.execution_mode,
+      );
 
       // Current backend contract:
       // POST /api/mission/start
@@ -3774,7 +3866,7 @@ export default function MissionReportScreen({
           <MissionControlCard
             waypoints={waypoints}
             mode={mode}
-            onSetMode={setMode}
+            onSetMode={handleSetExecutionMode}
             onStart={handleStart}
             onPause={handlePause}
             onResume={handleResume}

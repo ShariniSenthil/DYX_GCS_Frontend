@@ -28,6 +28,7 @@ import {
   type RtkStatusResponse,
 } from "../services/rtkService";
 import { useAuth } from "../hooks/useAuth";
+import { getSprayConfig, setSprayConfig } from "../services/sprayConfigService";
 
 interface SettingsScreenProps {
   visible: boolean;
@@ -86,11 +87,16 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
 
   // Servo Configuration State
   const [servoEnabled, setServoEnabled] = useState(false);
-  const [servoChannel, setServoChannel] = useState(9);
-  const [servoPwmOn, setServoPwmOn] = useState(2300);
-  const [servoPwmOff, setServoPwmOff] = useState(1750);
+  // PX4 contract is permanently AUX5.
+  const [servoChannel, setServoChannel] = useState(5);
+
+  // Dynamic backend-controlled servo positions.
+  const [servoPwmOn, setServoPwmOn] = useState(2000);
+  const [servoPwmOff, setServoPwmOff] = useState(1500);
+
+  // Current production spray logic.
   const [servoDelayBefore, setServoDelayBefore] = useState(0.0);
-  const [servoSprayDuration, setServoSprayDuration] = useState(5.0);
+  const [servoSprayDuration, setServoSprayDuration] = useState(0.5);
   const [servoDelayAfter, setServoDelayAfter] = useState(0.0);
   const [isLoadingServo, setIsLoadingServo] = useState(false);
   const [servoConfigLoaded, setServoConfigLoaded] = useState(false);
@@ -562,39 +568,67 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
 
   const loadServoConfig = async () => {
     try {
-      console.log("[Settings] Loading servo configuration...");
-      const response = await services.getMissionServoConfig();
+      console.log("[Settings] Loading spray configuration...");
 
-      if (response.success) {
-        // Backend returns config in 'message' field
-        const config =
-          (response as any).message ||
-          (response as any).config ||
-          (response as any).data ||
-          response;
+      const response = await getSprayConfig();
 
-        setServoEnabled(config.servo_enabled ?? false);
-        setServoChannel(config.servo_channel ?? 9);
-        setServoPwmOn(config.servo_pwm_on ?? 2300);
-        setServoPwmOff(config.servo_pwm_off ?? 1750);
-        setServoDelayBefore(config.servo_delay_before ?? 0.0);
-        setServoSprayDuration(config.servo_spray_duration ?? 5.0);
-        setServoDelayAfter(config.servo_delay_after ?? 0.0);
-        setServoConfigLoaded(true);
-        console.log("[Settings] ✅ Servo config loaded:", {
-          enabled: config.servo_enabled,
-          channel: config.servo_channel,
-          pwm_on: config.servo_pwm_on,
-          pwm_off: config.servo_pwm_off,
-        });
-      } else {
-        console.warn(
-          "[Settings] ⚠️ Failed to load servo config:",
-          response.message,
-        );
+      if (!response.success) {
+        console.warn("[Settings] Spray config request rejected");
+        return;
       }
+
+      const config = response.config;
+
+      setServoEnabled(
+        config.available === true && config.fault_latched !== true,
+      );
+
+      // Hardware mapping is fixed to AUX5.
+      setServoChannel(5);
+
+      if (
+        typeof config.press_pwm_us === "number" &&
+        Number.isFinite(config.press_pwm_us)
+      ) {
+        setServoPwmOn(config.press_pwm_us);
+      }
+
+      if (
+        typeof config.release_pwm_us === "number" &&
+        Number.isFinite(config.release_pwm_us)
+      ) {
+        setServoPwmOff(config.release_pwm_us);
+      }
+
+      setServoDelayBefore(0.0);
+      setServoDelayAfter(0.0);
+
+      if (
+        typeof config.spray_duration_sec === "number" &&
+        Number.isFinite(config.spray_duration_sec)
+      ) {
+        setServoSprayDuration(config.spray_duration_sec);
+      }
+
+      setServoConfigLoaded(true);
+
+      console.log("[Settings] Spray config loaded:", {
+        available: config.available,
+
+        controllerState: config.controller_state,
+
+        pressPwm: config.press_pwm_us,
+
+        releasePwm: config.release_pwm_us,
+
+        duration: config.spray_duration_sec,
+
+        fault: config.fault_reason,
+      });
     } catch (error) {
-      console.error("[Settings] ❌ Error loading servo config:", error);
+      console.error("[Settings] Failed to load spray config:", error);
+
+      setServoConfigLoaded(false);
     }
   };
 
@@ -920,31 +954,76 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
   // Servo Save Handler
   const handleServoSave = async (config: any) => {
     try {
-      console.log("[Settings] Saving servo config:", config);
-      const response = await services.updateMissionServoConfig(config);
+      console.log("[Settings] Updating spray PWM:", {
+        press_pwm_us: config.servo_pwm_on,
 
-      if (response.success) {
-        // Optimistically update local state with saved values
-        setServoEnabled(config.servo_enabled);
-        setServoChannel(config.servo_channel);
-        setServoPwmOn(config.servo_pwm_on);
-        setServoPwmOff(config.servo_pwm_off);
-        setServoDelayBefore(config.servo_delay_before);
-        setServoSprayDuration(config.servo_spray_duration);
-        setServoDelayAfter(config.servo_delay_after);
+        release_pwm_us: config.servo_pwm_off,
+      });
 
-        console.log("[Settings] ✅ Servo config saved successfully");
-        setSuccessMessage("Servo configuration saved successfully");
-        setTimeout(() => setSuccessMessage(""), 3000);
+      const response = await setSprayConfig({
+        press_pwm_us: Number(config.servo_pwm_on),
 
-        // Re-fetch from backend to confirm persisted values match what we saved
-        loadServoConfig();
+        release_pwm_us: Number(config.servo_pwm_off),
+      });
+
+      if (!response.success) {
+        return {
+          success: false,
+          message:
+            response.message || "Backend rejected spray PWM configuration.",
+        };
       }
 
-      return response;
+      const saved = response.config;
+
+      if (typeof saved.press_pwm_us === "number") {
+        setServoPwmOn(saved.press_pwm_us);
+      }
+
+      if (typeof saved.release_pwm_us === "number") {
+        setServoPwmOff(saved.release_pwm_us);
+      }
+
+      if (typeof saved.spray_duration_sec === "number") {
+        setServoSprayDuration(saved.spray_duration_sec);
+      }
+
+      setServoEnabled(saved.available === true && saved.fault_latched !== true);
+
+      setServoChannel(5);
+
+      setSuccessMessage("Spray PWM configuration saved successfully");
+
+      setTimeout(() => setSuccessMessage(""), 3000);
+
+      console.log("[Settings] Spray PWM accepted by controller:", {
+        press_pwm_us: saved.press_pwm_us,
+
+        release_pwm_us: saved.release_pwm_us,
+
+        press_value: saved.press_value,
+
+        release_value: saved.release_value,
+
+        result: saved.config_result,
+      });
+
+      return {
+        success: true,
+        message: response.message || "Spray PWM updated successfully.",
+      };
     } catch (error) {
-      console.error("[Settings] Servo save error:", error);
-      return { success: false, message: "Failed to save servo configuration" };
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to save spray PWM configuration.";
+
+      console.error("[Settings] Spray PWM save failed:", error);
+
+      return {
+        success: false,
+        message,
+      };
     }
   };
 
@@ -1317,9 +1396,10 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
               {/* Read-only status toggle */}
               <View style={styles.settingRow}>
                 <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>Spray Status</Text>
+                  <Text style={styles.settingLabel}>Spray Controller</Text>
+
                   <Text style={styles.settingDescription}>
-                    Current spray state (read-only)
+                    AUX5 production spray controller
                   </Text>
                 </View>
                 <View
@@ -1329,7 +1409,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
                   ]}
                 >
                   <Text style={styles.statusBadgeText}>
-                    {servoEnabled ? "ENABLED" : "DISABLED"}
+                    {servoEnabled ? "AVAILABLE" : "OFFLINE"}
                   </Text>
                 </View>
               </View>
@@ -1355,7 +1435,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
                   <Text style={styles.configureButtonDescription}>
                     {isLoadingServoModal
                       ? "Loading config..."
-                      : "Adjust channel, PWM values, timing parameters"}
+                      : "Configure AUX5 press and release PWM"}
                   </Text>
                 </View>
                 <Text style={styles.configureButtonArrow}>›</Text>
@@ -1364,10 +1444,9 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
               {servoConfigLoaded && (
                 <View style={styles.infoBox}>
                   <Text style={styles.infoText}>
-                    📊 Current Config: CH{servoChannel} | PWM ON:{servoPwmOn}{" "}
-                    OFF:{servoPwmOff} | Delays: {servoDelayBefore.toFixed(1)}s /{" "}
-                    {servoSprayDuration.toFixed(1)}s /{" "}
-                    {servoDelayAfter.toFixed(1)}s
+                    AUX5 | PRESS: {servoPwmOn} µs | RELEASE: {servoPwmOff} µs
+                    {" | "}
+                    Spray: {servoSprayDuration.toFixed(2)} s
                   </Text>
                 </View>
               )}
