@@ -2317,38 +2317,83 @@ export default function PathPlanScreen({
       const totalPoints =
         response.upload?.total_points ?? waypointsToUpload.length;
 
-      const navigationPoints = response.mission?.navigation_point_count;
+      const navigationPoints = Number(
+        response.mission?.navigation_point_count ?? 0,
+      );
+
+      const backendState = String(response.mission?.state ?? "PREPARING")
+        .trim()
+        .toUpperCase();
+
+      const missionAlreadyReady =
+        backendState === "READY" &&
+        response.mission?.ready === true &&
+        Number.isFinite(navigationPoints) &&
+        navigationPoints > 0;
 
       const dummyDistance = response.upload?.dummy_point_distance_m ?? null;
 
-      showPathPlanToast(
-        "success",
-        "Mission Ready",
-        `${totalPoints} marking points uploaded successfully.`,
-        5000,
-      );
+      if (missionAlreadyReady) {
+        /*
+         * RTK was already FIXED and the trajectory happened to complete
+         * before the upload response returned.
+         */
+        showPathPlanToast(
+          "success",
+          "Mission Ready",
+          `${totalPoints} marking points uploaded. ${navigationPoints} navigation points generated.`,
+          5000,
+        );
 
-      Alert.alert(
-        "Mission Ready",
-        [
-          `Marking points: ${totalPoints}`,
-          `Extension: ${extensionMode}`,
+        Alert.alert(
+          "Mission Ready",
+          [
+            `Marking points: ${totalPoints}`,
+            `Navigation points: ${navigationPoints}`,
+            `Extension: ${extensionMode}`,
 
-          dummyDistance !== null
-            ? `Dummy-point distance: ${dummyDistance} m`
-            : null,
+            dummyDistance !== null
+              ? `Dummy-point distance: ${dummyDistance} m`
+              : null,
 
-          navigationPoints !== undefined
-            ? `Navigation points: ${navigationPoints}`
-            : null,
+            "",
+            "Trajectory is ready.",
+            "Open Mission Report to review the generated path and START.",
+          ]
+            .filter((line): line is string => typeof line === "string")
+            .join("\n"),
+        );
+      } else {
+        /*
+         * Normal asynchronous upload behaviour.
+         */
+        showPathPlanToast(
+          "success",
+          "Mission Uploaded",
+          `${totalPoints} marking points uploaded. Generating trajectory...`,
+          5000,
+        );
 
-          "",
-          "The backend validated, stored and prepared the mission.",
-          "The rover has not started moving.",
-        ]
-          .filter((line): line is string => typeof line === "string")
-          .join("\n"),
-      );
+        Alert.alert(
+          "Mission Uploaded",
+          [
+            `Marking points: ${totalPoints}`,
+            `Extension: ${extensionMode}`,
+
+            dummyDistance !== null
+              ? `Dummy-point distance: ${dummyDistance} m`
+              : null,
+
+            "",
+            "Trajectory preparation has started.",
+            "RTK FIXED is required.",
+            "Open Mission Report to watch the generated trajectory become READY.",
+            "START will enable automatically when preparation is complete.",
+          ]
+            .filter((line): line is string => typeof line === "string")
+            .join("\n"),
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 

@@ -434,11 +434,14 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
           <TouchableOpacity
             style={[
               styles.controlButton,
+
               isPaused ? styles.resumeButton : styles.pauseButton,
-              (!isRunning || isPausing || isResuming) && styles.buttonDisabled,
+
+              (!isRunning || isWaitingForNext || isPausing || isResuming) &&
+                styles.buttonDisabled,
             ]}
             onPress={isPaused ? handleResume : handlePause}
-            disabled={!isRunning || isPausing || isResuming}
+            disabled={!isRunning || isWaitingForNext || isPausing || isResuming}
           >
             <Text style={styles.buttonText}>
               {isPaused ? "RESUME" : "PAUSE"}

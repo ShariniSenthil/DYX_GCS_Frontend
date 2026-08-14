@@ -631,47 +631,77 @@ export default function MissionReportScreen({
 
   const refreshBackendMission = useCallback(async (): Promise<void> => {
     if (isOfflineMode()) {
-      setBackendMission(null);
       return;
     }
 
     try {
-      console.log("[MissionReportScreen] Fetching backend mission status...");
-
       const response = await getMissionStatus();
 
-      if (!response.success) {
-        setBackendMission(null);
+      if (!response?.success || !response?.mission) {
         return;
       }
 
-      setBackendMission(response.mission);
+      const mission = response.mission;
 
-      const executionMode = String(response.mission.execution_mode ?? "")
+      setBackendMission(mission);
+
+      const state = String(mission.state ?? "")
         .trim()
         .toUpperCase();
 
+      const executionMode = String(mission.execution_mode ?? "")
+        .trim()
+        .toUpperCase();
+
+      /*
+       * Keep AUTO/MANUAL UI synchronized with mission_manager.
+       */
       if (executionMode === "AUTO" || executionMode === "MANUAL") {
         setMode(executionMode);
       }
 
-      setWaitingForManual(
-        String(response.mission.state ?? "")
-          .trim()
-          .toUpperCase() === "WAITING_FOR_NEXT",
-      );
+      /*
+       * MANUAL mission waits here after finishing one marking point.
+       */
+      setWaitingForManual(state === "WAITING_FOR_NEXT");
 
-      console.log("[MissionReportScreen] Backend mission status:", {
-        state: response.mission.state,
-        loaded: response.mission.loaded,
-        ready: response.mission.ready,
-        totalPoints: response.mission.total_points,
+      /*
+       * Backend is the source of truth for whether the mission
+       * is currently active.
+       */
+      if (
+        state === "RUNNING" ||
+        state === "PAUSED" ||
+        state === "WAITING_FOR_NEXT"
+      ) {
+        setIsMissionActive(true);
+      } else if (
+        state === "READY" ||
+        state === "PREPARING" ||
+        state === "EMPTY" ||
+        state === "COMPLETED" ||
+        state === "ERROR"
+      ) {
+        setIsMissionActive(false);
+      }
+
+      console.log("[MissionReportScreen] Backend mission:", {
+        state,
+        loaded: mission.loaded,
+        ready: mission.ready,
+        executionMode,
+        navigationPoints: mission.navigation_point_count,
       });
     } catch (error) {
-      setBackendMission(null);
-
+      /*
+       * IMPORTANT:
+       * Do not erase the previous valid mission state because one
+       * 500 ms status request failed.
+       *
+       * connectionState already handles actual disconnection.
+       */
       console.warn(
-        "[MissionReportScreen] Mission status unavailable:",
+        "[MissionReportScreen] Mission status refresh failed:",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -772,30 +802,154 @@ export default function MissionReportScreen({
     }
   }, []);
 
+  /*
+   * ============================================================
+   * MISSION STATUS SYNCHRONIZATION
+   * ============================================================
+   *
+   * LOAD MISSION is asynchronous:
+   *
+   * PREPARING
+   *   ↓
+   * trajectory_generator READY
+   *   ↓
+   * mission_manager accepts complete trajectory
+   *   ↓
+   * READY
+   *
+   * Therefore Mission Report must continue checking state instead
+   * of reading it only once.
+   */
   useEffect(() => {
-    if (!isVisible) {
+    if (!isVisible || connectionState !== "connected" || isOfflineMode()) {
       return;
     }
 
-    void refreshBackendMission();
+    let cancelled = false;
+    let requestInFlight = false;
+
+    const pollMission = async () => {
+      if (cancelled || requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
+
+      try {
+        await refreshBackendMission();
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    /*
+     * Immediate read when opening Mission Report.
+     */
+    void pollMission();
+
+    /*
+     * Continue synchronizing.
+     *
+     * 500 ms is fast enough for operator controls without creating
+     * an unnecessary high request rate.
+     */
+    const timer = setInterval(() => {
+      void pollMission();
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [isVisible, connectionState, refreshBackendMission]);
 
+  /*
+   * ============================================================
+   * GENERATED TRAJECTORY DISPLAY
+   * ============================================================
+   *
+   * Load the generated trajectory exactly when the prepared
+   * mission becomes READY.
+   *
+   * Once loaded, keep it displayed while:
+   *
+   * RUNNING
+   * PAUSED
+   * WAITING_FOR_NEXT
+   * COMPLETED
+   *
+   * START must never re-anchor or regenerate this display.
+   */
   useEffect(() => {
-    if (!isVisible) {
+    if (!isVisible || connectionState !== "connected") {
       return;
     }
 
-    if (backendMission?.ready !== true) {
+    const state = String(backendMission?.state ?? "")
+      .trim()
+      .toUpperCase();
+
+    const navigationPointCount = Number(
+      backendMission?.navigation_point_count ?? 0,
+    );
+
+    /*
+     * A new Load Mission has started.
+     *
+     * Remove the previous mission trajectory while the replacement
+     * trajectory is being generated.
+     */
+    if (backendMission?.loaded === true && state === "PREPARING") {
       setTrajectoryPoints([]);
       setTrajectoryMapReference(null);
       return;
     }
 
-    void refreshTrajectoryPreview();
+    /*
+     * No mission file.
+     */
+    if (backendMission?.loaded !== true) {
+      setTrajectoryPoints([]);
+      setTrajectoryMapReference(null);
+      return;
+    }
+
+    /*
+     * Only fetch the trajectory when mission_manager has actually
+     * accepted the complete generated path.
+     */
+    if (
+      state === "READY" &&
+      backendMission?.ready === true &&
+      Number.isFinite(navigationPointCount) &&
+      navigationPointCount > 0
+    ) {
+      void refreshTrajectoryPreview();
+    }
+
+    /*
+     * IMPORTANT:
+     *
+     * Do NOT clear trajectoryPoints when state becomes:
+     *
+     * RUNNING
+     * PAUSED
+     * WAITING_FOR_NEXT
+     * COMPLETED
+     *
+     * Backend ready=false outside READY is normal.
+     * The trajectory must remain visible.
+     */
   }, [
     isVisible,
+    connectionState,
+
+    backendMission?.mission_id,
+    backendMission?.loaded,
+    backendMission?.state,
     backendMission?.ready,
     backendMission?.navigation_point_count,
+
     refreshTrajectoryPreview,
   ]);
 
@@ -1978,7 +2132,6 @@ export default function MissionReportScreen({
        * Backend rebuilds the trajectory from the rover's current
        * position when Start is pressed.
        */
-      await refreshTrajectoryPreview();
 
       showNotification(
         "success",
