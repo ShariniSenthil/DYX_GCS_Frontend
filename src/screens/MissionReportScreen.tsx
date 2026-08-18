@@ -497,6 +497,18 @@ export default function MissionReportScreen({
 
   const isBackendMissionPaused = backendMissionState === "PAUSED";
 
+  const backendResumeAvailable = backendMission?.resume_available === true;
+
+  const backendPauseReason =
+    typeof backendMission?.pause_reason === "string"
+      ? backendMission.pause_reason.trim().toUpperCase()
+      : null;
+
+  const backendRtkReason =
+    typeof backendMission?.rtk_reason === "string"
+      ? backendMission.rtk_reason
+      : null;
+
   /**
    * Current marking-point index selected from
    * the currently active mission workflow.
@@ -2216,6 +2228,24 @@ export default function MissionReportScreen({
   };
 
   const handleResume = async () => {
+    if (backendMission?.resume_available !== true) {
+      const reason =
+        typeof backendMission?.rtk_reason === "string" &&
+        backendMission.rtk_reason.trim()
+          ? backendMission.rtk_reason
+          : typeof backendMission?.pause_reason === "string" &&
+              backendMission.pause_reason.trim()
+            ? `Resume blocked: ${backendMission.pause_reason}`
+            : "Mission is not ready to resume.";
+
+      showNotification("info", "Resume Blocked", reason, 4500);
+
+      return {
+        success: false,
+        message: reason,
+      };
+    }
+
     try {
       console.log("[MissionReportScreen] Resuming mission...");
 
@@ -4035,6 +4065,9 @@ export default function MissionReportScreen({
             onSetMode={handleSetExecutionMode}
             onStart={handleStart}
             onPause={handlePause}
+            resumeAvailable={backendResumeAvailable}
+            pauseReason={backendPauseReason}
+            rtkReason={backendRtkReason}
             onResume={handleResume}
             onStop={handleStop}
             onNext={handleNext}

@@ -45,6 +45,26 @@ export type MissionControlCardProps = {
   isMissionPaused?: boolean;
 
   /**
+   * Mission Manager is the authority for whether
+   * a paused mission may resume.
+   */
+  resumeAvailable?: boolean;
+
+  /**
+   * Examples:
+   * RTK_LOST
+   * OPERATOR
+   * ESTOP
+   * ODOM_STALE
+   */
+  pauseReason?: string | null;
+
+  /**
+   * Human-readable Mission Manager RTK reason.
+   */
+  rtkReason?: string | null;
+
+  /**
    * True when a mission is uploaded in the backend.
    * Controls START versus NO MISSION text.
    */
@@ -76,6 +96,9 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   missionMode = "DGPS Mark",
   isMissionActive = false,
   isMissionPaused = false,
+  resumeAvailable = false,
+  pauseReason = null,
+  rtkReason = null,
   waitingForManual = false,
   isMissionLoaded = false,
   isMissionReady = false,
@@ -261,11 +284,29 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   };
 
   const handleResume = async () => {
+    if (!resumeAvailable) {
+      const reason =
+        pauseReason === "RTK_LOST"
+          ? rtkReason || "Waiting for RTK FIXED and healthy corrections."
+          : pauseReason
+            ? `Resume blocked: ${pauseReason}`
+            : "Resume is not available yet.";
+
+      showLocalToast("info", reason, 4500);
+
+      return {
+        success: false,
+        message: reason,
+      };
+    }
+
     setIsResuming(true);
+
     try {
       const response = onResume
         ? await onResume()
         : await services.resumeMission();
+
       if (response && response.success) {
         showLocalToast("success", "Mission resumed");
       } else {
@@ -274,11 +315,17 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
           response?.message || "Failed to resume mission",
         );
       }
+
       return response;
     } catch (error) {
       console.error("[MissionControlCard] Resume Error:", error);
+
       showLocalToast("error", "Failed to resume mission");
-      return { success: false, message: String(error) };
+
+      return {
+        success: false,
+        message: String(error),
+      };
     } finally {
       setIsResuming(false);
     }
@@ -437,14 +484,30 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
               isPaused ? styles.resumeButton : styles.pauseButton,
 
-              (!isRunning || isWaitingForNext || isPausing || isResuming) &&
+              (!isRunning ||
+                isWaitingForNext ||
+                isPausing ||
+                isResuming ||
+                (isPaused && !resumeAvailable)) &&
                 styles.buttonDisabled,
             ]}
             onPress={isPaused ? handleResume : handlePause}
-            disabled={!isRunning || isWaitingForNext || isPausing || isResuming}
+            disabled={
+              !isRunning ||
+              isWaitingForNext ||
+              isPausing ||
+              isResuming ||
+              (isPaused && !resumeAvailable)
+            }
           >
             <Text style={styles.buttonText}>
-              {isPaused ? "RESUME" : "PAUSE"}
+              {isPaused
+                ? resumeAvailable
+                  ? "RESUME"
+                  : pauseReason === "RTK_LOST"
+                    ? "WAIT RTK"
+                    : "RESUME BLOCKED"
+                : "PAUSE"}
             </Text>
           </TouchableOpacity>
 

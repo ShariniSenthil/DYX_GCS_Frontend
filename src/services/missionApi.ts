@@ -87,6 +87,26 @@ export interface MissionRuntimeState {
   message?: string;
   error?: string | null;
 
+  pause_reason?: string | null;
+resume_available?: boolean;
+
+gps_fix_type?: number;
+
+rtk_state?: string | null;
+rtk_fixed?: boolean;
+rtk_healthy?: boolean;
+rtk_motion_ok?: boolean;
+rtk_reason?: string | null;
+rtk_correction_age_sec?: number | null;
+
+backend_heartbeat_healthy?: boolean;
+
+mission_enable?: boolean;
+emergency_stop?: boolean;
+
+arrival_settle_elapsed_sec?: number;
+arrival_settle_required_sec?: number;
+
   mission_id?: string;
   filename?: string;
 

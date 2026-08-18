@@ -39,6 +39,19 @@ export interface BackendMissionStatus {
 
   coordinateMode: string | null;
 
+pauseReason: string | null;
+resumeAvailable: boolean;
+
+rtkState: string | null;
+rtkFixed: boolean;
+rtkHealthy: boolean;
+rtkMotionOk: boolean;
+rtkReason: string | null;
+rtkCorrectionAgeSec: number | null;
+
+arrivalSettleElapsedSec: number;
+arrivalSettleRequiredSec: number;
+
   extensionMode:
     | MissionExtensionMode
     | null;
@@ -108,6 +121,19 @@ const EMPTY_MISSION: BackendMissionStatus = {
   coordinateMode: null,
   extensionMode: null,
 
+pauseReason: null,
+resumeAvailable: false,
+
+rtkState: null,
+rtkFixed: false,
+rtkHealthy: false,
+rtkMotionOk: false,
+rtkReason: null,
+rtkCorrectionAgeSec: null,
+
+arrivalSettleElapsedSec: 0,
+arrivalSettleRequiredSec: 0.30,
+
   dummyPointDistanceM: null,
   rowTransitionThresholdM: null,
 
@@ -136,7 +162,7 @@ const EMPTY_MISSION: BackendMissionStatus = {
   alignmentActive: false,
 
   holdElapsedSec: 0,
-  holdRequiredSec: 3,
+  holdRequiredSec: 0.30,
 
   pointStatus: [],
   lastPointEvent: null,
@@ -561,7 +587,7 @@ function mergeMissionPayload(
       source.hold_required_sec !== undefined
         ? toNonNegativeNumber(
             source.hold_required_sec,
-            3,
+            0.30,
           )
         : previous.holdRequiredSec,
 
@@ -603,6 +629,65 @@ function mergeMissionPayload(
             source.paused_at,
           )
         : previous.pausedAt,
+
+    pauseReason:
+  source.pause_reason !== undefined
+    ? toStringOrNull(source.pause_reason)
+    : previous.pauseReason,
+
+resumeAvailable:
+  source.resume_available !== undefined
+    ? toBoolean(source.resume_available)
+    : previous.resumeAvailable,
+
+rtkState:
+  source.rtk_state !== undefined
+    ? toStringOrNull(source.rtk_state)
+    : previous.rtkState,
+
+rtkFixed:
+  source.rtk_fixed !== undefined
+    ? toBoolean(source.rtk_fixed)
+    : previous.rtkFixed,
+
+rtkHealthy:
+  source.rtk_healthy !== undefined
+    ? toBoolean(source.rtk_healthy)
+    : previous.rtkHealthy,
+
+rtkMotionOk:
+  source.rtk_motion_ok !== undefined
+    ? toBoolean(source.rtk_motion_ok)
+    : previous.rtkMotionOk,
+
+rtkReason:
+  source.rtk_reason !== undefined
+    ? toStringOrNull(source.rtk_reason)
+    : previous.rtkReason,
+
+rtkCorrectionAgeSec:
+  source.rtk_correction_age_sec !== undefined
+    ? toFiniteNumberOrNull(source.rtk_correction_age_sec)
+    : previous.rtkCorrectionAgeSec,
+
+    arrivalSettleElapsedSec:
+      source.arrival_settle_elapsed_sec !== undefined ||
+      source.hold_elapsed_sec !== undefined
+        ? toNonNegativeNumber(
+            source.arrival_settle_elapsed_sec ??
+              source.hold_elapsed_sec,
+          )
+        : previous.arrivalSettleElapsedSec,
+
+    arrivalSettleRequiredSec:
+      source.arrival_settle_required_sec !== undefined ||
+      source.hold_required_sec !== undefined
+        ? toNonNegativeNumber(
+            source.arrival_settle_required_sec ??
+              source.hold_required_sec,
+            0.30,
+          )
+        : previous.arrivalSettleRequiredSec,
 
     completedAt:
       source.completed_at !== undefined
