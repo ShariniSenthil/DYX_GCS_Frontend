@@ -9,6 +9,14 @@ const BACKEND_URL_KEY = '@backend_url';
 const BACKEND_IP_KEY = '@backend_ip';
 const BACKEND_PORT_KEY = '@backend_port';
 const SESSION_SKIP_KEY = '@session_skip_discovery';
+const KNOWN_ROVERS_KEY = '@known_rovers';
+
+export interface KnownRover {
+  roverId: string;
+  roverName: string;
+  ip: string;
+  port: number;
+}
 
 /**
  * Save backend URL to persistent storage
@@ -124,5 +132,41 @@ export async function clearSessionSkip(): Promise<void> {
   } catch (error) {
     console.error('Failed to clear session skip:', error);
     throw error;
+  }
+}
+
+export async function loadKnownRovers(): Promise<KnownRover[]> {
+  try {
+    const raw = await AsyncStorage.getItem(KNOWN_ROVERS_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (item): item is KnownRover =>
+        item &&
+        typeof item.roverId === "string" &&
+        typeof item.ip === "string" &&
+        typeof item.port === "number",
+    );
+  } catch (error) {
+    console.error("Failed to load known rovers:", error);
+    return [];
+  }
+}
+
+export async function rememberRover(rover: KnownRover): Promise<void> {
+  try {
+    const current = await loadKnownRovers();
+    const next = [
+      rover,
+      ...current.filter((item) => item.roverId !== rover.roverId),
+    ].slice(0, 8);
+    await AsyncStorage.setItem(KNOWN_ROVERS_KEY, JSON.stringify(next));
+  } catch (error) {
+    console.error("Failed to remember rover:", error);
   }
 }

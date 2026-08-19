@@ -20,11 +20,25 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  quickScanForJetsonDevices,
+  getLocalNetworkBase,
   JetsonDevice,
+  quickScanForJetsonDevices,
 } from "../utils/jetsonDiscovery";
-import { saveBackendURL, markSessionSkipped } from "../utils/backendStorage";
-import beaconListener, { DiscoveredRover } from "../services/beaconListener";
+import {
+  markSessionSkipped,
+  rememberRover,
+  saveBackendURL,
+} from "../utils/backendStorage";
+import beaconListener, {
+  BEACON_STALE_MS,
+  DiscoveredRover,
+} from "../services/beaconListener";
+import {
+  HEALTH_INTERVAL_MS,
+  applyHealthResult,
+  refreshAllHealth,
+  restoreKnownRovers,
+} from "../services/roverPresence";
 import { setBackendURL } from "../config";
 import { useAuth } from "../hooks/useAuth";
 import { AUTH_ENABLED } from "../config/featureFlags";
@@ -109,37 +123,67 @@ export default function RoverDiscoveryScreen({
     ).start();
   }, []);
 
-  // Start beacon listener
+  // UDP hint + HTTP presence. Do not wipe the list when UDP is quiet.
   useEffect(() => {
-    if (beaconListener.isAvailable) {
-      beaconListener.start((rovers) => setDiscoveredRovers(rovers));
-    }
+    let cancelled = false;
+
+    beaconListener.start((rovers) => {
+      if (!cancelled) {
+        setDiscoveredRovers(rovers);
+      }
+      for (const rover of rovers) {
+        const lastHttp = rover.lastHttpSeen ?? 0;
+        if (Date.now() - lastHttp > HEALTH_INTERVAL_MS) {
+          void applyHealthResult(rover);
+        }
+      }
+    });
+
+    const bootstrap = async () => {
+      await restoreKnownRovers();
+      if (cancelled) {
+        return;
+      }
+      setDiscoveredRovers(beaconListener.getDiscoveredRovers());
+      const online = beaconListener
+        .getDiscoveredRovers()
+        .some((rover) => rover.online);
+      if (!online) {
+        await runNetworkScan();
+      }
+    };
+
+    void bootstrap();
+
+    const healthTimer = setInterval(() => {
+      void refreshAllHealth();
+    }, HEALTH_INTERVAL_MS);
     const dotTimer = setInterval(() => setNow(Date.now()), 2000);
+
     return () => {
-      if (beaconListener.isAvailable) beaconListener.stop();
+      cancelled = true;
+      clearInterval(healthTimer);
       clearInterval(dotTimer);
+      beaconListener.stop();
     };
   }, []);
 
   const handleRefresh = () => {
-    if (beaconListener.isAvailable) {
-      beaconListener.stop();
-      setDiscoveredRovers([]);
-      setNetworkDevices([]);
-      beaconListener.start((rovers) => setDiscoveredRovers(rovers));
-    }
+    setNetworkDevices([]);
+    void refreshAllHealth();
+    void runNetworkScan();
   };
 
   const runNetworkScan = async () => {
     setScanning(true);
-    setNetworkDevices([]);
     try {
+      const prefix = await getLocalNetworkBase();
       const found = await quickScanForJetsonDevices();
-      setNetworkDevices(found);
-      if (found.length === 0) {
+      setDiscoveredRovers(beaconListener.getDiscoveredRovers());
+      if (found.length === 0 && beaconListener.getDiscoveredRovers().length === 0) {
         Alert.alert(
           "No Rovers Found",
-          "Network scan found no rovers. Try manual entry or continue offline.",
+          `No rover answered GET /api/health on ${prefix}.x:5001. Try manual URL or wait for a UDP beacon.`,
         );
       }
     } catch {
@@ -203,6 +247,12 @@ export default function RoverDiscoveryScreen({
       /*
        * App.tsx saves the backend URL only after authentication succeeds.
        */
+      await rememberRover({
+        roverId: device.id,
+        roverName: device.name,
+        ip: device.ip,
+        port: device.port,
+      });
       await onRoverSelected(device);
 
       setShowPasswordModal(false);
@@ -265,10 +315,8 @@ export default function RoverDiscoveryScreen({
       const urlObj = new URL(manualUrl);
       const ip = urlObj.hostname;
       const port = urlObj.port ? parseInt(urlObj.port) : 5001;
-      // Use /api/healthz (4WD_SERVER) with fallback to /api/ping for both backends
       let reachable = false;
-      // NRP_ROS LEGACY DISABLED — '/api/status' probe removed (use /api/healthz on 4WD_SERVER)
-      for (const probePath of ["/api/healthz", "/api/ping"]) {
+      for (const probePath of ["/api/health", "/api/ping"]) {
         try {
           const r = await axios.get(`${manualUrl}${probePath}`, {
             timeout: 5000,
@@ -486,8 +534,10 @@ export default function RoverDiscoveryScreen({
     showPasswordModal && pendingConnect?.device.id === id;
 
   const renderRoverCard = (rover: DiscoveredRover) => {
-    const isStale = now - rover.lastSeen > 5000;
-    const dotColor = isStale ? "#fb923c" : "#4ade80";
+    const beaconStale =
+      rover.lastBeaconSeen === 0 || now - rover.lastBeaconSeen > BEACON_STALE_MS;
+    const isStale = !rover.online;
+    const dotColor = rover.online ? "#4ade80" : "#fb923c";
     const isConnectingThis = connectingRoverId === rover.roverId;
     const isPending = isRoverPending(rover.roverId);
 
@@ -514,7 +564,7 @@ export default function RoverDiscoveryScreen({
             >
               <View style={[styles.badgeDot, { backgroundColor: dotColor }]} />
               <Text style={[styles.cardBadgeText, { color: dotColor }]}>
-                {isStale ? "STALE" : "LIVE"}
+                {rover.online ? "ONLINE" : "OFFLINE"}
               </Text>
             </View>
           </View>
