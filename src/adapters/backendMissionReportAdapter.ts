@@ -4,8 +4,9 @@ import type {
   MissionReportPointStatus,
 } from "../services/missionApi";
 
-import type {
-  WaypointUiStatus,
+import {
+  isTerminalWaypointStatus,
+  type WaypointUiStatus,
 } from "../types/missionWaypointStatus";
 
 export interface MissionReportRowStatus {
@@ -20,6 +21,20 @@ export interface MissionReportRowStatus {
   remark: string;
 }
 
+/**
+ * Runtime/event fallback used only to repair a lagging canonical
+ * Mission Report row.
+ *
+ * Intentionally contains NO remark or accuracy fields.
+ * GET /api/mission/report remains the only authority for those.
+ */
+export interface MissionReportFallbackStatus {
+  reached?: boolean;
+  marked?: boolean;
+  status?: WaypointUiStatus;
+  timestamp?: string;
+}
+
 export interface BackendMissionReportProjection {
   statusMap:
     Record<
@@ -29,6 +44,103 @@ export interface BackendMissionReportProjection {
 
   activeIndex:
     number | null;
+}
+
+const EMPTY_ACCURACY_REMARK =
+  "Along — | Cross — | Overall —";
+
+/**
+ * Repair the short race where the runtime point snapshot has already
+ * reached a terminal state but /api/mission/report is still PENDING
+ * or has not emitted that sequence yet.
+ *
+ * Authority rules:
+ *
+ * 1. A terminal canonical report row always wins.
+ * 2. A terminal runtime row may temporarily replace only a missing
+ *    or non-terminal canonical status.
+ * 3. Runtime remark / locally calculated accuracy is NEVER copied.
+ * 4. Once the next report poll contains the terminal row + RPP
+ *    accuracy, that canonical row naturally replaces this fallback.
+ */
+export function reconcileMissionReportRow(
+  reportRow:
+    MissionReportRowStatus
+    | undefined,
+  fallbackRow:
+    MissionReportFallbackStatus
+    | undefined,
+): MissionReportRowStatus | null {
+  const reportIsTerminal =
+    isTerminalWaypointStatus(
+      reportRow?.status,
+    );
+
+  const fallbackIsTerminal =
+    isTerminalWaypointStatus(
+      fallbackRow?.status,
+    );
+
+  /*
+   * Canonical terminal state is final.
+   *
+   * Also keep a canonical non-terminal row when there is no
+   * authoritative terminal fallback available.
+   */
+  if (
+    reportRow
+    && (
+      reportIsTerminal
+      || !fallbackIsTerminal
+    )
+  ) {
+    return reportRow;
+  }
+
+  /*
+   * No useful terminal fallback.
+   */
+  if (
+    !fallbackIsTerminal
+    || !fallbackRow?.status
+  ) {
+    return reportRow ?? null;
+  }
+
+  const status =
+    fallbackRow.status;
+
+  /*
+   * Promote terminal STATUS only.
+   *
+   * Do not spread fallbackRow here:
+   * legacy maps can contain local GPS accuracy and remarks.
+   */
+  return {
+    reached:
+      status === "completed"
+      || status === "failed"
+      || fallbackRow.reached === true,
+
+    marked:
+      status === "completed"
+      || fallbackRow.marked === true,
+
+    status,
+
+    timestamp:
+      fallbackRow.timestamp
+      ?? reportRow?.timestamp,
+
+    /*
+     * Accuracy/remark always remains report-owned.
+     * If the report row has not arrived yet, show placeholders
+     * until the next canonical poll supplies RPP accuracy.
+     */
+    remark:
+      reportRow?.remark
+      ?? EMPTY_ACCURACY_REMARK,
+  };
 }
 
 function mapStatus(
@@ -104,11 +216,7 @@ function buildRemark(
     || accuracy.available
     !== true
   ) {
-    return (
-      "Along — | "
-      + "Cross — | "
-      + "Overall —"
-    );
+    return EMPTY_ACCURACY_REMARK;
   }
 
   const along =

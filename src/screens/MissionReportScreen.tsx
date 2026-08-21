@@ -77,6 +77,7 @@ import { isOfflineMode } from "../config";
 import {
   buildLegacyStatusMapFromPointMap,
   mergeLegacyStatusMap,
+  pointIndexToSn,
 } from "../adapters/px4PointStatusBridge";
 import { useVerifiedMissionUpload } from "../hooks/useVerifiedMissionUpload";
 import { useVerifiedMissionContext } from "../context/VerifiedMissionContext";
@@ -100,7 +101,17 @@ import {
   type CanonicalMissionReport,
 } from "../services/missionApi";
 
-import { projectBackendMissionReport } from "../adapters/backendMissionReportAdapter";
+import {
+  projectBackendMissionReport,
+  reconcileMissionReportRow,
+} from "../adapters/backendMissionReportAdapter";
+
+import {
+  captureTerminalRppAccuracy,
+  isTerminalRppAccuracyStatus,
+  selectMissionReportRemark,
+  type TerminalRppAccuracySnapshot,
+} from "../adapters/terminalRppAccuracyFallback";
 
 // Status map type matching web application
 type WpStatus = {
@@ -245,6 +256,43 @@ export default function MissionReportScreen({
 
   const [canonicalMissionReport, setCanonicalMissionReport] =
     useState<CanonicalMissionReport | null>(null);
+
+  /**
+   * Temporary frontend fallback for terminal RPP accuracy.
+   *
+   * Key = waypoint serial number (1-based wp.sn).
+   *
+   * Once captured it NEVER follows live telemetry again.
+   * The canonical Mission Report replaces it automatically
+   * when report accuracy becomes available.
+   */
+  const [
+    terminalRppAccuracyFallbackMap,
+    setTerminalRppAccuracyFallbackMap,
+  ] = useState<
+    Record<
+      number,
+      TerminalRppAccuracySnapshot
+    >
+  >({});
+
+  const terminalRppAccuracyFallbackRef =
+    useRef<
+      Record<
+        number,
+        TerminalRppAccuracySnapshot
+      >
+    >({});
+
+  const clearTerminalRppAccuracyFallback =
+    useCallback(() => {
+      terminalRppAccuracyFallbackRef.current =
+        {};
+
+      setTerminalRppAccuracyFallbackMap(
+        {},
+      );
+    }, []);
 
   const [trajectoryPoints, setTrajectoryPoints] = useState<LoadedPathPoint[]>(
     [],
@@ -442,6 +490,253 @@ export default function MissionReportScreen({
       : base;
   }, [statusMap, px4LegacyStatusMap, verifiedLegacyMap, verifiedCtx.isLoaded]);
 
+  /**
+   * ============================================================
+   * TERMINAL RPP ACCURACY FALLBACK
+   * ============================================================
+   *
+   * pointStatusMap receives terminal state immediately from:
+   *
+   * - point_completed
+   * - point_failed
+   * - authoritative point_status snapshot reconciliation
+   *
+   * /api/mission/report may lag behind that terminal state.
+   *
+   * During that short gap, freeze the current RPP accuracy exactly
+   * once for the point that just became terminal.
+   *
+   * IMPORTANT:
+   *
+   * This does NOT calculate accuracy.
+   * It copies already-calculated backend/RPP telemetry.
+   *
+   * It also does NOT continuously follow telemetry after capture.
+   */
+  useEffect(() => {
+    const currentPx4PointIndex =
+      px4CurrentPointIndex;
+
+    for (
+      const [
+        pointIndexText,
+        entry,
+      ] of Object.entries(
+        pointStatusMap,
+      )
+    ) {
+      const pointIndex =
+        Number.parseInt(
+          pointIndexText,
+          10,
+        );
+
+      if (
+        !Number.isInteger(
+          pointIndex,
+        )
+        || pointIndex < 0
+      ) {
+        continue;
+      }
+
+      if (
+        !isTerminalRppAccuracyStatus(
+          entry.status,
+        )
+      ) {
+        continue;
+      }
+
+      const serialNumber =
+        pointIndexToSn(
+          pointIndex,
+          waypoints,
+        );
+
+      /*
+       * Already frozen.
+       *
+       * Never update this value from later
+       * live telemetry packets.
+       */
+      if (
+        terminalRppAccuracyFallbackRef
+          .current[
+          serialNumber
+        ]
+      ) {
+        continue;
+      }
+
+      const telemetryGoalNumber =
+        Number(
+          telemetry.accuracy
+            ?.goal_number,
+        );
+
+      const telemetryActiveIndex =
+        Number(
+          telemetry.mission
+            ?.active_point_index,
+        );
+
+      const telemetryActiveNumber =
+        Number(
+          telemetry.mission
+            ?.active_point_number,
+        );
+
+      /*
+       * Only capture telemetry belonging to
+       * the terminal point.
+       *
+       * This prevents P1/P2/P3 from accidentally
+       * receiving P4's final telemetry on reconnect.
+       */
+      const pointIdentityMatches =
+        currentPx4PointIndex
+          === pointIndex
+        || (
+          Number.isFinite(
+            telemetryGoalNumber,
+          )
+          && Math.trunc(
+            telemetryGoalNumber,
+          ) === pointIndex + 1
+        )
+        || (
+          Number.isFinite(
+            telemetryActiveIndex,
+          )
+          && Math.trunc(
+            telemetryActiveIndex,
+          ) === pointIndex
+        )
+        || (
+          Number.isFinite(
+            telemetryActiveNumber,
+          )
+          && Math.trunc(
+            telemetryActiveNumber,
+          ) === pointIndex + 1
+        );
+
+      if (!pointIdentityMatches) {
+        continue;
+      }
+
+      /*
+       * Don't reconstruct historical terminal
+       * accuracy from current rover position.
+       *
+       * Snapshot reconciliation normally happens
+       * immediately, so five seconds gives enough
+       * time for the telemetry packet to arrive.
+       */
+      const terminalTimeMs =
+        Date.parse(
+          entry.timestamp ?? "",
+        );
+
+      if (
+        Number.isFinite(
+          terminalTimeMs,
+        )
+        && Math.abs(
+          Date.now()
+          - terminalTimeMs
+        ) > 5000
+      ) {
+        continue;
+      }
+
+      const snapshot =
+        captureTerminalRppAccuracy(
+          telemetry,
+          pointIndex,
+          entry.timestamp
+            ?? new Date()
+              .toISOString(),
+        );
+
+      if (!snapshot) {
+        /*
+         * Accuracy may arrive one telemetry packet
+         * after the terminal status.
+         *
+         * Because this effect also depends on the
+         * RPP telemetry fields below, it will retry
+         * during the five-second capture window.
+         */
+        continue;
+      }
+
+      const next = {
+        ...terminalRppAccuracyFallbackRef
+          .current,
+        [serialNumber]:
+          snapshot,
+      };
+
+      terminalRppAccuracyFallbackRef.current =
+        next;
+
+      setTerminalRppAccuracyFallbackMap(
+        next,
+      );
+
+      console.log(
+        "[MissionReportScreen] Frozen terminal RPP accuracy",
+        {
+          pointIndex,
+          serialNumber,
+
+          status:
+            entry.status,
+
+          alongMm:
+            snapshot
+              .alongTrackErrorMm,
+
+          crossMm:
+            snapshot
+              .crossTrackErrorMm,
+
+          overallMm:
+            snapshot
+              .overallAccuracyMm,
+        },
+      );
+    }
+  }, [
+    pointStatusMap,
+    px4CurrentPointIndex,
+    waypoints,
+
+    telemetry.accuracy_available,
+
+    telemetry.front_back_error_mm,
+    telemetry.cross_track_error_mm,
+    telemetry.radial_error_mm,
+
+    telemetry.accuracy
+      ?.front_back_error_mm,
+    telemetry.accuracy
+      ?.cross_track_error_mm,
+    telemetry.accuracy
+      ?.radial_error_mm,
+
+    telemetry.accuracy
+      ?.goal_number,
+
+    telemetry.mission
+      ?.active_point_index,
+
+    telemetry.mission
+      ?.active_point_number,
+  ]);
+
   const telemetryMissionActive = useMemo(() => {
     const ms = String(telemetry.mission?.status ?? "").toLowerCase();
     return [
@@ -559,69 +854,82 @@ export default function MissionReportScreen({
   const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
     const next: Record<number, WpStatus> = {};
 
-    /*
-     * ==================================================
-     * CANONICAL BACKEND MISSION REPORT
-     * ==================================================
-     *
-     * This is the source of truth for:
-     *
-     * STATUS
-     * REMARK
-     *
-     * No telemetry/local accuracy is used here.
-     */
-    if (canonicalReportProjection) {
-      for (const waypoint of waypoints) {
-        const row = canonicalReportProjection.statusMap[waypoint.sn];
+    for (const waypoint of waypoints) {
+      const reportRow =
+        canonicalReportProjection
+          ?.statusMap[
+            waypoint.sn
+          ];
 
-        if (row) {
-          next[waypoint.sn] = {
-            reached: row.reached,
+      const runtimeRow =
+        effectiveStatusMap[
+          waypoint.sn
+        ];
 
-            marked: row.marked,
+      const reconciledRow =
+        reconcileMissionReportRow(
+          reportRow,
+          runtimeRow,
+        );
 
-            status: row.status,
+      const frozenAccuracy =
+        terminalRppAccuracyFallbackMap[
+          waypoint.sn
+        ];
 
-            timestamp: row.timestamp,
+      if (reconciledRow) {
+        next[waypoint.sn] = {
+          reached:
+            reconciledRow.reached,
 
-            remark: row.remark,
-          };
-        } else {
-          next[waypoint.sn] = {
-            reached: false,
-            marked: false,
+          marked:
+            reconciledRow.marked,
 
-            status: "pending",
+          status:
+            reconciledRow.status,
 
-            remark: "Along — | " + "Cross — | " + "Overall —",
-          };
-        }
+          timestamp:
+            reconciledRow.timestamp,
+
+          /*
+           * IMPORTANT:
+           * The canonical report remark always has
+           * priority. The frozen RPP telemetry is only
+           * used while report accuracy is unavailable.
+           */
+          remark:
+            selectMissionReportRemark(
+              reconciledRow.remark,
+              frozenAccuracy,
+            ),
+        };
+
+        continue;
       }
 
-      return next;
-    }
-
-    /*
-     * Until the first report response
-     * arrives, uploaded points remain
-     * PENDING.
-     *
-     * Do NOT calculate accuracy locally.
-     */
-    for (const waypoint of waypoints) {
+      /*
+       * No canonical row and no terminal runtime fallback yet.
+       */
       next[waypoint.sn] = {
         reached: false,
         marked: false,
 
         status: "pending",
 
-        remark: "Along — | " + "Cross — | " + "Overall —",
+        remark:
+          "Along — | "
+          + "Cross — | "
+          + "Overall —",
       };
     }
 
     return next;
-  }, [waypoints, canonicalReportProjection]);
+  }, [
+    waypoints,
+    canonicalReportProjection,
+    effectiveStatusMap,
+    terminalRppAccuracyFallbackMap,
+  ]);
 
   const effectiveWaitingForManual =
     backendMissionState === "WAITING_FOR_NEXT" ||
@@ -2104,6 +2412,12 @@ export default function MissionReportScreen({
     );
     setStatusMap({});
     resetPointStatusMap();
+
+    /*
+     * Never allow terminal accuracy from the
+     * previous mission run to leak into the next run.
+     */
+    clearTerminalRppAccuracyFallback();
     setCurrentIndex(null);
     setMissionStartTime(null);
     setMissionEndTime(null);
