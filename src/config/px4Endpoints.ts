@@ -64,6 +64,8 @@ export const PX4_MISSION = {
 
   // Mission information.
   STATUS: "/api/mission/status",
+  REPORT: "/api/mission/report",
+  REPORT_DOWNLOAD: "/api/mission/report/download",
   LOADED_PATH: "/api/mission/loaded-path",
 
   // Active mission.csv.

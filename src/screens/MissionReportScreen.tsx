@@ -86,6 +86,7 @@ import { clearVerifiedMission } from "../services/verifiedMissionService";
 import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStatus,
+  getMissionReport,
   getLoadedMissionPath,
   setMissionExecutionMode,
   startMission,
@@ -96,7 +97,10 @@ import {
   stopMission,
   type LoadedPathPoint,
   type MissionRuntimeState,
+  type CanonicalMissionReport,
 } from "../services/missionApi";
+
+import { projectBackendMissionReport } from "../adapters/backendMissionReportAdapter";
 
 // Status map type matching web application
 type WpStatus = {
@@ -238,6 +242,9 @@ export default function MissionReportScreen({
 
   const [backendMission, setBackendMission] =
     useState<MissionRuntimeState | null>(null);
+
+  const [canonicalMissionReport, setCanonicalMissionReport] =
+    useState<CanonicalMissionReport | null>(null);
 
   const [trajectoryPoints, setTrajectoryPoints] = useState<LoadedPathPoint[]>(
     [],
@@ -407,6 +414,10 @@ export default function MissionReportScreen({
   // Use waypoints from shared context for persistence across screens
   const waypoints = missionWaypoints;
   const PINNED_COUNT = 4;
+  const canonicalReportProjection = useMemo(
+    () => projectBackendMissionReport(canonicalMissionReport),
+    [canonicalMissionReport],
+  );
 
   const px4LegacyStatusMap = useMemo(
     () =>
@@ -514,6 +525,14 @@ export default function MissionReportScreen({
    * the currently active mission workflow.
    */
   const effectiveCurrentIndex = useMemo<number | null>(() => {
+    /*
+     * Canonical Mission Report active point
+     * has first priority for the table.
+     */
+    if (canonicalReportProjection?.activeIndex != null) {
+      return canonicalReportProjection.activeIndex;
+    }
+
     if (verifiedCtx.isLoaded && verifiedTargetIndex !== null) {
       return verifiedTargetIndex;
     }
@@ -524,6 +543,7 @@ export default function MissionReportScreen({
 
     return currentIndex;
   }, [
+    canonicalReportProjection,
     verifiedCtx.isLoaded,
     verifiedTargetIndex,
     px4CurrentPointIndex,
@@ -539,19 +559,69 @@ export default function MissionReportScreen({
   const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
     const next: Record<number, WpStatus> = {};
 
-    for (const waypoint of waypoints) {
-      const existing = effectiveStatusMap[waypoint.sn] as WpStatus | undefined;
+    /*
+     * ==================================================
+     * CANONICAL BACKEND MISSION REPORT
+     * ==================================================
+     *
+     * This is the source of truth for:
+     *
+     * STATUS
+     * REMARK
+     *
+     * No telemetry/local accuracy is used here.
+     */
+    if (canonicalReportProjection) {
+      for (const waypoint of waypoints) {
+        const row = canonicalReportProjection.statusMap[waypoint.sn];
 
-      next[waypoint.sn] = existing ?? {
+        if (row) {
+          next[waypoint.sn] = {
+            reached: row.reached,
+
+            marked: row.marked,
+
+            status: row.status,
+
+            timestamp: row.timestamp,
+
+            remark: row.remark,
+          };
+        } else {
+          next[waypoint.sn] = {
+            reached: false,
+            marked: false,
+
+            status: "pending",
+
+            remark: "Along — | " + "Cross — | " + "Overall —",
+          };
+        }
+      }
+
+      return next;
+    }
+
+    /*
+     * Until the first report response
+     * arrives, uploaded points remain
+     * PENDING.
+     *
+     * Do NOT calculate accuracy locally.
+     */
+    for (const waypoint of waypoints) {
+      next[waypoint.sn] = {
         reached: false,
         marked: false,
+
         status: "pending",
-        remark: "Pending",
+
+        remark: "Along — | " + "Cross — | " + "Overall —",
       };
     }
 
     return next;
-  }, [waypoints, effectiveStatusMap]);
+  }, [waypoints, canonicalReportProjection]);
 
   const effectiveWaitingForManual =
     backendMissionState === "WAITING_FOR_NEXT" ||
@@ -719,6 +789,35 @@ export default function MissionReportScreen({
     }
   }, []);
 
+  const refreshCanonicalMissionReport = useCallback(async (): Promise<void> => {
+    if (isOfflineMode()) {
+      return;
+    }
+
+    try {
+      const response = await getMissionReport();
+
+      if (!response?.success) {
+        return;
+      }
+
+      if (response.available === true && response.report) {
+        setCanonicalMissionReport(response.report);
+      } else {
+        setCanonicalMissionReport(null);
+      }
+    } catch (error) {
+      /*
+       * Do not destroy the last valid
+       * report because one request failed.
+       */
+      console.warn(
+        "[MissionReportScreen] " + "Mission report refresh failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }, []);
+
   const refreshTrajectoryPreview = useCallback(async (): Promise<void> => {
     if (isOfflineMode()) {
       setTrajectoryPoints([]);
@@ -874,6 +973,57 @@ export default function MissionReportScreen({
       clearInterval(timer);
     };
   }, [isVisible, connectionState, refreshBackendMission]);
+
+  /*
+   * ============================================================
+   * CANONICAL MISSION REPORT SYNCHRONIZATION
+   * ============================================================
+   *
+   * Mission Report point status + terminal
+   * RPP accuracy comes only from:
+   *
+   * GET /api/mission/report
+   */
+  useEffect(() => {
+    if (!isVisible || connectionState !== "connected" || isOfflineMode()) {
+      return;
+    }
+
+    let cancelled = false;
+    let requestInFlight = false;
+
+    const pollReport = async () => {
+      if (cancelled || requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
+
+      try {
+        await refreshCanonicalMissionReport();
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    /*
+     * Immediate first request.
+     */
+    void pollReport();
+
+    /*
+     * Mission Report does not need
+     * high-frequency polling.
+     */
+    const timer = setInterval(() => {
+      void pollReport();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isVisible, connectionState, refreshCanonicalMissionReport]);
 
   /*
    * ============================================================

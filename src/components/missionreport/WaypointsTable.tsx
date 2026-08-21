@@ -25,45 +25,6 @@ function formatTimestamp(timestamp?: string): string {
   }
 }
 
-function getAccuracyDisplay(wpStatus: any): {
-  text: string;
-  color: string | undefined;
-} {
-  if (!wpStatus) {
-    return { text: "", color: undefined };
-  }
-
-  const positionErrorCm = Number(wpStatus.position_error_cm);
-
-  if (!Number.isFinite(positionErrorCm) || positionErrorCm < 0) {
-    return { text: "", color: undefined };
-  }
-
-  const level =
-    typeof wpStatus.accuracy_level === "string"
-      ? wpStatus.accuracy_level.toLowerCase()
-      : "unknown";
-
-  const levelCapitalized = level.charAt(0).toUpperCase() + level.slice(1);
-
-  let color = "#94A3B8";
-
-  if (level === "excellent") {
-    color = "#10B981";
-  } else if (level === "good") {
-    color = "#F59E0B";
-  } else if (level === "poor") {
-    color = "#EF4444";
-  }
-
-  const positionErrorMm = positionErrorCm * 10;
-
-  return {
-    text: `${levelCapitalized} - ${positionErrorMm.toFixed(1)}mm`,
-    color,
-  };
-}
-
 function getWaypointStatusDisplay(wpStatus: any): {
   statusDisplay: string;
   statusColor: string;
@@ -76,24 +37,11 @@ function getWaypointStatusDisplay(wpStatus: any): {
   };
 }
 
-function getRemarkText(
-  s: string | undefined,
-  wpStatus: any,
-  statusDisplay: string,
-): string {
-  if (!wpStatus) return "";
-  // For error/terminal-context statuses, prefer the backend reason/remark text.
-  const p = getStatusPresentation(s as WaypointUiStatus | undefined);
-  if (p.isError) return wpStatus?.remark || wpStatus?.reason || p.label;
-  if (
-    s === "spray_on" ||
-    s === "spray_off" ||
-    s === "passed" ||
-    s === "mission_end"
-  ) {
-    return wpStatus?.remark || statusDisplay;
-  }
-  return p.label;
+function getRemarkText(wpStatus: any): string {
+  const remark =
+    typeof wpStatus?.remark === "string" ? wpStatus.remark.trim() : "";
+
+  return remark || "—";
 }
 
 // ── Memoized row component (recycled by LegendList) ───────────────────────────
@@ -110,7 +58,6 @@ const WaypointRow = React.memo(
   ({ wp, index, wpStatus, isCurrentWaypoint, embedded = false }: RowProps) => {
     const { statusDisplay, statusColor } = getWaypointStatusDisplay(wpStatus);
     const isSkipped = wpStatus?.status === "skipped";
-    const s = wpStatus?.status;
 
     return (
       <View
@@ -213,36 +160,19 @@ const WaypointRow = React.memo(
         </Text>
         <View style={[styles.colRemark, styles.remarkCell]}>
           <Text
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
             style={[
               styles.cell,
+              styles.remarkText,
+
               isCurrentWaypoint && styles.currentWaypointText,
+
               isSkipped && styles.skippedText,
             ]}
           >
-            {getRemarkText(s, wpStatus, statusDisplay)}
+            {getRemarkText(wpStatus)}
           </Text>
-          {(() => {
-            const { text: accuracyText, color: accuracyColor } =
-              getAccuracyDisplay(wpStatus);
-            const displayText = accuracyText || wpStatus?.remark || "";
-            return displayText ? (
-              <Text
-                numberOfLines={1}
-                ellipsizeMode="tail"
-                style={[
-                  styles.cell,
-                  styles.remarkDetail,
-                  isCurrentWaypoint && styles.currentWaypointText,
-                  isSkipped && styles.skippedText,
-                  accuracyColor && { color: accuracyColor },
-                ]}
-              >
-                {displayText}
-              </Text>
-            ) : null;
-          })()}
         </View>
       </View>
     );
@@ -282,7 +212,7 @@ interface Props {
   embedded?: boolean;
 }
 
-const ROW_HEIGHT = 46;
+const ROW_HEIGHT = 58;
 
 export const WaypointsTable = React.memo<Props>(
   ({
@@ -599,14 +529,13 @@ const styles = StyleSheet.create({
   colLon: { flex: 1.35 },
   colStatus: { flex: 1.15 },
   colTime: { flex: 1.2 },
-  colRemark: { flex: 1.7 },
+  colRemark: { flex: 3.0 },
   remarkCell: {
     flexDirection: "column",
     justifyContent: "center",
   },
-  remarkDetail: {
-    fontSize: 12,
-    marginTop: 2,
-    opacity: 0.8,
+  remarkText: {
+    fontSize: 10,
+    lineHeight: 16,
   },
 });

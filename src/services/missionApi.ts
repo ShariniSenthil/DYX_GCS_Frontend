@@ -123,6 +123,7 @@ arrival_settle_required_sec?: number;
   total_points?: number;
 
   completed_points?: number;
+  failed_points?: number;
   skipped_points?: number;
   remaining_points?: number;
 
@@ -170,6 +171,178 @@ export interface MissionStatusResponse {
   success: boolean;
   mission: MissionRuntimeState;
 }
+
+// ── Canonical Mission Report ──────────────────────────────────────────────────
+
+export type MissionReportPointStatus =
+  | "PENDING"
+  | "COMPLETED"
+  | "FAILED"
+  | "SKIPPED";
+
+export type RppTerminalOutcome =
+  | "CAPTURED"
+  | "MISSED"
+  | null;
+
+export interface MissionReportAccuracy {
+  /**
+   * RPP is the ONLY final marking-accuracy authority.
+   */
+  measurement_source:
+    "RPP_TERMINAL_RESULT";
+
+  /**
+   * True only when an RPP terminal result exists
+   * for this marking point.
+   *
+   * PENDING / SKIPPED normally return false.
+   */
+  available: boolean;
+
+  /**
+   * Signed lateral error from RPP.
+   */
+  cross_track_error_mm:
+    number | null;
+
+  /**
+   * Signed front/back error from RPP.
+   */
+  along_track_error_mm:
+    number | null;
+
+  /**
+   * Exact radial/overall terminal error from RPP.
+   */
+  overall_accuracy_mm:
+    number | null;
+
+  /**
+   * Compatibility alias from backend.
+   * Frontend Mission Report should use
+   * overall_accuracy_mm.
+   */
+  total_accuracy_mm?:
+    number | null;
+
+  tolerance_mm:
+    number | null;
+
+  /**
+   * Copied from RPP terminal result.
+   * Frontend must not calculate this.
+   */
+  within_tolerance?:
+    boolean | null;
+
+  rpp_outcome?:
+    RppTerminalOutcome;
+
+  captured_at:
+    string | null;
+}
+
+export interface MissionReportSpray {
+  attempted: boolean;
+
+  outcome: string;
+
+  confirmed:
+    boolean | null;
+
+  reason:
+    string | null;
+
+  elapsed_sec:
+    number | null;
+}
+
+export interface MissionReportPoint {
+  point_id: string;
+
+  point_index: number;
+
+  /**
+   * 1-based point number.
+   * P1 = sequence 1.
+   */
+  sequence: number;
+
+  status:
+    MissionReportPointStatus;
+
+  is_active: boolean;
+
+  accuracy:
+    MissionReportAccuracy;
+
+  spray:
+    MissionReportSpray;
+
+  reason:
+    string | null;
+
+  updated_at:
+    string | null;
+
+  target:
+    Record<string, unknown>;
+}
+
+export interface MissionReportSummary {
+  total_points: number;
+
+  pending_points: number;
+
+  completed_points: number;
+
+  failed_points: number;
+
+  skipped_points: number;
+
+  resolved_points: number;
+
+  progress_percent: number;
+}
+
+export interface CanonicalMissionReport {
+  schema_version: number;
+
+  source: string;
+
+  lifecycle: string;
+
+  report_id: string;
+
+  mission_id: string;
+
+  mission_run_id:
+    string | null;
+
+  generated_at: string;
+
+  state: string;
+
+  summary:
+    MissionReportSummary;
+
+  points:
+    MissionReportPoint[];
+
+  [key: string]:
+    unknown;
+}
+
+export interface MissionReportResponse {
+  success: boolean;
+
+  available: boolean;
+
+  report:
+    CanonicalMissionReport | null;
+}
+
 
 export interface LoadedPathPoint {
   x?: number;
@@ -334,6 +507,23 @@ Promise<MissionStatusResponse> {
     PX4_MISSION.STATUS,
   );
 }
+/**
+ * Canonical Mission Report.
+ *
+ * Accuracy values are already calculated by RPP.
+ * This function only retrieves them.
+ *
+ * Frontend must NOT calculate:
+ * - cross-track
+ * - along-track
+ * - overall accuracy
+ */
+export async function getMissionReport():
+Promise<MissionReportResponse> {
+  return apiGet<MissionReportResponse>(
+    PX4_MISSION.REPORT,
+  );
+}
 
 export async function getLoadedMissionPath():
 Promise<LoadedPathResponse> {
@@ -446,11 +636,15 @@ Promise<DeleteMissionResponse> {
 
 export default {
   uploadMissionCsv,
+
   getMissionStatus,
+  getMissionReport,
   getLoadedMissionPath,
   getMissionDownloadUrl,
+
   prepareMission,
   setMissionExecutionMode,
+
   startMission,
   pauseMission,
   resumeMission,
@@ -458,5 +652,6 @@ export default {
   skipMissionPoint,
   stopMission,
   clearMission,
+
   deleteMissionCsv,
 };
