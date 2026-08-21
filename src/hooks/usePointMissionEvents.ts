@@ -21,6 +21,7 @@ import {
   hasWaitingForContinue,
   ingestPointEvent,
   INITIAL_POINT_EVENT_CURSOR,
+  reconcilePointStatusSnapshot,
   type PointEventCursor,
   type PointMissionTerminalOutcome,
   type WaypointStatusEntry,
@@ -87,6 +88,16 @@ function finiteNumber(value: unknown): number | null {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isoTimestampFromUnixNanoseconds(value: unknown): string | undefined {
+  const nanoseconds = finiteNumber(value);
+  if (nanoseconds === null) return undefined;
+
+  const timestamp = new Date(nanoseconds / 1_000_000);
+  return Number.isFinite(timestamp.getTime())
+    ? timestamp.toISOString()
+    : undefined;
 }
 
 function backendEventType(
@@ -284,6 +295,12 @@ export function usePointMissionEvents(
     if (!root) return;
     const mission = asRecord(root.mission) ?? root;
 
+    const state = stringValue(mission.state).toUpperCase();
+    if (state === "EMPTY" || state === "CLEARED") {
+      resetStatusMap();
+      return;
+    }
+
     const totalPoints = finiteNumber(mission.total_points);
     if (totalPoints !== null) {
       lastKnownTotalRef.current = Math.max(0, Math.trunc(totalPoints));
@@ -301,9 +318,27 @@ export function usePointMissionEvents(
       setAuthoritativeCurrentIndex(normalizedIndex);
     }
 
-    const state = stringValue(mission.state).toUpperCase();
-    if (state === "EMPTY" || state === "CLEARED") {
-      resetStatusMap();
+    const snapshotTimestamp =
+      stringValue(
+        mission.timestamp ??
+          mission.updated_at ??
+          mission.received_at ??
+          root.timestamp ??
+          root.updated_at ??
+          root.received_at,
+      ) ||
+      isoTimestampFromUnixNanoseconds(
+        mission.timestamp_unix_ns ?? root.timestamp_unix_ns,
+      );
+    const reconciledMap = reconcilePointStatusSnapshot(
+      statusMapRef.current,
+      mission.point_status,
+      snapshotTimestamp,
+    );
+
+    if (reconciledMap !== statusMapRef.current) {
+      statusMapRef.current = reconciledMap;
+      setStatusMap(reconciledMap);
     }
   }, [resetStatusMap]);
 

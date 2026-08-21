@@ -1778,13 +1778,11 @@ export default function MissionReportScreen({
         "Mission Completed",
         "All marking points have been processed!",
       );
-      const dialogTimer = setTimeout(() => {
-        if (mountedRef.current) {
-          setShowCompletionDialog(true);
-        }
-        clearMissionTerminal();
-      }, 1000);
-      return () => clearTimeout(dialogTimer);
+      if (mountedRef.current) {
+        setShowCompletionDialog(true);
+      }
+      clearMissionTerminal();
+      return;
     }
 
     const detail = event.message || event.reason || `Mission ${outcome}`;
@@ -3542,16 +3540,12 @@ export default function MissionReportScreen({
           "All marking points have been processed!",
         );
 
-        // Show completion dialog
-        const dialogTimer = setTimeout(() => {
-          if (mountedRef.current) {
-            // console.log('[MissionReportScreen] 📋 Opening mission completion dialog');
-            setShowCompletionDialog(true);
-          }
-        }, 1000);
-
-        // Cleanup timer if component unmounts before dialog shows
-        return () => clearTimeout(dialogTimer);
+        // Show completion dialog immediately after confirmed backend completion.
+        if (mountedRef.current) {
+          // console.log('[MissionReportScreen] 📋 Opening mission completion dialog');
+          setShowCompletionDialog(true);
+        }
+        return;
       }
 
       // Handle mission status updates (high frequency - no notifications)

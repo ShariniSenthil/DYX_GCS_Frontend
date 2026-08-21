@@ -6,6 +6,7 @@ import {
   ingestPointEvent,
   INITIAL_POINT_EVENT_CURSOR,
   isPointMissionTerminalEvent,
+  reconcilePointStatusSnapshot,
   type WaypointStatusEntry,
 } from '../pointEventAdapter';
 import {
@@ -152,6 +153,133 @@ describe('reconnect backfill', () => {
 
     const batch = buildStatusMapFromEvents(events, {}, INITIAL_POINT_EVENT_CURSOR);
     expect(batch.statusMap[0]?.status).toBe('marked');
+  });
+});
+
+describe('authoritative point status snapshot reconciliation', () => {
+  const snapshotTimestamp = '2026-08-21T07:39:45.000Z';
+
+  test('repairs a missing final P4 failure from a four-point FAILED snapshot', () => {
+    const map: Record<number, WaypointStatusEntry> = {
+      0: { status: 'failed', timestamp: 'p1', eventType: 'point_failed', reason: 'radial' },
+      1: { status: 'failed', timestamp: 'p2', eventType: 'point_failed', reason: 'radial' },
+      2: { status: 'failed', timestamp: 'p3', eventType: 'point_failed', reason: 'radial' },
+    };
+
+    const reconciled = reconcilePointStatusSnapshot(
+      map,
+      ['FAILED', 'FAILED', 'FAILED', 'FAILED'],
+      snapshotTimestamp,
+    );
+
+    expect(Object.values(reconciled).map((entry) => entry.status)).toEqual([
+      'failed',
+      'failed',
+      'failed',
+      'failed',
+    ]);
+    expect(reconciled[0]).toBe(map[0]);
+    expect(reconciled[3]).toEqual({
+      status: 'failed',
+      timestamp: snapshotTimestamp,
+      eventType: 'point_failed',
+    });
+  });
+
+  test.each([
+    ['completed', 'point_completed'],
+    ['failed', 'point_failed'],
+    ['skipped', 'point_skipped'],
+    ['aborted', 'point_aborted'],
+  ] as const)('does not downgrade terminal %s status', (status, eventType) => {
+    const map: Record<number, WaypointStatusEntry> = {
+      0: { status, timestamp: 'event-time', eventType, reason: 'event detail' },
+    };
+
+    const reconciled = reconcilePointStatusSnapshot(
+      map,
+      ['ACTIVE'],
+      snapshotTimestamp,
+    );
+
+    expect(reconciled).toBe(map);
+    expect(reconciled[0]).toBe(map[0]);
+  });
+
+  test('ignores malformed snapshots and unknown status entries', () => {
+    const map: Record<number, WaypointStatusEntry> = {
+      0: { status: 'active', timestamp: 'event-time', eventType: 'point_leg_started' },
+    };
+
+    expect(reconcilePointStatusSnapshot(map, null, snapshotTimestamp)).toBe(map);
+    expect(reconcilePointStatusSnapshot(map, { point_status: ['FAILED'] }, snapshotTimestamp)).toBe(map);
+    expect(reconcilePointStatusSnapshot(map, [null, 42, 'UNKNOWN'], snapshotTimestamp)).toBe(map);
+  });
+
+  test.each([undefined, 'not-a-timestamp'])(
+    'uses a valid receipt-time timestamp when snapshot timestamp is %s',
+    (invalidTimestamp) => {
+      const reconciled = reconcilePointStatusSnapshot(
+        {},
+        ['FAILED'],
+        invalidTimestamp,
+      );
+
+      expect(Number.isFinite(Date.parse(reconciled[0].timestamp))).toBe(true);
+      expect(reconciled[0].timestamp).not.toBe('1970-01-01T00:00:00.000Z');
+    },
+  );
+
+  test('PENDING snapshot does not replace a terminal entry', () => {
+    const map: Record<number, WaypointStatusEntry> = {
+      0: {
+        status: 'failed',
+        timestamp: 'event-time',
+        eventType: 'point_failed',
+        reason: 'RADIAL_OUTSIDE_30MM',
+        lastEventId: 41,
+      },
+    };
+
+    const reconciled = reconcilePointStatusSnapshot(
+      map,
+      ['PENDING'],
+      snapshotTimestamp,
+    );
+
+    expect(reconciled).toBe(map);
+    expect(reconciled[0]).toEqual(map[0]);
+  });
+
+  test('maps paused and aborted aliases while preserving event detail fields', () => {
+    const map: Record<number, WaypointStatusEntry> = {
+      0: {
+        status: 'active',
+        timestamp: 'event-time',
+        eventType: 'point_leg_started',
+        lat: 10,
+        lon: 20,
+        message: 'existing detail',
+      },
+    };
+
+    const paused = reconcilePointStatusSnapshot(map, ['PAUSED'], snapshotTimestamp);
+    const aborted = reconcilePointStatusSnapshot(paused, ['STOPPED'], snapshotTimestamp);
+
+    expect(paused[0]).toMatchObject({
+      status: 'paused',
+      eventType: 'point_paused',
+      lat: 10,
+      lon: 20,
+      message: 'existing detail',
+    });
+    expect(aborted[0]).toMatchObject({
+      status: 'aborted',
+      eventType: 'point_aborted',
+      lat: 10,
+      lon: 20,
+      message: 'existing detail',
+    });
   });
 });
 

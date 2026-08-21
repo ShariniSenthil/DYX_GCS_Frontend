@@ -73,6 +73,22 @@ const ENTRY_STATUS_PRIORITY: Record<WaypointStatusKey, number> = {
   aborted: 4,
 };
 
+const SNAPSHOT_STATUS_TO_ENTRY: Record<
+  string,
+  { status: WaypointStatusKey; eventType: PointEventType }
+> = {
+  PENDING: { status: "pending", eventType: "point_leg_started" },
+  ACTIVE: { status: "active", eventType: "point_leg_started" },
+  COMPLETED: { status: "completed", eventType: "point_completed" },
+  FAILED: { status: "failed", eventType: "point_failed" },
+  SKIPPED: { status: "skipped", eventType: "point_skipped" },
+  ABORTED: { status: "aborted", eventType: "point_aborted" },
+  CANCELLED: { status: "aborted", eventType: "point_aborted" },
+  CANCELED: { status: "aborted", eventType: "point_aborted" },
+  STOPPED: { status: "aborted", eventType: "point_aborted" },
+  PAUSED: { status: "paused", eventType: "point_paused" },
+};
+
 const CURRENT_INDEX_STATUSES = new Set<WaypointStatusKey>([
   "active",
   "arrived",
@@ -112,6 +128,55 @@ export function isEntryStatusDowngrade(
     (ENTRY_STATUS_PRIORITY[incoming.status] ?? 0) <
     (ENTRY_STATUS_PRIORITY[existing.status] ?? 0)
   );
+}
+
+/**
+ * Reconcile the event-derived point map with the authoritative backend
+ * `point_status` snapshot. This repairs gaps when two backend events happen
+ * between Socket.IO broadcast ticks (for example, a final point failure
+ * immediately followed by mission completion).
+ *
+ * Unknown or malformed snapshot entries are ignored. Existing event details
+ * are retained, and the same priority rule used for journal events prevents a
+ * snapshot from regressing a point to an earlier lifecycle state.
+ */
+export function reconcilePointStatusSnapshot(
+  statusMap: Record<number, WaypointStatusEntry>,
+  rawPointStatus: unknown,
+  snapshotTimestamp?: string,
+): Record<number, WaypointStatusEntry> {
+  if (!Array.isArray(rawPointStatus)) return statusMap;
+
+  let resolvedTimestamp =
+    typeof snapshotTimestamp === "string" &&
+    Number.isFinite(Date.parse(snapshotTimestamp))
+      ? snapshotTimestamp
+      : null;
+  let nextMap = statusMap;
+
+  rawPointStatus.forEach((rawStatus, pointIndex) => {
+    if (typeof rawStatus !== "string") return;
+
+    const mapped = SNAPSHOT_STATUS_TO_ENTRY[rawStatus.trim().toUpperCase()];
+    if (!mapped) return;
+
+    const existing = statusMap[pointIndex];
+    if (existing?.status === mapped.status) return;
+
+    const incoming: WaypointStatusEntry = {
+      ...existing,
+      status: mapped.status,
+      timestamp:
+        resolvedTimestamp ?? (resolvedTimestamp = new Date().toISOString()),
+      eventType: mapped.eventType,
+    };
+    if (isEntryStatusDowngrade(existing, incoming)) return;
+
+    if (nextMap === statusMap) nextMap = { ...statusMap };
+    nextMap[pointIndex] = incoming;
+  });
+
+  return nextMap;
 }
 
 export function shouldAcceptPointEvent(
