@@ -53,14 +53,14 @@ import { MissionCompletionDialog } from "../components/missionreport/MissionComp
 import { LogClearDialog } from "../components/missionreport/LogClearDialog";
 import { useScreenReadiness } from "../hooks/useComponentReadiness";
 import PersistentStorage from "../services/PersistentStorage";
-import { getAllProfiles } from "../services/ntripProfileStorage";
+import { getRtkStatus, startRtk } from "../services/rtkService";
+import { formatRtkApiError } from "../services/rtkService";
 import {
-  getRtkStatus,
-  startNtripStream,
-  stopAllRtk,
-} from "../services/rtkService";
+  decideMissionRtkQuickStart,
+  toRtkControlView,
+  type RtkHeadlineState,
+} from "../adapters/rtkControlAdapter";
 import { armVehicle, setManualMode } from "../services/vehicleControlService";
-import type { NTRIPProfile } from "../types/ntrip";
 // NOTE: calculateAccuracy and formatAccuracyDisplay commented out - now using backend wp_dist_cm
 // import { calculateAccuracy, formatAccuracyDisplay } from '../utils/accuracyCalculation';
 import { getAccuracyLevel } from "../utils/accuracyCalculation";
@@ -150,27 +150,8 @@ type WpStatus = {
  * calculateAccuracy return shape.
  */
 
-const getRtkFailureMessage = (err: unknown, fallback: string) => {
-  if (err instanceof Error) {
-    const responseBody =
-      "responseBody" in err
-        ? String((err as { responseBody?: unknown }).responseBody ?? "")
-        : "";
-    if (responseBody) {
-      try {
-        const parsed = JSON.parse(responseBody);
-        const detail = parsed?.detail;
-        if (typeof detail === "string") {
-          return `${err.message}: ${detail}`;
-        }
-      } catch {
-        return `${err.message}: ${responseBody}`;
-      }
-    }
-    return err.message;
-  }
-  return fallback;
-};
+const getRtkFailureMessage = (err: unknown, fallback: string) =>
+  formatRtkApiError(err, fallback);
 
 type TrajectoryMapReference = {
   /**
@@ -411,7 +392,9 @@ export default function MissionReportScreen({
   // RTK Injection overlay
   const [showRTKInjection, setShowRTKInjection] = useState(false);
   const [isQuickNtripStarting, setIsQuickNtripStarting] = useState(false);
-  const [isQuickNtripConnected, setIsQuickNtripConnected] = useState(false);
+  const [quickRtkState, setQuickRtkState] =
+    useState<RtkHeadlineState>("off");
+  const quickRtkStatusInFlightRef = useRef(false);
   const [isManualPreparing, setIsManualPreparing] = useState(false);
   const [isManualDriveVisible, setIsManualDriveVisible] = useState(false);
   const missionControlsRestoreRef = useRef(false);
@@ -1423,140 +1406,108 @@ export default function MissionReportScreen({
     refreshTrajectoryPreview,
   ]);
 
-  const getLatestNtripProfile = async (): Promise<NTRIPProfile | null> => {
-    const profiles = await getAllProfiles();
-    if (profiles.length === 0) return null;
-    return [...profiles].sort((a, b) => {
-      const bTime = Date.parse(b.updatedAt || b.createdAt || "");
-      const aTime = Date.parse(a.updatedAt || a.createdAt || "");
-      return (
-        (Number.isFinite(bTime) ? bTime : 0) -
-        (Number.isFinite(aTime) ? aTime : 0)
-      );
-    })[0];
-  };
-
-  const refreshQuickNtripStatus = async () => {
-    try {
-      const status = await getRtkStatus();
-      const source = String(
-        status.active_source ?? status.desired_source ?? status.mode ?? "",
-      ).toLowerCase();
-      setIsQuickNtripConnected(
-        Boolean(status.running && source.includes("ntrip")),
-      );
-    } catch (err) {
-      console.warn("[RTK] Quick status check failed", err);
-      setIsQuickNtripConnected(false);
+  const refreshQuickNtripStatus = useCallback(async () => {
+    if (connectionState !== "connected") {
+      setQuickRtkState("rover_offline");
+      return;
     }
-  };
+
+    if (quickRtkStatusInFlightRef.current) {
+      return;
+    }
+
+    quickRtkStatusInFlightRef.current = true;
+
+    try {
+      const response = await getRtkStatus();
+      const view = toRtkControlView(response, { connected: true });
+      setQuickRtkState(view.headline);
+    } catch {
+      setQuickRtkState("rover_offline");
+    } finally {
+      quickRtkStatusInFlightRef.current = false;
+    }
+  }, [connectionState]);
 
   useEffect(() => {
-    if (!isVisible || isOfflineMode()) return;
-    refreshQuickNtripStatus();
-    const timer = setInterval(refreshQuickNtripStatus, 3000);
+    if (
+      !isVisible ||
+      connectionState !== "connected" ||
+      showRTKInjection
+    ) {
+      return undefined;
+    }
+
+    void refreshQuickNtripStatus();
+
+    const timer = setInterval(() => {
+      void refreshQuickNtripStatus();
+    }, 3000);
+
     return () => clearInterval(timer);
-  }, [isVisible]);
+  }, [
+    connectionState,
+    isVisible,
+    refreshQuickNtripStatus,
+    showRTKInjection,
+  ]);
 
   const handleQuickStartNtrip = async () => {
-    if (isQuickNtripStarting || isQuickNtripConnected) return;
+    if (isQuickNtripStarting) return;
 
     setIsQuickNtripStarting(true);
+
     try {
-      const profile = await getLatestNtripProfile();
-      if (!profile) {
+      const response = await getRtkStatus();
+      const view = toRtkControlView(response, {
+        connected: connectionState === "connected",
+      });
+
+      setQuickRtkState(view.headline);
+
+      const decision = decideMissionRtkQuickStart({
+        connected: connectionState === "connected",
+        activeProfileId: response.status.persisted.active_profile_id,
+      });
+
+      if (decision === "offline") {
         Alert.alert(
-          "No NTRIP Profile",
-          "Create an NTRIP profile in Settings before using quick start.",
+          "Rover Offline",
+          "Connect to the rover before starting RTK.",
         );
         return;
       }
 
-      const host = profile.casterAddress.trim();
-      const port = Number.parseInt(profile.port || "2101", 10);
-      const mountpoint = profile.mountpoint.trim();
-      const user = profile.username.trim();
-      const pass = profile.password.trim();
-
-      if (
-        !host ||
-        !mountpoint ||
-        !user ||
-        !pass ||
-        !Number.isFinite(port) ||
-        port < 1 ||
-        port > 65535
-      ) {
-        Alert.alert(
-          "Profile Incomplete",
-          "NTRIP profile requires host, valid port, mountpoint, username, and password.",
-        );
+      if (decision === "open_config") {
+        openRTKInjection();
         return;
       }
 
-      const currentStatus = await getRtkStatus().catch(() => null);
-      const activeSource = String(
-        currentStatus?.active_source ?? currentStatus?.mode ?? "",
-      ).toLowerCase();
-      if (currentStatus?.running && activeSource.includes("lora")) {
-        await stopAllRtk();
+      // A running/transitional/error lifecycle is status-only here.
+      // Mission Progress must never issue a duplicate start.
+      if (!view.canStart) {
+        return;
       }
 
-      console.log("[RTK] Quick NTRIP start", {
-        profile: profile.name,
-        host,
-        port,
-        mountpoint,
-        user,
-        pass: "<redacted>",
-      });
+      const intent = await startRtk();
 
-      const status = await startNtripStream({
-        host,
-        port,
-        mountpoint,
-        user,
-        pass,
-      });
-
-      console.log("[RTK] Quick NTRIP response", {
-        mode: status.mode,
-        running: status.running,
-        healthy: status.healthy,
-        active_source: status.active_source,
-        desired_source: status.desired_source,
-        lifecycle_state: status.lifecycle_state,
-        last_error: status.last_error,
-        last_process_error: status.last_process_error,
-      });
-
-      if (status.running) {
-        setIsQuickNtripConnected(true);
-        showNotification(
-          "success",
-          "NTRIP Started",
-          `${profile.name} • ${status.healthy ? "healthy" : (status.lifecycle_state ?? "starting")}`,
-        );
-      } else {
-        setIsQuickNtripConnected(false);
-        const message =
-          status.last_error ||
-          status.last_process_error ||
-          `NTRIP did not start (${status.lifecycle_state ?? status.source_state ?? "unknown"})`;
-        showNotification("error", "NTRIP Failed", message, 5000);
-        Alert.alert("NTRIP Failed", message);
+      if (intent.persisted.desired_state === "RUNNING") {
+        setQuickRtkState("start_requested");
       }
-    } catch (err) {
-      console.error("[RTK] Quick NTRIP start failed", err);
-      const message = getRtkFailureMessage(
-        err,
-        "Failed to start NTRIP stream.",
+
+      showNotification(
+        "success",
+        "RTK Start Requested",
+        intent.message ||
+          "Desired RUNNING accepted. Waiting for backend status.",
       );
-      showNotification("error", "NTRIP Failed", message, 5000);
-      Alert.alert("NTRIP Failed", message);
+    } catch (err) {
+      const message = getRtkFailureMessage(err, "Failed to start RTK.");
+      showNotification("error", "RTK Start Failed", message, 5000);
+      Alert.alert("RTK Start Failed", message);
     } finally {
       setIsQuickNtripStarting(false);
-      refreshQuickNtripStatus();
+      void refreshQuickNtripStatus();
     }
   };
 
@@ -4445,7 +4396,7 @@ export default function MissionReportScreen({
             onManualPress={handleOpenManualDrive}
             manualLoading={isManualPreparing}
             loading={isQuickNtripStarting}
-            connected={isQuickNtripConnected}
+            rtkState={quickRtkState}
           />
         </View>
       )}

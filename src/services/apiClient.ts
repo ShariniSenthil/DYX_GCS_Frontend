@@ -310,6 +310,19 @@ export async function apiPut<T>(
   );
 }
 
+export async function apiPatch<T>(
+  path: string,
+  body?: unknown,
+  options?: ApiRequestOptions,
+): Promise<T> {
+  return request<T>(
+    "PATCH",
+    path,
+    body,
+    options,
+  );
+}
+
 export async function apiDelete<T>(
   path: string,
   options?: ApiRequestOptions,
@@ -352,6 +365,7 @@ export const apiClient = {
   apiGet,
   apiPost,
   apiPut,
+  apiPatch,
   apiDelete,
   apiPostMultipart,
   configureApiClient,

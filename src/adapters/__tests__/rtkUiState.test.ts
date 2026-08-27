@@ -1,18 +1,95 @@
 import { toRtkUiState, rtkUiStateLabel } from '../px4RtkUiStateAdapter';
 import { toNetworkData } from '../px4NetworkAdapter';
-import type { RtkStatusResponse } from '../../services/rtkService';
+import type { RtkStatusResponse } from '../../types/rtk';
 
-const rtk = (over: Partial<RtkStatusResponse> = {}): RtkStatusResponse =>
-  ({
-    mode: 'ntrip',
-    running: false,
-    healthy: true,
-    ...over,
-  }) as RtkStatusResponse;
+const rtk = (
+  over: {
+    manager?: RtkStatusResponse['status']['runtime']['manager'] extends infer M
+      ? M extends { state: infer S }
+        ? S
+        : never
+      : never;
+    desired?: 'STOPPED' | 'RUNNING';
+    healthy?: boolean;
+    fixType?: number;
+  } = {},
+): RtkStatusResponse => ({
+  status: {
+    persisted: {
+      active_profile_id: 1,
+      desired_state: over.desired ?? (over.manager && over.manager !== 'STOPPED' ? 'RUNNING' : 'STOPPED'),
+      revision: 1,
+      updated_at_epoch: 1,
+    },
+    active_profile: null,
+    runtime: {
+      supervisor: {
+        running: true,
+        shutdown_requested: false,
+        mavros_ready: true,
+        last_error_code: null,
+      },
+      manager: {
+        desired_state: over.desired ?? 'RUNNING',
+        state: over.manager ?? 'STOPPED',
+        mavros_ready: true,
+        active_run_id: null,
+        child_started: false,
+        child_ready: false,
+        next_restart_at_monotonic_sec: null,
+        consecutive_failures: 0,
+        restart_count_in_window: 0,
+        error_reason: over.manager === 'ERROR' ? 'AUTH_FAILED' : null,
+      },
+      process: null,
+      last_worker_status: null,
+      last_process_returncode: null,
+      last_protocol_fault_run_id: null,
+    },
+    correction_stream: {
+      state: over.healthy ? 'HEALTHY' : 'UNHEALTHY',
+      connected: Boolean(over.healthy),
+      healthy: Boolean(over.healthy),
+      correction_age_sec: over.healthy ? 0.2 : null,
+      socket_bytes_received: 0,
+      valid_frames: 0,
+      published_frames: 0,
+      crc_failures: 0,
+      invalid_headers: 0,
+      resync_bytes_discarded: 0,
+      partial_frame_timeouts: 0,
+      oversize_drops: 0,
+      publish_errors: 0,
+      mavros_ready: true,
+      mavros_rtcm_subscribers: 0,
+      worker_mavros_subscribers: -1,
+      max_mavros_rtcm_frame_bytes: 720,
+      gga: {
+        enabled: false,
+        state: 'DISABLED',
+        source_age_sec: null,
+        last_sent_age_sec: null,
+        sent_total: 0,
+        send_errors: 0,
+      },
+    },
+    gnss_solution: {
+      fix_type: over.fixType ?? 0,
+      fix_name: 'NO_GPS',
+      rtk_float: over.fixType === 5,
+      rtk_fixed: over.fixType === 6,
+      satellites_visible: 0,
+      horizontal_accuracy_m: null,
+      vertical_accuracy_m: null,
+      hdop: null,
+      vdop: null,
+    },
+  },
+});
 
 describe('toRtkUiState', () => {
   it('returns off when not running', () => {
-    expect(toRtkUiState(rtk({ running: false }))).toBe('off');
+    expect(toRtkUiState(rtk({ manager: 'STOPPED', desired: 'STOPPED' }))).toBe('off');
   });
 
   it('returns off for null/undefined input', () => {
@@ -20,29 +97,35 @@ describe('toRtkUiState', () => {
     expect(toRtkUiState(undefined)).toBe('off');
   });
 
-  it('returns error when running but unhealthy with an error', () => {
+  it('returns error when running but unhealthy', () => {
     expect(
-      toRtkUiState(rtk({ running: true, healthy: false, last_error: 'boom' })),
+      toRtkUiState(rtk({ manager: 'RUNNING', desired: 'RUNNING', healthy: false, fixType: 6 })),
     ).toBe('error');
   });
 
-  it('returns rtk_fixed for gps_fix_type >= 6', () => {
-    expect(toRtkUiState(rtk({ running: true, gps_fix_type: 6 }))).toBe('rtk_fixed');
-    expect(toRtkUiState(rtk({ running: true, fix_type: 7 }))).toBe('rtk_fixed');
+  it('returns rtk_fixed only for healthy corrections + fix 6', () => {
+    expect(
+      toRtkUiState(rtk({ manager: 'RUNNING', desired: 'RUNNING', healthy: true, fixType: 6 })),
+    ).toBe('rtk_fixed');
+    expect(
+      toRtkUiState(rtk({ manager: 'RUNNING', desired: 'RUNNING', healthy: true, fixType: 3 })),
+    ).not.toBe('rtk_fixed');
   });
 
-  it('returns rtk_float for gps_fix_type === 5', () => {
-    expect(toRtkUiState(rtk({ running: true, gps_fix_type: 5 }))).toBe('rtk_float');
+  it('returns rtk_float for healthy corrections + fix 5', () => {
+    expect(
+      toRtkUiState(rtk({ manager: 'RUNNING', desired: 'RUNNING', healthy: true, fixType: 5 })),
+    ).toBe('rtk_float');
   });
 
   it('returns streaming when stream is healthy but no RTK fix', () => {
     expect(
-      toRtkUiState(rtk({ running: true, stream_healthy: true, gps_fix_type: 4 })),
+      toRtkUiState(rtk({ manager: 'RUNNING', desired: 'RUNNING', healthy: true, fixType: 4 })),
     ).toBe('streaming');
   });
 
-  it('returns starting when running with no healthy stream yet', () => {
-    expect(toRtkUiState(rtk({ running: true, stream_healthy: false }))).toBe('starting');
+  it('returns starting when the manager is starting', () => {
+    expect(toRtkUiState(rtk({ manager: 'STARTING', desired: 'RUNNING' }))).toBe('starting');
   });
 
   it('rtkUiStateLabel maps every state', () => {

@@ -43,7 +43,12 @@ import { toRtkUiState } from "../adapters/px4RtkUiStateAdapter";
 import { normalizePx4Mode } from "../adapters/px4ModeAdapter";
 import { PX4_SYSTEM, PX4_TELEMETRY, PX4_RTK } from "../config/px4Endpoints";
 import type { Px4HealthzResponse } from "../types/px4/telemetry";
-import type { RtkStatusResponse } from "../services/rtkService";
+import {
+  getRtkStatus,
+  startRtk,
+  stopRtk,
+  type RtkStatusResponse,
+} from "../services/rtkService";
 import { apiGet, apiPost } from "../services/apiClient";
 import {
   clearMission as clearBackendMission,
@@ -2921,66 +2926,46 @@ attitude: adapted.attitude,
         nrpRosLegacyDisabled("restartFailsafeMission"),
       injectRTK: () => nrpRosLegacyDisabled("injectRTK"),
       stopRTK: async () => {
-        console.log("[RTK DEBUG] Sending RTK stop request", {
-          endpoint: API_ENDPOINTS.RTK_STOP,
-        });
-        try {
-          const res = await postService(API_ENDPOINTS.RTK_STOP);
-          console.log("[RTK DEBUG] RTK stop response", res);
-          return res;
-        } catch (err) {
-          console.error("[RTK DEBUG] RTK stop error", err);
-          throw err;
-        }
+        const intent = await stopRtk();
+        return {
+          success: intent.success,
+          message: intent.message,
+        };
       },
-      getRTKStatus: () => getService(API_ENDPOINTS.RTK_STATUS),
+      getRTKStatus: () => getRtkStatus(),
 
-      // New RTK methods per documentation
-      startNTRIPStream: async (params) => {
-        console.log("[RTK DEBUG] Starting NTRIP stream with params", params);
-        try {
-          const res = await postService(API_ENDPOINTS.RTK_NTRIP_START, params);
-          console.log("[RTK DEBUG] NTRIP start response", res);
-          return res as import("../types/rtk").NTRIPStartResponse;
-        } catch (err) {
-          console.error("[RTK DEBUG] NTRIP start error", err);
-          throw err;
-        }
+      startNTRIPStream: async (_params) => {
+        const intent = await startRtk();
+        return {
+          success: intent.success,
+          message: intent.message,
+          source: "NTRIP" as const,
+        };
       },
 
-      // PX4: no separate NTRIP stop — use RTK_STOP
       stopNTRIPStream: async () => {
-        const res = await postService(API_ENDPOINTS.RTK_STOP);
-        return res as import("../types/rtk").NTRIPStopResponse;
+        const intent = await stopRtk();
+        return {
+          success: intent.success,
+          message: intent.message,
+          source: "NTRIP" as const,
+        };
       },
 
-      startLoRaStream: async () =>
-        nrpRosLegacyDisabled("startLoRaStream") as Promise<
-          import("../types/rtk").LoRaStartResponse
-        >,
+      startLoRaStream: async () => {
+        throw new Error("LoRa RTK is not supported by the production backend.");
+      },
 
       stopLoRaStream: async () => {
-        console.log("[RTK DEBUG] Stopping LoRa stream via REST");
-        try {
-          const res = await postService(API_ENDPOINTS.RTK_LORA_STOP);
-          console.log("[RTK DEBUG] LoRa stop response", res);
-          return res as import("../types/rtk").LoRaStopResponse;
-        } catch (err) {
-          console.error("[RTK DEBUG] LoRa stop error", err);
-          throw err;
-        }
+        throw new Error("LoRa RTK is not supported by the production backend.");
       },
 
       stopAllRTKStreams: async () => {
-        console.log("[RTK DEBUG] Stopping all RTK streams");
-        try {
-          const res = await postService(API_ENDPOINTS.RTK_STOP);
-          console.log("[RTK DEBUG] Stop all response", res);
-          return res as import("../types/rtk").RTKStopAllResponse;
-        } catch (err) {
-          console.error("[RTK DEBUG] Stop all error", err);
-          throw err;
-        }
+        const intent = await stopRtk();
+        return {
+          success: intent.success,
+          message: intent.message,
+        };
       },
 
       // NRP_ROS LEGACY DISABLED — LoRa socket emits (use rtkService REST on PX4)

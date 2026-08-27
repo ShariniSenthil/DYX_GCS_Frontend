@@ -1,293 +1,217 @@
 /**
- * Production RTK/NTRIP API client.
+ * Production RTK client for the backend-owned profile + lifecycle API.
  *
- * Contract:
- *   GET  /api/rtk/config
- *   PUT  /api/rtk/config
- *   POST /api/rtk/reconnect
- *   GET  /api/rtk/status
+ * Contract (rover_ws e57e050):
+ *   GET    /api/rtk/profiles
+ *   POST   /api/rtk/profiles
+ *   GET    /api/rtk/profiles/{id}
+ *   PATCH  /api/rtk/profiles/{id}
+ *   DELETE /api/rtk/profiles/{id}
+ *   POST   /api/rtk/profiles/{id}/activate
+ *   DELETE /api/rtk/active-profile
+ *   GET    /api/rtk/status
+ *   POST   /api/rtk/start
+ *   POST   /api/rtk/stop
  *
- * A successful PUT means "configuration persisted and reload accepted".
- * It does not mean the caster authenticated or RTCM is flowing. Only
- * healthy=true + correction_fresh=true is treated as an active RTK stream.
+ * POST /start acknowledges desired RUNNING intent only.
+ * It does not mean corrections are healthy or GNSS is RTK FIXED.
+ *
+ * NTRIP passwords are write-only. They are never logged, never stored in
+ * returned snapshots, and omitted from PATCH when unchanged.
  */
 
-import { apiGet, apiPost, apiPut } from './apiClient';
-import { PX4_RTK } from '../config/px4Endpoints';
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+} from "./apiClient";
+import { ApiError, NetworkError } from "./apiError";
+import { PX4_RTK } from "../config/px4Endpoints";
+import type {
+  FastApiErrorBody,
+  RtkActivateResponse,
+  RtkApiErrorDetail,
+  RtkIntentResponse,
+  RtkParsedApiError,
+  RtkProfile,
+  RtkProfileCreateRequest,
+  RtkProfileDeleteResponse,
+  RtkProfileListResponse,
+  RtkProfileResponse,
+  RtkProfileUpdateRequest,
+  RtkStatusResponse,
+} from "../types/rtk";
 
-export interface ActiveRtkConfiguration {
-  host: string;
-  port: number;
-  mountpoint: string;
-  username: string;
-  password_configured: boolean;
-  caster_url: string;
+export type {
+  RtkStatusResponse,
+  RtkProfile,
+  RtkProfileCreateRequest,
+  RtkProfileUpdateRequest,
+} from "../types/rtk";
+
+/**
+ * Build a PATCH body. Blank / missing password means "unchanged" and is
+ * omitted entirely. Password whitespace is preserved exactly.
+ */
+export function buildRtkProfileUpdateBody(
+  dto: RtkProfileUpdateRequest,
+): RtkProfileUpdateRequest {
+  const body: RtkProfileUpdateRequest = { ...dto };
+
+  if (body.password === undefined || body.password === null || body.password === "") {
+    delete body.password;
+  }
+
+  return body;
 }
 
-export interface RtkConfigurationState {
-  configured: boolean;
-  active: ActiveRtkConfiguration | null;
-  last_good_available: boolean;
-  persistent: boolean;
-  changes_only_on_explicit_update: boolean;
+function isRtkApiErrorDetail(value: unknown): value is RtkApiErrorDetail {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.code === "string" || typeof record.message === "string";
 }
 
-export interface GetRtkConfigurationResponse {
-  success: boolean;
-  configuration: RtkConfigurationState;
-}
+export function parseRtkApiError(error: unknown): RtkParsedApiError {
+  if (error instanceof NetworkError) {
+    return {
+      statusCode: null,
+      code: "NETWORK",
+      message: error.message || "Rover offline",
+    };
+  }
 
-export interface UpdateRtkConfigurationRequest {
-  caster_url?: string;
-  host?: string;
-  port?: number;
-  mountpoint?: string;
-  username?: string;
-  password?: string;
-}
+  if (error instanceof ApiError) {
+    let code: string | null = null;
+    let message = error.message;
 
-export interface RtkReloadResult {
-  accepted: boolean;
-  message: string;
-  requested_at: string;
-}
+    if (error.responseBody) {
+      try {
+        const parsed = JSON.parse(error.responseBody) as FastApiErrorBody;
+        const detail = parsed.detail;
 
-export interface UpdateRtkConfigurationResponse {
-  success: boolean;
-  message: string;
-  configuration: ActiveRtkConfiguration & {
-    configured: boolean;
-    active: boolean;
-    persisted: boolean;
+        if (typeof detail === "string" && detail.trim()) {
+          message = detail;
+        } else if (isRtkApiErrorDetail(detail)) {
+          if (typeof detail.code === "string" && detail.code) {
+            code = detail.code;
+          }
+          if (typeof detail.message === "string" && detail.message) {
+            message = detail.message;
+          }
+        } else if (Array.isArray(detail) && detail.length > 0) {
+          const first = detail[0];
+          if (first && typeof first.msg === "string" && first.msg) {
+            message = first.msg;
+          }
+        }
+      } catch {
+        // Keep the already-classified ApiError message.
+      }
+    }
+
+    return {
+      statusCode: error.statusCode,
+      code,
+      message,
+    };
+  }
+
+  if (error instanceof Error && error.message) {
+    return {
+      statusCode: null,
+      code: null,
+      message: error.message,
+    };
+  }
+
+  return {
+    statusCode: null,
+    code: null,
+    message: "RTK request failed",
   };
-  reload: RtkReloadResult;
 }
 
-export interface ReconnectRtkResponse {
-  success: boolean;
-  message: string;
-  configuration: RtkConfigurationState;
-  reload: RtkReloadResult;
+export function formatRtkApiError(error: unknown, fallback: string): string {
+  const parsed = parseRtkApiError(error);
+  if (!parsed.message) {
+    return fallback;
+  }
+  if (parsed.code && parsed.code !== "NETWORK") {
+    return parsed.message;
+  }
+  return parsed.message || fallback;
 }
 
-export interface BackendRtkStatusResponse {
-  healthy: boolean;
-  connected?: boolean;
-  configured?: boolean;
-  persistent?: boolean;
-  status: string;
-  correction_age_sec: number | null;
-  correction_fresh: boolean;
-  fix_type: number;
-  fix_name: string;
-  rtk_fixed: boolean;
-  satellites_visible: number;
-  hdop: number | null;
-  vdop: number | null;
-  total_bytes?: number;
-  total_chunks?: number;
-  last_error?: string | null;
-  last_error_code?: string | null;
-  retry_in_sec?: number | null;
-  mavros_subscribers?: number;
-  caster_host?: string | null;
-  caster_port?: number | null;
-  mountpoint?: string | null;
-  password_configured?: boolean;
-  gps_updated_at: string | null;
-  rtk_updated_at: string | null;
+export async function listRtkProfiles(): Promise<RtkProfileListResponse> {
+  return apiGet<RtkProfileListResponse>(PX4_RTK.PROFILES);
 }
 
-export interface RtkStatusResponse extends BackendRtkStatusResponse {
-  mode: 'NTRIP';
-  running: boolean;
-  active_source: 'ntrip';
-  desired_source: 'ntrip';
-  lifecycle_state: string;
-  source_state: string;
-  stream_healthy: boolean;
-  gps_fix_type: number;
-  last_valid_rtcm_age_s: number | null;
-  last_frame_age_s: number | null;
-  last_error: string | null;
-  last_process_error: string | null;
-  active?: boolean;
-  connected?: boolean;
-  source?: 'ntrip' | 'lora' | string | null;
-  bytes_received?: number;
-  serial_open?: boolean;
+export async function getRtkProfile(id: number): Promise<RtkProfile> {
+  const response = await apiGet<RtkProfileResponse>(PX4_RTK.PROFILE(id));
+  return response.profile;
 }
 
-export interface NtripStartRequest {
-  host: string;
-  port: number;
-  mountpoint: string;
-  user?: string;
-  username?: string;
-  pass?: string;
-  password?: string;
+export async function createRtkProfile(
+  dto: RtkProfileCreateRequest,
+): Promise<RtkProfile> {
+  const response = await apiPost<RtkProfileResponse>(PX4_RTK.PROFILES, dto);
+  return response.profile;
 }
 
-export interface LoraStartRequest {
-  serial_port: string;
-  baudrate?: number;
-}
-
-export type RtkConnectionOutcome =
-  | { kind: 'healthy'; status: RtkStatusResponse }
-  | { kind: 'failed'; status: RtkStatusResponse }
-  | { kind: 'pending'; status: RtkStatusResponse };
-
-const TERMINAL_FAILURE_STATES = new Set([
-  'AUTH_FAILED',
-  'CONFIG_REQUIRED',
-  'DNS_FAILED',
-  'NETWORK_TIMEOUT',
-  'NETWORK_ERROR',
-  'CASTER_UNREACHABLE',
-  'CASTER_REJECTED',
-  'STREAM_STALE',
-  'ERROR',
-  'UNAVAILABLE',
-]);
-
-export function isRtkStreamHealthy(status: RtkStatusResponse | null | undefined): boolean {
-  return Boolean(status?.healthy && status?.correction_fresh);
-}
-
-export function isRtkTerminalFailure(status: RtkStatusResponse): boolean {
-  return TERMINAL_FAILURE_STATES.has(
-    String(status.status || '').trim().toUpperCase(),
+export async function updateRtkProfile(
+  id: number,
+  dto: RtkProfileUpdateRequest,
+): Promise<RtkProfile> {
+  const response = await apiPatch<RtkProfileResponse>(
+    PX4_RTK.PROFILE(id),
+    buildRtkProfileUpdateBody(dto),
   );
+  return response.profile;
 }
 
-export async function getRtkConfiguration(): Promise<GetRtkConfigurationResponse> {
-  return apiGet<GetRtkConfigurationResponse>(PX4_RTK.CONFIG);
+export async function deleteRtkProfile(
+  id: number,
+): Promise<RtkProfileDeleteResponse> {
+  return apiDelete<RtkProfileDeleteResponse>(PX4_RTK.PROFILE(id));
 }
 
-export async function updateRtkConfiguration(
-  request: UpdateRtkConfigurationRequest,
-): Promise<UpdateRtkConfigurationResponse> {
-  return apiPut<UpdateRtkConfigurationResponse>(PX4_RTK.CONFIG, request);
+export async function activateRtkProfile(
+  id: number,
+): Promise<RtkActivateResponse> {
+  return apiPost<RtkActivateResponse>(PX4_RTK.ACTIVATE(id));
 }
 
-export async function reconnectRtk(): Promise<ReconnectRtkResponse> {
-  return apiPost<ReconnectRtkResponse>(PX4_RTK.RECONNECT);
+export async function clearActiveRtkProfile(): Promise<RtkActivateResponse> {
+  return apiDelete<RtkActivateResponse>(PX4_RTK.ACTIVE_PROFILE);
 }
 
 export async function getRtkStatus(): Promise<RtkStatusResponse> {
-  const raw = await apiGet<BackendRtkStatusResponse>(PX4_RTK.STATUS);
-  const state = String(raw.status ?? 'UNAVAILABLE').trim().toUpperCase();
-  const streamHealthy = Boolean(raw.healthy && raw.correction_fresh);
-
-  return {
-    ...raw,
-    status: state,
-    mode: 'NTRIP',
-    running: streamHealthy,
-    active_source: 'ntrip',
-    desired_source: 'ntrip',
-    lifecycle_state: state,
-    source_state: state,
-    stream_healthy: streamHealthy,
-    gps_fix_type: raw.fix_type,
-    last_valid_rtcm_age_s: raw.correction_age_sec,
-    last_frame_age_s: raw.correction_age_sec,
-    last_error:
-      raw.last_error ??
-      (TERMINAL_FAILURE_STATES.has(state) ? state : null),
-    last_process_error: null,
-    active: streamHealthy,
-    connected: streamHealthy,
-    source: 'ntrip',
-    bytes_received: raw.total_bytes ?? 0,
-    serial_open: false,
-  };
+  return apiGet<RtkStatusResponse>(PX4_RTK.STATUS);
 }
 
-export async function waitForRtkOutcome(
-  timeoutMs = 20_000,
-  pollIntervalMs = 750,
-): Promise<RtkConnectionOutcome> {
-  const deadline = Date.now() + timeoutMs;
-  let latest = await getRtkStatus();
-
-  while (Date.now() < deadline) {
-    if (isRtkStreamHealthy(latest)) {
-      return { kind: 'healthy', status: latest };
-    }
-
-    if (isRtkTerminalFailure(latest)) {
-      return { kind: 'failed', status: latest };
-    }
-
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, pollIntervalMs);
-    });
-    latest = await getRtkStatus();
-  }
-
-  return { kind: 'pending', status: latest };
+export async function startRtk(): Promise<RtkIntentResponse> {
+  return apiPost<RtkIntentResponse>(PX4_RTK.START);
 }
 
-export async function applyNtripConfiguration(
-  request: UpdateRtkConfigurationRequest,
-): Promise<{
-  update: UpdateRtkConfigurationResponse;
-  outcome: RtkConnectionOutcome;
-}> {
-  const update = await updateRtkConfiguration(request);
-  const outcome = await waitForRtkOutcome();
-  return { update, outcome };
-}
-
-export async function startNtripStream(
-  request: NtripStartRequest,
-): Promise<RtkStatusResponse> {
-  const username = request.username ?? request.user ?? '';
-  const password = request.password ?? request.pass ?? '';
-
-  const { outcome } = await applyNtripConfiguration({
-    host: request.host.trim(),
-    port: request.port,
-    mountpoint: request.mountpoint.trim().replace(/^\/+/, ''),
-    username: username.trim(),
-    ...(password.trim() ? { password } : {}),
-  });
-
-  return outcome.status;
-}
-
-export async function stopAllRtk(): Promise<RtkStatusResponse> {
-  throw new Error(
-    'RTK stop is not supported. The persistent bridge reconnects automatically.',
-  );
-}
-
-export async function stopNtripStream(): Promise<RtkStatusResponse> {
-  return stopAllRtk();
-}
-
-export async function startLoraStream(
-  _request?: LoraStartRequest,
-): Promise<RtkStatusResponse> {
-  throw new Error('LoRa RTK is not supported by the current backend.');
-}
-
-export async function stopLoraStream(): Promise<RtkStatusResponse> {
-  throw new Error('LoRa RTK is not supported by the current backend.');
+export async function stopRtk(): Promise<RtkIntentResponse> {
+  return apiPost<RtkIntentResponse>(PX4_RTK.STOP);
 }
 
 export default {
-  getRtkConfiguration,
-  updateRtkConfiguration,
-  reconnectRtk,
+  listRtkProfiles,
+  getRtkProfile,
+  createRtkProfile,
+  updateRtkProfile,
+  deleteRtkProfile,
+  activateRtkProfile,
+  clearActiveRtkProfile,
   getRtkStatus,
-  waitForRtkOutcome,
-  applyNtripConfiguration,
-  startNtripStream,
-  stopAllRtk,
-  stopNtripStream,
-  startLoraStream,
-  stopLoraStream,
+  startRtk,
+  stopRtk,
+  buildRtkProfileUpdateBody,
+  parseRtkApiError,
+  formatRtkApiError,
 };

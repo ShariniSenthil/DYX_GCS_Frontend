@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Switch,
   Modal,
-  TextInput,
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -16,17 +15,9 @@ import { useRover } from "../context/RoverContext";
 import { FailsafeModeSelector } from "../components/pathplan/FailsafeModeSelector";
 import { ServoConfigModal } from "../components/settings/ServoConfigModal";
 import { ParamBrowserModal } from "../components/settings/ParamBrowserModal";
-import { NTRIPProfile } from "../types/ntrip";
-import { NTRIPProfileList } from "../components/missionreport/NTRIPProfileList";
-import { NTRIPProfileEditor } from "../components/missionreport/NTRIPProfileEditor";
-import {
-  getRtkStatus,
-  startLoraStream,
-  startNtripStream,
-  stopAllRtk,
-  stopLoraStream,
-  type RtkStatusResponse,
-} from "../services/rtkService";
+import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
+import { getRtkStatus, stopRtk } from "../services/rtkService";
+import { toRtkControlView } from "../adapters/rtkControlAdapter";
 import { useAuth } from "../hooks/useAuth";
 import { getSprayConfig, setSprayConfig } from "../services/sprayConfigService";
 
@@ -108,403 +99,64 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
   const [isLoadingLed, setIsLoadingLed] = useState(false);
   const [lastLedUpdate, setLastLedUpdate] = useState<string>("");
 
-  // RTK Injection State
+  // RTK Injection State — backend-owned profiles; no local runtime authority.
   const [showRTKModal, setShowRTKModal] = useState(false);
-  const [modalScreen, setModalScreen] = useState<"list" | "editor">("list");
-  const [selectedProfile, setSelectedProfile] = useState<NTRIPProfile | null>(
-    null,
-  );
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
-  const [isRTKStreamRunning, setIsRTKStreamRunning] = useState(false);
-  const [rtkTotalBytes, setRtkTotalBytes] = useState(0);
-  const [isRTKSubmitting, setIsRTKSubmitting] = useState(false);
-  const [rtkFeedback, setRtkFeedback] = useState<string | null>(null);
-  const [rtkError, setRtkError] = useState<string | null>(null);
-  const [rtkHealthy, setRtkHealthy] = useState(false);
-  const [rtkActiveSource, setRtkActiveSource] = useState<string | null>(null);
+  const [rtkHeadline, setRtkHeadline] = useState("Off");
   const [rtkStatusMessage, setRtkStatusMessage] = useState("Idle");
-  const rtkMonitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // LoRa RTK State
+  const [isRTKSubmitting, setIsRTKSubmitting] = useState(false);
+  const [canStopRtk, setCanStopRtk] = useState(false);
 
   // MAVLink Param Browser State
   const [showParamBrowser, setShowParamBrowser] = useState(false);
-  const [rtkSource, setRtkSource] = useState<"ntrip" | "lora">("ntrip");
-  const [loraRunning, setLoraRunning] = useState(false);
-  const [loraConnected, setLoraConnected] = useState(false);
-  const [loraSerialPort, setLoraSerialPort] = useState("/dev/ttyUSB0");
-  const [loraBaudrate, setLoraBaudrate] = useState("115200");
-  const [loraFeedback, setLoraFeedback] = useState<string | null>(null);
-  const [loraError, setLoraError] = useState<string | null>(null);
 
   // Toast/Success Message State
   const [successMessage, setSuccessMessage] = useState<string>("");
 
-  // RTK Monitor Functions
-  const stopRTKMonitor = useCallback(() => {
-    if (rtkMonitorRef.current) {
-      clearInterval(rtkMonitorRef.current);
-      rtkMonitorRef.current = null;
-    }
-  }, []);
-
-  const applyRtkStatus = useCallback((status: RtkStatusResponse) => {
-    const source = (
-      status.active_source ??
-      status.source ??
-      status.mode ??
-      ""
-    ).toLowerCase();
-    const running = Boolean(status.running ?? status.active);
-    const healthy = Boolean(
-      status.stream_healthy ?? status.healthy ?? status.connected,
-    );
-    const bytesReceived = status.bytes_received ?? 0;
-    const sourceIsLora =
-      running && (source.includes("lora") || Boolean(status.serial_open));
-    const sourceIsNtrip = running && !sourceIsLora;
-    const sourceLabel =
-      status.active_source ?? status.source ?? status.mode ?? null;
-
-    setRtkTotalBytes(bytesReceived);
-    setRtkHealthy(healthy);
-    setRtkActiveSource(sourceLabel);
-    setIsRTKStreamRunning(sourceIsNtrip);
-    setLoraRunning(sourceIsLora);
-    setLoraConnected(sourceIsLora && (Boolean(status.serial_open) || healthy));
-
-    if (!running) {
-      setRtkStatusMessage("Idle");
-      return false;
-    }
-
-    const age = status.last_valid_rtcm_age_s ?? status.last_frame_age_s;
-    const ageLabel =
-      typeof age === "number" ? ` • RTCM age ${age.toFixed(1)}s` : "";
-    setRtkStatusMessage(`${healthy ? "Healthy" : "Running"}${ageLabel}`);
-    return true;
-  }, []);
-
-  const startRTKMonitor = useCallback(() => {
-    if (rtkMonitorRef.current) return;
-    rtkMonitorRef.current = setInterval(async () => {
-      try {
-        const rtkStatus = await getRtkStatus();
-        const running = applyRtkStatus(rtkStatus);
-        if (!running) {
-          stopRTKMonitor();
-        }
-      } catch (e) {
-        console.error("RTK monitor error:", e);
-      }
-    }, 250);
-  }, [applyRtkStatus, stopRTKMonitor]);
-
-  // Check RTK status on component mount and modal open
-  useEffect(() => {
-    if (visible) {
-      const checkRTKStatus = async () => {
-        try {
-          const rtkStatus = await getRtkStatus();
-          const running = applyRtkStatus(rtkStatus);
-          if (running) {
-            startRTKMonitor();
-          }
-        } catch (err) {
-          console.error("Failed to get initial RTK status:", err);
-        }
-      };
-      checkRTKStatus();
-    }
-    return () => {
-      stopRTKMonitor();
-    };
-  }, [visible, applyRtkStatus, startRTKMonitor, stopRTKMonitor]);
-
-  // RTK Button Handlers
-  const handleOpenRTKModal = () => {
-    setModalScreen("list");
-    setSelectedProfile(null);
-    setRtkFeedback(null);
-    setRtkError(null);
-    setLoraFeedback(null);
-    setLoraError(null);
-    setShowRTKModal(true);
-  };
-
-  const handleSelectRTKProfile = async (profile: NTRIPProfile) => {
-    setIsRTKSubmitting(true);
-    setRtkFeedback(null);
-    setRtkError(null);
-
+  const refreshSettingsRtkStatus = useCallback(async () => {
     try {
-      const host = profile.casterAddress.trim();
-      const port = Number.parseInt(profile.port || "2101", 10);
-      const mountpoint = profile.mountpoint.trim();
-      const user = profile.username.trim();
-      const pass = profile.password.trim();
-
-      if (
-        !host ||
-        !mountpoint ||
-        !user ||
-        !pass ||
-        !Number.isFinite(port) ||
-        port < 1 ||
-        port > 65535
-      ) {
-        const message =
-          "NTRIP profile requires host, valid port, mountpoint, username, and password.";
-        setRtkError(message);
-        Alert.alert("Profile Incomplete", message);
-        return;
-      }
-
-      // Stop LoRa first if it is active; the backend has one RTK injection source at a time.
-      if (loraRunning) {
-        await stopLoraStream().catch(() => undefined);
-        setLoraRunning(false);
-        setLoraConnected(false);
-      }
-
-      console.log("[RTK] Starting NTRIP stream", {
-        host,
-        port,
-        mountpoint,
-        user,
-        pass: "<redacted>",
+      const rtkStatus = await getRtkStatus();
+      const view = toRtkControlView(rtkStatus, {
+        connected: connectionState === "connected",
       });
-
-      const response = await startNtripStream({
-        host,
-        port,
-        mountpoint,
-        user,
-        pass,
-      });
-      console.log("[RTK] NTRIP start response", {
-        mode: response.mode,
-        running: response.running,
-        healthy: response.healthy,
-        active_source: response.active_source,
-        desired_source: response.desired_source,
-        lifecycle_state: response.lifecycle_state,
-        last_error: response.last_error,
-        last_process_error: response.last_process_error,
-      });
-
-      if (applyRtkStatus(response)) {
-        setRtkFeedback("RTK stream started successfully.");
-        setIsRTKStreamRunning(true);
-        setActiveProfileId(profile.id);
-        startRTKMonitor();
-
-        setTimeout(async () => {
-          try {
-            const status = await getRtkStatus();
-            console.log("[RTK] NTRIP verify status", {
-              mode: status.mode,
-              running: status.running,
-              healthy: status.healthy,
-              active_source: status.active_source,
-              desired_source: status.desired_source,
-              lifecycle_state: status.lifecycle_state,
-              last_error: status.last_error,
-              last_process_error: status.last_process_error,
-            });
-            const running = applyRtkStatus(status);
-            if (running) {
-              Alert.alert("Success", `Connected to ${profile.name}`);
-            } else {
-              const message =
-                status.last_error ||
-                status.last_process_error ||
-                "Stream started but connection failed. Check credentials and network.";
-              setRtkError(message);
-              setIsRTKStreamRunning(false);
-              setActiveProfileId(null);
-              stopRTKMonitor();
-              Alert.alert("Connection Failed", message);
-            }
-          } catch (err) {
-            console.warn("[RTK] Failed to verify connection status:", err);
-          }
-        }, 1000);
-      } else {
-        const message =
-          response.last_error ||
-          response.last_process_error ||
-          `NTRIP did not start (state: ${response.lifecycle_state ?? response.source_state ?? "unknown"}).`;
-        console.warn("[RTK] NTRIP start returned non-running status", response);
-        setRtkError(message);
-        Alert.alert("Connection Failed", message);
-      }
-    } catch (err) {
-      console.error("[RTK] NTRIP start failed", err);
-      const errorMsg = getRtkFailureMessage(err, "Failed to start RTK stream.");
-      setRtkError(errorMsg);
-      Alert.alert("Error", errorMsg);
-    } finally {
-      setIsRTKSubmitting(false);
+      setRtkHeadline(view.headlineLabel);
+      setCanStopRtk(view.canStop);
+      setRtkStatusMessage(
+        `${view.desiredState ?? "—"} · ${view.managerState ?? "—"} · ${
+          view.correctionState ?? "no stream"
+        }`,
+      );
+    } catch {
+      setRtkHeadline("Rover Offline");
+      setCanStopRtk(false);
+      setRtkStatusMessage("Unable to read backend RTK status");
     }
+  }, [connectionState]);
+
+  useEffect(() => {
+    if (!visible || showRTKModal) {
+      return undefined;
+    }
+    void refreshSettingsRtkStatus();
+    return undefined;
+  }, [visible, showRTKModal, refreshSettingsRtkStatus]);
+
+  const handleOpenRTKModal = () => {
+    setShowRTKModal(true);
   };
 
   const handleStopRTKStream = async () => {
     setIsRTKSubmitting(true);
-    setRtkFeedback(null);
-    setRtkError(null);
-
     try {
-      const response = await stopAllRtk();
-      console.log("[RTK] Stop all response", {
-        mode: response.mode,
-        running: response.running,
-        lifecycle_state: response.lifecycle_state,
-        last_error: response.last_error,
-      });
-      applyRtkStatus(response);
-      setRtkFeedback("RTK stream stopped successfully.");
-      setIsRTKStreamRunning(false);
-      setLoraRunning(false);
-      setLoraConnected(false);
-      setRtkHealthy(false);
-      setRtkActiveSource(null);
-      setRtkStatusMessage("Idle");
-      setActiveProfileId(null);
-      stopRTKMonitor();
+      await stopRtk();
+      await refreshSettingsRtkStatus();
     } catch (err) {
-      console.error("[RTK] Stop all failed", err);
-      setRtkError(getRtkFailureMessage(err, "Failed to stop RTK stream."));
+      Alert.alert(
+        "RTK Stop Failed",
+        getRtkFailureMessage(err, "Failed to stop RTK."),
+      );
     } finally {
       setIsRTKSubmitting(false);
     }
-  };
-
-  const handleAddNewRTKProfile = () => {
-    setSelectedProfile(null);
-    setModalScreen("editor");
-  };
-
-  const handleEditRTKProfile = (profile: NTRIPProfile) => {
-    setSelectedProfile(profile);
-    setModalScreen("editor");
-  };
-
-  const handleRTKProfileSaved = () => {
-    setModalScreen("list");
-    setSelectedProfile(null);
-  };
-
-  const handleCancelRTKEdit = () => {
-    setModalScreen("list");
-    setSelectedProfile(null);
-  };
-
-  // LoRa Handlers
-  const handleStartLora = async () => {
-    setIsRTKSubmitting(true);
-    setLoraFeedback(null);
-    setLoraError(null);
-
-    try {
-      const serialPort = loraSerialPort.trim();
-      const baudrate = Number.parseInt(loraBaudrate || "115200", 10);
-
-      if (!serialPort || !Number.isFinite(baudrate) || baudrate <= 0) {
-        const message = "LoRa requires a serial port and a valid baud rate.";
-        setLoraError(message);
-        Alert.alert("LoRa Config Incomplete", message);
-        return;
-      }
-
-      // Stop NTRIP first if running
-      if (isRTKStreamRunning) {
-        await stopAllRtk();
-        setIsRTKStreamRunning(false);
-        setActiveProfileId(null);
-        stopRTKMonitor();
-      }
-
-      console.log("[RTK] Starting LoRa stream", {
-        serial_port: serialPort,
-        baudrate,
-      });
-      const response = await startLoraStream({
-        serial_port: serialPort,
-        baudrate,
-      });
-      console.log("[RTK] LoRa start response", {
-        mode: response.mode,
-        running: response.running,
-        healthy: response.healthy,
-        active_source: response.active_source,
-        desired_source: response.desired_source,
-        lifecycle_state: response.lifecycle_state,
-        last_error: response.last_error,
-      });
-      if (applyRtkStatus(response)) {
-        setLoraFeedback("LoRa stream started successfully.");
-        setLoraRunning(true);
-        startRTKMonitor();
-      } else {
-        setLoraError(
-          response.last_error ||
-            `LoRa did not start (state: ${response.lifecycle_state ?? response.source_state ?? "unknown"}).`,
-        );
-      }
-    } catch (err) {
-      console.error("[RTK] LoRa start failed", err);
-      setLoraError(getRtkFailureMessage(err, "Failed to start LoRa stream."));
-    } finally {
-      setIsRTKSubmitting(false);
-    }
-  };
-
-  const handleStopLora = async () => {
-    setIsRTKSubmitting(true);
-    setLoraFeedback(null);
-    setLoraError(null);
-
-    try {
-      const response = await stopLoraStream();
-      console.log("[RTK] LoRa stop response", {
-        mode: response.mode,
-        running: response.running,
-        lifecycle_state: response.lifecycle_state,
-        last_error: response.last_error,
-      });
-      applyRtkStatus(response);
-      setLoraFeedback("LoRa stream stopped successfully.");
-      setLoraRunning(false);
-      setLoraConnected(false);
-      setRtkHealthy(false);
-      setRtkActiveSource(null);
-      setRtkStatusMessage("Idle");
-      stopRTKMonitor();
-    } catch (err) {
-      console.error("[RTK] LoRa stop failed", err);
-      setLoraError(getRtkFailureMessage(err, "Failed to stop LoRa stream."));
-    } finally {
-      setIsRTKSubmitting(false);
-    }
-  };
-
-  const handleSwitchRTKSource = async (source: "ntrip" | "lora") => {
-    if (source === rtkSource) return;
-    // Stop the other source if active
-    if (source === "ntrip" && loraRunning) {
-      await stopLoraStream().catch(() => undefined);
-      setLoraRunning(false);
-    } else if (source === "lora" && isRTKStreamRunning) {
-      await stopAllRtk().catch(() => undefined);
-      setIsRTKStreamRunning(false);
-      stopRTKMonitor();
-    }
-    setRtkSource(source);
-    setRtkFeedback(null);
-    setRtkError(null);
-    setLoraFeedback(null);
-    setLoraError(null);
   };
 
   // GPS failsafe mode is now persisted by backend, no need for AsyncStorage
@@ -1260,31 +912,19 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
 
               <View style={styles.settingRow}>
                 <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>
-                    {loraRunning ? "LoRa Connection" : "NTRIP Connection"}
-                  </Text>
+                  <Text style={styles.settingLabel}>{rtkHeadline}</Text>
                   <Text style={styles.settingDescription}>
-                    {isRTKStreamRunning
-                      ? `NTRIP Connected • ${rtkTotalBytes} bytes received • ${rtkStatusMessage}`
-                      : loraRunning
-                        ? `LoRa Connected • ${rtkTotalBytes} bytes received • ${rtkStatusMessage}`
-                        : "Not connected - Configure NTRIP or LoRa"}
+                    {rtkStatusMessage}
                   </Text>
                 </View>
                 <View
                   style={[
                     styles.statusBadge,
-                    isRTKStreamRunning || loraRunning
-                      ? styles.statusBadgeOn
-                      : styles.statusBadgeOff,
+                    canStopRtk ? styles.statusBadgeOn : styles.statusBadgeOff,
                   ]}
                 >
                   <Text style={styles.statusBadgeText}>
-                    {isRTKStreamRunning || loraRunning
-                      ? rtkHealthy
-                        ? "HEALTHY"
-                        : "ACTIVE"
-                      : "INACTIVE"}
+                    {rtkHeadline.toUpperCase()}
                   </Text>
                 </View>
               </View>
@@ -1305,26 +945,22 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
                 </Text>
                 <View style={styles.configureButtonContent}>
                   <Text style={styles.configureButtonTitle}>
-                    {isRTKStreamRunning
-                      ? "Manage RTK Connection"
-                      : "Configure RTK Injection"}
+                    Configure RTK Injection
                   </Text>
                   <Text style={styles.configureButtonDescription}>
-                    {isRTKSubmitting
-                      ? "Processing..."
-                      : "Set up NTRIP caster or LoRa receiver"}
+                    Backend RTK profiles, activate, start, and stop
                   </Text>
                 </View>
                 <Text style={styles.configureButtonArrow}>›</Text>
               </TouchableOpacity>
 
-              {(isRTKStreamRunning || loraRunning) && (
+              {canStopRtk && (
                 <TouchableOpacity
                   style={[
                     styles.configureButton,
                     { backgroundColor: "#dc2626", marginTop: 12 },
                   ]}
-                  onPress={loraRunning ? handleStopLora : handleStopRTKStream}
+                  onPress={handleStopRTKStream}
                   disabled={isRTKSubmitting}
                 >
                   <Text style={styles.configureButtonIcon}>⏹️</Text>
@@ -1332,7 +968,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
                     <Text
                       style={[styles.configureButtonTitle, { color: "#fff" }]}
                     >
-                      Stop {loraRunning ? "LoRa" : "NTRIP"} Stream
+                      Stop RTK
                     </Text>
                     <Text
                       style={[
@@ -1340,8 +976,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
                         { color: "#fca5a5" },
                       ]}
                     >
-                      Disconnect from{" "}
-                      {loraRunning ? "LoRa receiver" : "NTRIP caster"}
+                      Persist STOPPED on the rover
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1715,245 +1350,15 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
           onClose={() => setShowParamBrowser(false)}
         />
 
-        {/* RTK Profile Manager Modal */}
-        <Modal
+        <RTKInjectionScreen
           visible={showRTKModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowRTKModal(false)}
-        >
-          <View style={rtkModalStyles.modalOverlay}>
-            <View style={rtkModalStyles.modalContent}>
-              <View style={rtkModalStyles.modalHeader}>
-                <Text style={rtkModalStyles.modalTitle}>RTK Injection</Text>
-                <TouchableOpacity onPress={() => setShowRTKModal(false)}>
-                  <Text style={rtkModalStyles.modalCloseButton}>✕</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Source Toggle: NTRIP | LoRa */}
-              <View style={rtkModalStyles.sourceToggle}>
-                <TouchableOpacity
-                  style={[
-                    rtkModalStyles.toggleButton,
-                    rtkSource === "ntrip" && rtkModalStyles.toggleActive,
-                  ]}
-                  onPress={() => handleSwitchRTKSource("ntrip")}
-                >
-                  <Text
-                    style={[
-                      rtkModalStyles.toggleText,
-                      rtkSource === "ntrip" && rtkModalStyles.toggleTextActive,
-                    ]}
-                  >
-                    📡 NTRIP
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    rtkModalStyles.toggleButton,
-                    rtkSource === "lora" && rtkModalStyles.toggleActive,
-                  ]}
-                  onPress={() => handleSwitchRTKSource("lora")}
-                >
-                  <Text
-                    style={[
-                      rtkModalStyles.toggleText,
-                      rtkSource === "lora" && rtkModalStyles.toggleTextActive,
-                    ]}
-                  >
-                    📻 LoRa
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* NTRIP Tab */}
-              {rtkSource === "ntrip" && (
-                <View style={rtkModalStyles.modalBody}>
-                  {modalScreen === "list" ? (
-                    <NTRIPProfileList
-                      onSelectProfile={handleSelectRTKProfile}
-                      onAddNew={handleAddNewRTKProfile}
-                      onEditProfile={handleEditRTKProfile}
-                      isConnecting={isRTKSubmitting}
-                      activeProfileId={activeProfileId}
-                      isStreamRunning={isRTKStreamRunning}
-                    />
-                  ) : (
-                    <NTRIPProfileEditor
-                      profile={selectedProfile}
-                      onSave={handleRTKProfileSaved}
-                      onCancel={handleCancelRTKEdit}
-                    />
-                  )}
-
-                  {rtkFeedback && (
-                    <View style={rtkModalStyles.feedbackBox}>
-                      <Text style={rtkModalStyles.feedbackText}>
-                        {rtkFeedback}
-                      </Text>
-                    </View>
-                  )}
-
-                  {rtkError && (
-                    <View style={rtkModalStyles.errorBox}>
-                      <Text style={rtkModalStyles.errorText}>{rtkError}</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {/* LoRa Tab */}
-              {rtkSource === "lora" && (
-                <View style={rtkModalStyles.modalBody}>
-                  <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-                    {/* LoRa Status Header */}
-                    <View style={rtkModalStyles.loraStatusHeader}>
-                      <Text style={rtkModalStyles.loraSectionTitle}>
-                        LoRa USB Receiver
-                      </Text>
-                      <View
-                        style={[
-                          rtkModalStyles.loraPill,
-                          loraRunning
-                            ? rtkModalStyles.loraPillSuccess
-                            : rtkModalStyles.loraPillDanger,
-                        ]}
-                      >
-                        <Text style={rtkModalStyles.loraPillText}>
-                          {loraRunning ? "Streaming" : "Stopped"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={rtkModalStyles.manualEntrySection}>
-                      <Text style={rtkModalStyles.manualEntryTitle}>
-                        Receiver Port
-                      </Text>
-                      <TextInput
-                        style={rtkModalStyles.input}
-                        placeholder="/dev/ttyUSB0"
-                        placeholderTextColor="#94a3b8"
-                        value={loraSerialPort}
-                        onChangeText={setLoraSerialPort}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                      <TextInput
-                        style={rtkModalStyles.input}
-                        placeholder="115200"
-                        placeholderTextColor="#94a3b8"
-                        value={loraBaudrate}
-                        onChangeText={setLoraBaudrate}
-                        keyboardType="numeric"
-                      />
-                    </View>
-
-                    {/* LoRa Stats Grid */}
-                    <View style={rtkModalStyles.loraStatsGrid}>
-                      <View style={rtkModalStyles.loraStatBox}>
-                        <Text style={rtkModalStyles.loraStatLabel}>
-                          Connection
-                        </Text>
-                        <Text
-                          style={[
-                            rtkModalStyles.loraStatValue,
-                            { color: loraConnected ? "#10b981" : "#ef4444" },
-                          ]}
-                        >
-                          {loraConnected ? "Connected" : "Not Connected"}
-                        </Text>
-                      </View>
-                      <View style={rtkModalStyles.loraStatBox}>
-                        <Text style={rtkModalStyles.loraStatLabel}>Source</Text>
-                        <Text style={rtkModalStyles.loraStatValue}>
-                          {rtkActiveSource ?? "None"}
-                        </Text>
-                      </View>
-                      <View style={rtkModalStyles.loraStatBox}>
-                        <Text style={rtkModalStyles.loraStatLabel}>Bytes</Text>
-                        <Text style={rtkModalStyles.loraStatValue}>
-                          {(rtkTotalBytes / 1024).toFixed(2)} KB
-                        </Text>
-                      </View>
-                      <View style={rtkModalStyles.loraStatBox}>
-                        <Text style={rtkModalStyles.loraStatLabel}>Health</Text>
-                        <Text
-                          style={[
-                            rtkModalStyles.loraStatValue,
-                            { color: rtkHealthy ? "#10b981" : "#f59e0b" },
-                          ]}
-                        >
-                          {rtkHealthy
-                            ? "Healthy"
-                            : loraRunning
-                              ? "Running"
-                              : "Idle"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* LoRa Status Message */}
-                    <View style={rtkModalStyles.loraMessageBox}>
-                      <Text style={rtkModalStyles.loraMessageLabel}>
-                        Status
-                      </Text>
-                      <Text style={rtkModalStyles.loraMessageValue}>
-                        {rtkStatusMessage}
-                      </Text>
-                    </View>
-
-                    {/* LoRa Action Buttons */}
-                    <View style={rtkModalStyles.loraButtonRow}>
-                      <TouchableOpacity
-                        style={[
-                          rtkModalStyles.loraButton,
-                          rtkModalStyles.loraButtonStart,
-                          loraRunning && rtkModalStyles.loraButtonDisabled,
-                        ]}
-                        onPress={handleStartLora}
-                        disabled={loraRunning || isRTKSubmitting}
-                      >
-                        <Text style={rtkModalStyles.loraButtonText}>
-                          ▶ Start Stream
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          rtkModalStyles.loraButton,
-                          rtkModalStyles.loraButtonStop,
-                          !loraRunning && rtkModalStyles.loraButtonDisabled,
-                        ]}
-                        onPress={handleStopLora}
-                        disabled={!loraRunning || isRTKSubmitting}
-                      >
-                        <Text style={rtkModalStyles.loraButtonText}>
-                          ⏹ Stop Stream
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {loraFeedback && (
-                      <View style={rtkModalStyles.feedbackBox}>
-                        <Text style={rtkModalStyles.feedbackText}>
-                          {loraFeedback}
-                        </Text>
-                      </View>
-                    )}
-
-                    {loraError && (
-                      <View style={rtkModalStyles.errorBox}>
-                        <Text style={rtkModalStyles.errorText}>
-                          {loraError}
-                        </Text>
-                      </View>
-                    )}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
-          </View>
-        </Modal>
+          onClose={() => {
+            setShowRTKModal(false);
+            void refreshSettingsRtkStatus();
+          }}
+          services={services}
+          isConnected={connectionState === "connected"}
+        />
       </View>
     </Modal>
   );
@@ -2405,243 +1810,6 @@ const styles = StyleSheet.create({
   configureButtonArrow: {
     fontSize: 32,
     color: colors.text,
-    fontWeight: "bold",
-  },
-});
-
-// RTK Modal Styles
-const rtkModalStyles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-    width: "90%",
-    height: "85%",
-    maxHeight: "85%",
-    borderWidth: 2,
-    borderColor: "#3b82f6",
-  },
-  modalBody: {
-    flex: 1,
-    minHeight: 0,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#3b82f6",
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  modalCloseButton: {
-    fontSize: 24,
-    color: "#94a3b8",
-    padding: 4,
-  },
-  feedbackBox: {
-    backgroundColor: "rgba(16, 185, 129, 0.2)",
-    borderWidth: 1,
-    borderColor: "#10b981",
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
-  },
-  feedbackText: {
-    color: "#10b981",
-    fontSize: 14,
-  },
-  errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.2)",
-    borderWidth: 1,
-    borderColor: "#ef4444",
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
-  },
-  errorText: {
-    color: "#ef4444",
-    fontSize: 14,
-  },
-  // Source Toggle
-  sourceToggle: {
-    flexDirection: "row",
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#3b82f6",
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: "center",
-    backgroundColor: "#1a1a2e",
-  },
-  toggleActive: {
-    backgroundColor: "#3b82f6",
-  },
-  toggleText: {
-    color: "#94a3b8",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  toggleTextActive: {
-    color: "#ffffff",
-  },
-  // LoRa Tab Styles
-  loraStatusHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  loraSectionTitle: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  loraPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-  },
-  loraPillSuccess: {
-    backgroundColor: "#10b981",
-  },
-  loraPillDanger: {
-    backgroundColor: "#ef4444",
-  },
-  loraPillText: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  loraStatsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  loraStatBox: {
-    flex: 1,
-    minWidth: "45%",
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#374151",
-  },
-  loraStatLabel: {
-    color: "#94a3b8",
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  loraStatValue: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  loraMessageBox: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#374151",
-    marginBottom: 16,
-  },
-  loraMessageLabel: {
-    color: "#94a3b8",
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  loraMessageValue: {
-    color: "#ffffff",
-    fontSize: 14,
-  },
-  loraButtonRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
-  },
-  loraButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  loraButtonStart: {
-    backgroundColor: "#3b82f6",
-  },
-  loraButtonStop: {
-    backgroundColor: "#ef4444",
-  },
-  loraButtonDisabled: {
-    opacity: 0.4,
-  },
-  loraButtonText: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  manualEntrySection: {
-    marginTop: 20,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#374151",
-  },
-  manualEntryTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: "#1a1a1a",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    color: "#fff",
-    borderWidth: 1,
-    borderColor: "#374151",
-  },
-  buttonRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 8,
-  },
-  button: {
-    flex: 1,
-    backgroundColor: "#3b82f6",
-    borderRadius: 8,
-    padding: 14,
-    alignItems: "center",
-  },
-  buttonDisabled: {
-    backgroundColor: "#4b5563",
-    opacity: 0.6,
-  },
-  stopButton: {
-    flex: 1,
-    backgroundColor: "#ef4444",
-    borderRadius: 8,
-    padding: 14,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
     fontWeight: "bold",
   },
 });

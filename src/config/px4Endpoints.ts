@@ -152,8 +152,12 @@ export const PX4_PATH = {
 
 export const PX4_RTK = {
   STATUS: "/api/rtk/status",
-  CONFIG: "/api/rtk/config",
-  RECONNECT: "/api/rtk/reconnect",
+  START: "/api/rtk/start",
+  STOP: "/api/rtk/stop",
+  PROFILES: "/api/rtk/profiles",
+  PROFILE: (id: number) => `/api/rtk/profiles/${id}`,
+  ACTIVATE: (id: number) => `/api/rtk/profiles/${id}/activate`,
+  ACTIVE_PROFILE: "/api/rtk/active-profile",
 } as const;
 
 // ── Legacy spray compatibility ────────────────────────────────────────────────
