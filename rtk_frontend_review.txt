@@ -1,0 +1,6013 @@
+
+==============================================================================================================
+FRONTEND STATUS
+==============================================================================================================
+ M src/adapters/__tests__/rtkUiState.test.ts
+ M src/adapters/px4RtkStatusAdapter.ts
+ M src/adapters/px4RtkUiStateAdapter.ts
+ M src/components/missionreport/RTKInjectionScreen.tsx
+ M src/config/px4Endpoints.ts
+ M src/hooks/useRoverTelemetry.ts
+ M src/screens/MissionReportScreen.tsx
+ M src/screens/SettingsScreen.tsx
+ M src/services/apiClient.ts
+ M src/services/rtkService.ts
+ M src/types/rtk.ts
+?? rtk_frontend_review.txt
+?? src/adapters/__tests__/rtkControlAdapter.test.ts
+?? src/adapters/__tests__/rtkProfileFormAdapter.test.ts
+?? src/adapters/rtkControlAdapter.ts
+?? src/adapters/rtkProfileFormAdapter.ts
+?? src/components/rtk/
+?? src/hooks/__tests__/useRtkControl.test.tsx
+?? src/hooks/useRtkControl.ts
+?? src/services/__tests__/rtkLocalMigration.test.ts
+?? src/services/__tests__/rtkService.test.ts
+?? src/services/rtkLocalMigration.ts
+
+
+==============================================================================================================
+FRONTEND HEAD
+==============================================================================================================
+49f1350 fix/waypoints remark state at at final point is nt fully resolved.
+
+
+==============================================================================================================
+TRACKED DIFF FROM BASELINE
+==============================================================================================================
+diff --git a/src/adapters/px4RtkStatusAdapter.ts b/src/adapters/px4RtkStatusAdapter.ts
+index c37a017..143395a 100644
+--- a/src/adapters/px4RtkStatusAdapter.ts
++++ b/src/adapters/px4RtkStatusAdapter.ts
+@@ -1,14 +1,21 @@
+ /**
+  * Maps GET /api/rtk/status to the telemetry fields used by the rover UI.
+- * The current backend provides NTRIP corrections only; LoRa is not part of
+- * this contract.
++ *
++ * Correction-stream health is independent from GNSS RTK FIXED.
++ * LoRa is not part of the production RTK API.
+  */
+ 
+-import type { TelemetryEnvelope } from '../types/telemetry';
+-import type { RtkStatusResponse } from '../services/rtkService';
++import type { TelemetryEnvelope } from "../types/telemetry";
++import type { RtkStatus, RtkStatusResponse } from "../types/rtk";
++import { unwrapRtkStatus } from "./rtkControlAdapter";
+ 
+-export function rtkStatusToEnvelope(status: RtkStatusResponse): TelemetryEnvelope {
+-  const correctionActive = Boolean(status.healthy && status.correction_fresh);
++export function rtkStatusToEnvelope(
++  status: RtkStatusResponse | RtkStatus | null | undefined,
++): TelemetryEnvelope {
++  const payload = unwrapRtkStatus(status);
++  const correctionHealthy = Boolean(payload?.correction_stream?.healthy);
++  const fixType = payload?.gnss_solution?.fix_type ?? 0;
++  const correctionAge = payload?.correction_stream?.correction_age_sec ?? 0;
+ 
+   const envelope: TelemetryEnvelope & {
+     rtk_stream_active?: boolean;
+@@ -16,16 +23,15 @@ export function rtkStatusToEnvelope(status: RtkStatusResponse): TelemetryEnvelop
+   } = {
+     timestamp: Date.now(),
+     network: {
+-      // Do not report the NTRIP internet stream as a LoRa connection.
+       lora_connected: false,
+     },
+     rtk: {
+-      fix_type: status.fix_type,
+-      baseline_age: status.correction_age_sec ?? 0,
+-      base_linked: correctionActive,
++      fix_type: fixType,
++      baseline_age: correctionAge,
++      base_linked: correctionHealthy,
+     },
+-    rtk_stream_active: correctionActive,
+-    rtk_source: 'ntrip',
++    rtk_stream_active: correctionHealthy,
++    rtk_source: "ntrip",
+   };
+ 
+   return envelope;
+diff --git a/src/adapters/px4RtkUiStateAdapter.ts b/src/adapters/px4RtkUiStateAdapter.ts
+index 7e7c63b..399f59f 100644
+--- a/src/adapters/px4RtkUiStateAdapter.ts
++++ b/src/adapters/px4RtkUiStateAdapter.ts
+@@ -1,75 +1,71 @@
+ /**
+- * px4RtkUiStateAdapter — Derive a discrete RTK UI state from GET /api/rtk/status.
++ * Compact RTK icon vocabulary derived from GET /api/rtk/status.
+  *
+- * The icon layer must not inspect raw backend objects; it consumes a normalized
+- * `RtkUiState`. This maps the rich RtkStatusResponse (running / healthy /
+- * stream_healthy / gps_fix_type / errors) into one of:
++ * Header icons keep a small discrete set. The shared RTK control screen uses
++ * `rtkControlAdapter` for the full nested correction/GNSS/manager mapping.
+  *
+- *   off        — RTK process not running
+- *   starting   — running, but corrections not yet established (no healthy stream)
+- *   streaming  — corrections flowing (stream healthy) but no RTK float/fixed fix yet
+- *   rtk_float  — GPS fix type 5 (RTK float)
+- *   rtk_fixed  — GPS fix type 6 (RTK fixed)
+- *   error      — running but unhealthy with an explicit error
++ * Healthy corrections are never collapsed into RTK Fixed.
+  */
+ 
+-import type { RtkStatusResponse } from '../services/rtkService';
++import type { RtkStatus, RtkStatusResponse } from "../types/rtk";
++import {
++  toRtkControlView,
++  type RtkHeadlineState,
++} from "./rtkControlAdapter";
+ 
+ export type RtkUiState =
+-  | 'off'
+-  | 'starting'
+-  | 'streaming'
+-  | 'rtk_float'
+-  | 'rtk_fixed'
+-  | 'error';
++  | "off"
++  | "starting"
++  | "streaming"
++  | "rtk_float"
++  | "rtk_fixed"
++  | "error";
+ 
+-/** Human-readable label for each RTK UI state. */
+ export const RTK_UI_STATE_LABEL: Record<RtkUiState, string> = {
+-  off: 'Off',
+-  starting: 'Starting',
+-  streaming: 'Streaming',
+-  rtk_float: 'RTK Float',
+-  rtk_fixed: 'RTK Fixed',
+-  error: 'Error',
++  off: "Off",
++  starting: "Starting",
++  streaming: "Streaming",
++  rtk_float: "RTK Float",
++  rtk_fixed: "RTK Fixed",
++  error: "Error",
+ };
+ 
+-/** Convenience accessor for a label, tolerant of undefined input. */
+-export function rtkUiStateLabel(state: RtkUiState | undefined | null): string {
+-  return state ? (RTK_UI_STATE_LABEL[state] ?? state) : RTK_UI_STATE_LABEL.off;
++export function rtkUiStateLabel(
++  state: RtkUiState | undefined | null,
++): string {
++  return state ? RTK_UI_STATE_LABEL[state] ?? state : RTK_UI_STATE_LABEL.off;
+ }
+ 
+-/** Resolve a numeric GPS fix type from the various alias fields the backend may send. */
+-function resolveFixType(status: RtkStatusResponse): number {
+-  if (typeof status.gps_fix_type === 'number') return status.gps_fix_type;
+-  if (typeof status.fix_type === 'number') return status.fix_type;
+-  return 0;
++function headlineToIconState(headline: RtkHeadlineState): RtkUiState {
++  switch (headline) {
++    case "rtk_fixed":
++      return "rtk_fixed";
++    case "rtk_float":
++      return "rtk_float";
++    case "corrections_active":
++      return "streaming";
++    case "start_requested":
++    case "waiting_for_mavros":
++    case "starting":
++    case "reconnecting":
++    case "stopping":
++      return "starting";
++    case "degraded":
++    case "mavros_lost":
++    case "terminal_error":
++    case "rover_offline":
++      return "error";
++    case "off":
++    default:
++      return "off";
++  }
+ }
+ 
+-/**
+- * Convert a raw RtkStatusResponse into a discrete UI state.
+- * Safe for missing/null fields.
+- */
+-export function toRtkUiState(status: RtkStatusResponse | null | undefined): RtkUiState {
+-  if (!status) return 'off';
+-
+-  const running = Boolean(status.running ?? status.active ?? status.connected);
+-  if (!running) return 'off';
+-
+-  const healthy = status.healthy ?? status.stream_healthy ?? true;
+-  const hasError = Boolean(status.last_error) || Boolean(status.last_process_error);
+-
+-  // Explicit failure while running takes priority — the stream is up but broken.
+-  if (!healthy && hasError) return 'error';
+-
+-  // Fix-type derived states (MAVLink GPS_FIX_TYPE: 5 = RTK float, 6 = RTK fixed).
+-  const fixType = resolveFixType(status);
+-  if (fixType >= 6) return 'rtk_fixed';
+-  if (fixType === 5) return 'rtk_float';
+-
+-  // Corrections are flowing but no float/fixed fix established yet.
+-  const streamHealthy = status.stream_healthy ?? status.healthy ?? false;
+-  if (streamHealthy) return 'streaming';
+-
+-  // Running, no healthy stream yet — warming up.
+-  return 'starting';
++export function toRtkUiState(
++  status: RtkStatusResponse | RtkStatus | null | undefined,
++): RtkUiState {
++  if (!status) {
++    return "off";
++  }
++  return headlineToIconState(toRtkControlView(status).headline);
+ }
+diff --git a/src/components/missionreport/RTKInjectionScreen.tsx b/src/components/missionreport/RTKInjectionScreen.tsx
+index b4c6b98..cec1cf3 100644
+--- a/src/components/missionreport/RTKInjectionScreen.tsx
++++ b/src/components/missionreport/RTKInjectionScreen.tsx
+@@ -2,710 +2,331 @@ import React, { useCallback, useEffect, useState } from "react";
+ import {
+   ActivityIndicator,
+   Alert,
+-  ScrollView,
++  Modal,
++  Pressable,
+   StyleSheet,
+   Text,
+-  TouchableOpacity,
+   View,
+ } from "react-native";
+ 
+-import { colors } from "../../theme/colors";
+-import type { RoverServices } from "../../hooks/useRoverTelemetry";
+-import { NTRIPProfileList } from "./NTRIPProfileList";
+-import { NTRIPProfileEditor } from "./NTRIPProfileEditor";
+-import type { NTRIPProfile } from "../../types/ntrip";
+-import { getAllProfiles } from "../../services/ntripProfileStorage";
++import { RtkProfileEditor } from "../rtk/RtkProfileEditor";
++import { RtkProfileList } from "../rtk/RtkProfileList";
++import { RtkStatusStrip } from "../rtk/RtkStatusStrip";
++import { useRtkControl } from "../../hooks/useRtkControl";
+ import {
+-  applyNtripConfiguration,
+-  getRtkConfiguration,
+-  getRtkStatus,
+-  reconnectRtk,
+-  type ActiveRtkConfiguration,
+-  type RtkStatusResponse,
+-} from "../../services/rtkService";
++  importSelectedLocalRtkProfiles,
++  listLocalRtkProfilesForMigration,
++} from "../../services/rtkLocalMigration";
++import type { NTRIPProfile } from "../../types/ntrip";
++import type { RoverServices } from "../../hooks/useRoverTelemetry";
++import { colors } from "../../theme/colors";
+ 
+ interface Props {
+   visible: boolean;
+   onClose: () => void;
+-  /** Retained temporarily so MissionReportScreen does not need a prop change. */
+-  services: RoverServices;
++  /** Retained so MissionReportScreen / Settings do not need a prop change. */
++  services?: RoverServices;
+   isConnected: boolean;
+ }
+ 
+-type ModalScreen = "list" | "editor";
+-
+-function profileMatchesConfiguration(
+-  profile: NTRIPProfile,
+-  configuration: ActiveRtkConfiguration,
+-): boolean {
+-  return (
+-    profile.casterAddress.trim().toLowerCase() ===
+-      configuration.host.trim().toLowerCase() &&
+-    Number.parseInt(profile.port || "2101", 10) === configuration.port &&
+-    profile.mountpoint.trim().replace(/^\/+/, "") ===
+-      configuration.mountpoint.trim().replace(/^\/+/, "") &&
+-    profile.username.trim() === configuration.username.trim()
+-  );
+-}
+-
+-function statusLabel(
+-  status: RtkStatusResponse | null,
+-  roverConnected: boolean,
+-): string {
+-  if (!roverConnected) return "Rover Offline";
+-  if (!status) return "Loading";
+-
+-  const state = String(status.status || "")
+-    .trim()
+-    .toUpperCase();
+-  const correctionsHealthy = Boolean(status.healthy && status.correction_fresh);
+-
+-  if (state === "AUTH_FAILED") return "Authentication Failed";
+-  if (state === "DNS_FAILED") return "DNS / Internet Unavailable";
+-  if (state === "NETWORK_TIMEOUT") return "Network Timeout";
+-  if (state === "NETWORK_ERROR") return "Network Error";
+-  if (state === "CASTER_UNREACHABLE") return "Caster Unreachable";
+-  if (state === "CASTER_REJECTED") return "Caster Rejected";
+-  if (state === "STREAM_STALE") return "RTCM Stream Stale";
+-  if (state === "CONFIG_REQUIRED") return "Configuration Required";
+-  if (state === "ERROR") return "RTK Error";
+-  if (state === "DISCONNECTED") return "Disconnected";
+-  if (state === "UNAVAILABLE") return "Unavailable";
+-  if (state === "CONNECTING") return "Connecting";
+-  if (state === "RELOADING") return "Reloading";
+-  if (state === "RECONNECT_WAIT") return "Reconnecting";
+-  if (state === "STARTING") return "Starting";
+-
+-  // RTK Fixed/Float is green only while fresh corrections are present.
+-  if (correctionsHealthy && (status.rtk_fixed || status.fix_type >= 6)) {
+-    return "RTK Fixed";
+-  }
+-  if (correctionsHealthy && status.fix_type === 5) return "RTK Float";
+-  if (correctionsHealthy) return "Corrections Active";
+-  if (state === "CONNECTED") return "Connected — No Fresh Corrections";
+-
+-  return "No RTK Corrections";
+-}
+-
+-function formatFixLabel(status: RtkStatusResponse | null): string {
+-  if (!status) return "—";
+-
+-  const readable = String(status.fix_name || "NO_FIX")
+-    .replace(/_/g, " ")
+-    .toUpperCase();
+-  const correctionsHealthy = Boolean(status.healthy && status.correction_fresh);
+-
+-  if (status.fix_type < 5 || !correctionsHealthy) {
+-    return `${readable} — NO RTK`;
+-  }
+-
+-  return readable;
+-}
+-
+ export const RTKInjectionScreen: React.FC<Props> = ({
+   visible,
+   onClose,
+   isConnected,
+ }) => {
+-  const [modalScreen, setModalScreen] = useState<ModalScreen>("list");
+-  const [selectedProfile, setSelectedProfile] = useState<NTRIPProfile | null>(
+-    null,
+-  );
+-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+-  const [activeConfiguration, setActiveConfiguration] =
+-    useState<ActiveRtkConfiguration | null>(null);
+-  const [status, setStatus] = useState<RtkStatusResponse | null>(null);
+-  const [isLoading, setIsLoading] = useState(false);
+-  const [isSubmitting, setIsSubmitting] = useState(false);
+-  const [isReconnecting, setIsReconnecting] = useState(false);
+-  const [feedback, setFeedback] = useState<string | null>(null);
+-  const [error, setError] = useState<string | null>(null);
+-
+-  const findActiveLocalProfile = useCallback(
+-    async (configuration: ActiveRtkConfiguration | null): Promise<void> => {
+-      if (!configuration) {
+-        setActiveProfileId(null);
+-        return;
+-      }
+-
+-      try {
+-        const profiles = await getAllProfiles();
+-        const match = profiles.find((profile) =>
+-          profileMatchesConfiguration(profile, configuration),
+-        );
+-        setActiveProfileId(match?.id ?? null);
+-      } catch (profileError) {
+-        console.warn(
+-          "[RTKInjection] Unable to match active local profile:",
+-          profileError,
+-        );
+-      }
+-    },
+-    [],
+-  );
+-
+-  const refreshConfiguration = useCallback(async (): Promise<void> => {
+-    const response = await getRtkConfiguration();
+-    const active = response.configuration.active;
+-    setActiveConfiguration(active);
+-    await findActiveLocalProfile(active);
+-  }, [findActiveLocalProfile]);
+-
+-  const refreshStatus = useCallback(async (): Promise<void> => {
+-    if (!visible || !isConnected) {
+-      setStatus(null);
+-      return;
+-    }
+-
+-    try {
+-      const nextStatus = await getRtkStatus();
+-      setStatus(nextStatus);
+-
+-      const nextState = String(nextStatus.status || "")
+-        .trim()
+-        .toUpperCase();
+-      if (nextState === "AUTH_FAILED") {
+-        setError(
+-          nextStatus.last_error ||
+-            "NTRIP authentication failed. Check mountpoint, username and password.",
+-        );
+-      } else if (nextState === "CONFIG_REQUIRED") {
+-        setError("No persistent NTRIP configuration is saved on the Jetson.");
+-      } else if (nextStatus.healthy && nextStatus.correction_fresh) {
+-        setError(null);
+-      }
+-    } catch (statusError) {
+-      console.warn("[RTKInjection] Failed to read RTK status:", statusError);
+-      setStatus(null);
+-    }
+-  }, [isConnected, visible]);
+-
+-  const loadScreen = useCallback(async (): Promise<void> => {
+-    if (!visible || !isConnected) {
+-      setStatus(null);
+-      return;
+-    }
+-
+-    setIsLoading(true);
+-    setError(null);
+-
+-    try {
+-      await Promise.all([refreshConfiguration(), refreshStatus()]);
+-    } catch (loadError) {
+-      const message =
+-        loadError instanceof Error
+-          ? loadError.message
+-          : "Unable to load RTK configuration.";
+-      setError(message);
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  }, [isConnected, refreshConfiguration, refreshStatus, visible]);
++  const control = useRtkControl({
++    visible,
++    connected: isConnected,
++  });
++  const [creating, setCreating] = useState(false);
++  const [localProfiles, setLocalProfiles] = useState<NTRIPProfile[]>([]);
++  const [importing, setImporting] = useState(false);
++
++  const loadLocal = useCallback(async () => {
++    const locals = await listLocalRtkProfilesForMigration();
++    setLocalProfiles(locals);
++  }, []);
+ 
+   useEffect(() => {
+-    if (!visible) return;
+-    void loadScreen();
+-  }, [loadScreen, visible]);
+-
+-  useEffect(() => {
+-    if (!visible || !isConnected) return undefined;
+-
+-    const timer = setInterval(() => {
+-      void refreshStatus();
+-    }, 1000);
+-
+-    return () => clearInterval(timer);
+-  }, [isConnected, refreshStatus, visible]);
+-
+-  const handleSelectProfile = async (profile: NTRIPProfile): Promise<void> => {
+-    if (!isConnected) {
+-      Alert.alert(
+-        "Rover Disconnected",
+-        "Connect to the rover Wi-Fi before applying RTK settings.",
+-      );
+-      return;
+-    }
+-
+-    const host = profile.casterAddress.trim();
+-    const port = Number.parseInt(profile.port || "2101", 10);
+-    const mountpoint = profile.mountpoint.trim().replace(/^\/+/, "");
+-    const username = profile.username.trim();
+-    const password = profile.password.trim();
+-
+-    if (
+-      !host ||
+-      !mountpoint ||
+-      !username ||
+-      !Number.isFinite(port) ||
+-      port < 1 ||
+-      port > 65535
+-    ) {
+-      Alert.alert(
+-        "Invalid RTK Profile",
+-        "Enter a valid caster host, port, mountpoint, and username.",
+-      );
++    if (!visible) {
++      setCreating(false);
+       return;
+     }
++    void loadLocal();
++  }, [loadLocal, visible]);
+ 
+-    setIsSubmitting(true);
+-    setFeedback(null);
+-    setError(null);
+-
+-    try {
+-      const { update, outcome } = await applyNtripConfiguration({
+-        host,
+-        port,
+-        mountpoint,
+-        username,
+-        ...(password ? { password } : {}),
+-      });
+-
+-      const savedConfiguration: ActiveRtkConfiguration = {
+-        host: update.configuration.host,
+-        port: update.configuration.port,
+-        mountpoint: update.configuration.mountpoint,
+-        username: update.configuration.username,
+-        password_configured: update.configuration.password_configured,
+-        caster_url: update.configuration.caster_url,
+-      };
+-
+-      setActiveConfiguration(savedConfiguration);
+-      setStatus(outcome.status);
++  const handleCreate = () => {
++    setCreating(true);
++    control.selectProfile(null);
++  };
+ 
+-      if (outcome.kind === "healthy") {
+-        setActiveProfileId(profile.id);
+-        setFeedback("RTCM corrections are active and fresh.");
+-        Alert.alert(
+-          "RTK Connected",
+-          "Authenticated RTCM corrections are now flowing.",
+-        );
+-      } else if (outcome.kind === "failed") {
+-        setActiveProfileId(null);
+-        const failureMessage =
+-          outcome.status.last_error ||
+-          `RTK connection failed (${outcome.status.status}).`;
+-        setError(failureMessage);
+-        Alert.alert("RTK Connection Failed", failureMessage);
+-      } else {
+-        setActiveProfileId(null);
+-        setFeedback(
+-          "Configuration saved. The bridge is still connecting; status will continue updating.",
+-        );
+-      }
+-    } catch (submitError) {
+-      const message =
+-        submitError instanceof Error
+-          ? submitError.message
+-          : "Unable to save the RTK configuration.";
+-      setError(message);
+-      Alert.alert("RTK Configuration Failed", message);
+-    } finally {
+-      setIsSubmitting(false);
+-    }
++  const handleSelect = (id: number) => {
++    setCreating(false);
++    control.selectProfile(id);
+   };
+ 
+-  const handleReconnect = async (): Promise<void> => {
+-    if (!isConnected) {
+-      Alert.alert(
+-        "Rover Disconnected",
+-        "Connect to the rover Wi-Fi before reconnecting RTK.",
+-      );
++  const handleImport = () => {
++    if (localProfiles.length === 0 || importing) {
+       return;
+     }
+ 
+-    setIsReconnecting(true);
+-    setFeedback(null);
+-    setError(null);
+-
+-    try {
+-      const response = await reconnectRtk();
+-      setFeedback(response.message || "RTK reconnect requested.");
+-      await refreshStatus();
+-    } catch (reconnectError) {
+-      const message =
+-        reconnectError instanceof Error
+-          ? reconnectError.message
+-          : "Unable to reconnect RTK.";
+-      setError(message);
+-      Alert.alert("RTK Reconnect Failed", message);
+-    } finally {
+-      setIsReconnecting(false);
+-    }
+-  };
+-
+-  const handleAddNewProfile = (): void => {
+-    setSelectedProfile(null);
+-    setModalScreen("editor");
++    Alert.alert(
++      "Import local RTK profiles?",
++      "Local tablet profiles will be created on the rover with TLS REQUIRED. They will not start RTK automatically.",
++      [
++        { text: "Cancel", style: "cancel" },
++        {
++          text: "Import",
++          onPress: () => {
++            void (async () => {
++              setImporting(true);
++              try {
++                const result = await importSelectedLocalRtkProfiles({
++                  localIds: localProfiles.map((profile) => profile.id),
++                  tlsMode: "REQUIRED",
++                  confirmDisabledTls: false,
++                });
++                await control.refresh();
++                await loadLocal();
++                const imported = result.imported.length;
++                const failed = result.failed.length;
++                Alert.alert(
++                  failed > 0 ? "Partial import" : "Import complete",
++                  `${imported} imported. ${failed} left on the tablet for retry.`,
++                );
++              } catch (error) {
++                Alert.alert(
++                  "Import failed",
++                  error instanceof Error ? error.message : "Unable to import local profiles.",
++                );
++              } finally {
++                setImporting(false);
++              }
++            })();
++          },
++        },
++      ],
++    );
+   };
+ 
+-  const handleEditProfile = (profile: NTRIPProfile): void => {
+-    setSelectedProfile(profile);
+-    setModalScreen("editor");
+-  };
+-
+-  const handleProfileSaved = (): void => {
+-    setSelectedProfile(null);
+-    setModalScreen("list");
+-  };
+-
+-  const handleCancelEdit = (): void => {
+-    setSelectedProfile(null);
+-    setModalScreen("list");
+-  };
+-
+-  if (!visible) return null;
+-
+-  const label = statusLabel(status, isConnected);
+-  const statusState = String(status?.status || "")
+-    .trim()
+-    .toUpperCase();
+-  const isHealthy = Boolean(status?.healthy && status?.correction_fresh);
+-  const isFixed = Boolean(
+-    isHealthy && (status?.rtk_fixed || (status?.fix_type ?? 0) >= 6),
+-  );
+-  const isErrorState = Boolean(
+-    isConnected &&
+-    status &&
+-    [
+-      "AUTH_FAILED",
+-      "CONFIG_REQUIRED",
+-      "DNS_FAILED",
+-      "NETWORK_TIMEOUT",
+-      "NETWORK_ERROR",
+-      "CASTER_UNREACHABLE",
+-      "CASTER_REJECTED",
+-      "STREAM_STALE",
+-      "DISCONNECTED",
+-      "UNAVAILABLE",
+-      "ERROR",
+-    ].includes(statusState),
+-  );
+-
+-  const pillStyle =
+-    isFixed || isHealthy
+-      ? styles.pillSuccess
+-      : isErrorState || !isConnected
+-        ? styles.pillDanger
+-        : styles.pillPending;
+-
+-  const rtkDotColor = isHealthy
+-    ? colors.success
+-    : isErrorState || !isConnected
+-      ? colors.danger
+-      : colors.accent;
++  const editorMode = creating
++    ? "create"
++    : control.selectedProfile
++      ? "edit"
++      : "idle";
+ 
+   return (
+-    <View style={styles.overlay} pointerEvents="box-none">
+-      <View style={styles.container}>
+-        <View style={styles.header}>
+-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
+-            <Text style={styles.backText}>←</Text>
+-          </TouchableOpacity>
+-          <Text style={styles.title}>RTK INJECTION</Text>
+-          <View
+-            style={[styles.connectionDot, { backgroundColor: rtkDotColor }]}
+-          />
+-        </View>
+-
+-        <ScrollView
+-          style={styles.body}
+-          contentContainerStyle={styles.bodyContent}
+-        >
+-          <View style={styles.sectionCard}>
+-            <View style={styles.sectionHeader}>
+-              <Text style={styles.sectionTitle}>NTRIP Caster</Text>
+-              <View style={[styles.statusPill, pillStyle]}>
+-                <Text style={styles.pillText}>{label}</Text>
+-              </View>
+-            </View>
++    <Modal
++      visible={visible}
++      animationType="slide"
++      transparent
++      onRequestClose={onClose}
++      supportedOrientations={["landscape", "landscape-left", "landscape-right"]}
++    >
++      <View style={styles.overlay}>
++        <View style={styles.container}>
++          <View style={styles.header}>
++            <Pressable onPress={onClose} hitSlop={10} style={styles.close}>
++              <Text style={styles.closeText}>Close</Text>
++            </Pressable>
++            <Text style={styles.title}>Configure RTK Injection</Text>
++            <View style={styles.headerSpacer} />
++          </View>
+ 
+-            {!isConnected ? (
+-              <View style={styles.messageBox}>
+-                <Text style={styles.messageLabel}>Rover connection</Text>
+-                <Text style={styles.messageValue}>
+-                  Connect to the rover Wi-Fi to view or change RTK settings.
+-                </Text>
+-              </View>
+-            ) : null}
++          <RtkStatusStrip view={control.view} />
+ 
+-            {isLoading ? (
+-              <View style={styles.loadingContainer}>
+-                <ActivityIndicator size="small" color={colors.accent} />
+-                <Text style={styles.loadingText}>
+-                  Loading RTK configuration...
++          {localProfiles.length > 0 ? (
++            <View style={styles.migration}>
++              <View style={styles.migrationCopy}>
++                <Text style={styles.migrationTitle}>
++                  Local RTK profiles found — Import to rover
+                 </Text>
+-              </View>
+-            ) : modalScreen === "list" ? (
+-              <NTRIPProfileList
+-                onSelectProfile={handleSelectProfile}
+-                onAddNew={handleAddNewProfile}
+-                onEditProfile={handleEditProfile}
+-                isConnecting={isSubmitting}
+-                activeProfileId={isHealthy ? activeProfileId : null}
+-                isStreamRunning={isHealthy}
+-              />
+-            ) : (
+-              <NTRIPProfileEditor
+-                profile={selectedProfile}
+-                onSave={handleProfileSaved}
+-                onCancel={handleCancelEdit}
+-              />
+-            )}
+-
+-            <View style={styles.summaryGrid}>
+-              <View style={styles.summaryItem}>
+-                <Text style={styles.summaryLabel}>GNSS Fix</Text>
+-                <Text style={styles.summaryValue}>
+-                  {formatFixLabel(status)}
+-                </Text>
+-              </View>
+-              <View style={styles.summaryItem}>
+-                <Text style={styles.summaryLabel}>Satellites</Text>
+-                <Text style={styles.summaryValue}>
+-                  {status ? status.satellites_visible : "—"}
+-                </Text>
+-              </View>
+-              <View style={styles.summaryItem}>
+-                <Text style={styles.summaryLabel}>Correction</Text>
+-                <Text style={styles.summaryValue}>
+-                  {status?.correction_fresh ? "Fresh" : "Not Fresh"}
+-                </Text>
+-              </View>
+-              <View style={styles.summaryItem}>
+-                <Text style={styles.summaryLabel}>Correction Age</Text>
+-                <Text style={styles.summaryValue}>
+-                  {status?.correction_age_sec == null
+-                    ? "—"
+-                    : `${status.correction_age_sec.toFixed(2)} s`}
++                <Text style={styles.migrationBody}>
++                  {localProfiles.length} tablet profile
++                  {localProfiles.length === 1 ? "" : "s"} will not run RTK until
++                  imported. TLS defaults to REQUIRED.
+                 </Text>
+               </View>
++              <Pressable
++                onPress={handleImport}
++                disabled={importing || control.mutationBusy || !isConnected}
++                style={[
++                  styles.importButton,
++                  (importing || !isConnected) && styles.disabled,
++                ]}
++              >
++                {importing ? (
++                  <ActivityIndicator color="#041018" />
++                ) : (
++                  <Text style={styles.importText}>Import</Text>
++                )}
++              </Pressable>
+             </View>
++          ) : null}
+ 
+-            <View style={styles.messageBox}>
+-              <Text style={styles.messageLabel}>Active caster</Text>
+-              <Text style={styles.messageValue}>
+-                {activeConfiguration
+-                  ? `${activeConfiguration.host}:${activeConfiguration.port}/${activeConfiguration.mountpoint}`
+-                  : "No RTK caster configuration saved"}
+-              </Text>
+-              {activeConfiguration ? (
+-                <Text style={styles.messageSubValue}>
+-                  User: {activeConfiguration.username} • Password:{" "}
+-                  {activeConfiguration.password_configured
+-                    ? "Configured"
+-                    : "Missing"}
+-                </Text>
+-              ) : null}
++          {control.initialLoading ? (
++            <View style={styles.loading}>
++              <ActivityIndicator color={colors.accent} />
++              <Text style={styles.loadingText}>Loading backend RTK state…</Text>
+             </View>
++          ) : (
++            <View style={styles.body}>
++              <RtkProfileList
++                profiles={control.profiles}
++                selectedProfileId={creating ? null : control.selectedProfileId}
++                activeProfileId={control.view.activeProfileId}
++                disabled={control.mutationBusy || !isConnected}
++                onSelect={handleSelect}
++                onCreate={handleCreate}
++              />
++              <RtkProfileEditor
++                mode={editorMode}
++                profile={creating ? null : control.selectedProfile}
++                activeProfileId={control.view.activeProfileId}
++                desiredState={control.view.desiredState}
++                busy={control.mutationBusy}
++                disabled={!isConnected}
++                disabledReason={control.disabledReason}
++                canStart={control.canStart}
++                canStop={control.canStop}
++                onCreate={async (dto) => {
++                  const result = await control.createProfile(dto);
++                  if (result.ok) {
++                    setCreating(false);
++                    control.selectProfile(result.value.id);
++                  }
++                }}
++                onUpdate={async (id, dto) => {
++                  await control.updateProfile(id, dto);
++                }}
++                onDelete={async (id) => {
++                  await control.removeProfile(id);
++                }}
++                onActivate={async (id) => {
++                  await control.activateProfile(id);
++                }}
++                onClearActive={async () => {
++                  await control.clearActive();
++                }}
++                onStart={async () => {
++                  await control.start();
++                }}
++                onStop={async () => {
++                  await control.stop();
++                }}
++              />
++            </View>
++          )}
+ 
+-            <TouchableOpacity
+-              style={[
+-                styles.reconnectButton,
+-                (!isConnected || isReconnecting || !activeConfiguration) &&
+-                  styles.buttonDisabled,
+-              ]}
+-              onPress={handleReconnect}
+-              disabled={!isConnected || isReconnecting || !activeConfiguration}
+-            >
+-              {isReconnecting ? (
+-                <ActivityIndicator size="small" color="#ffffff" />
+-              ) : null}
+-              <Text style={styles.reconnectButtonText}>
+-                {isReconnecting ? "Reconnecting..." : "Reconnect Saved RTK"}
+-              </Text>
+-            </TouchableOpacity>
+-
+-            <Text style={styles.helperText}>
+-              Selecting a profile saves it permanently on the Jetson and
+-              automatically reconnects the RTK bridge. You do not need to send
+-              the profile again after a reboot.
+-            </Text>
+-
+-            {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
+-            {error ? <Text style={styles.error}>{error}</Text> : null}
+-          </View>
+-        </ScrollView>
++          {control.error ? (
++            <Text style={styles.error}>{control.error.message}</Text>
++          ) : null}
++        </View>
+       </View>
+-    </View>
++    </Modal>
+   );
+ };
+ 
+ const styles = StyleSheet.create({
+   overlay: {
+-    ...StyleSheet.absoluteFillObject,
+-    backgroundColor: "rgba(0,0,0,0.7)",
+-    zIndex: 20000,
+-    elevation: 20,
++    flex: 1,
++    backgroundColor: "rgba(0,0,0,0.72)",
+     justifyContent: "center",
+     alignItems: "center",
++    padding: 16,
+   },
+   container: {
+-    width: "92%",
+-    height: "90%",
++    width: "96%",
++    height: "94%",
+     backgroundColor: colors.primary,
+     borderRadius: 16,
+     borderWidth: 1,
+     borderColor: colors.border,
+     overflow: "hidden",
+-    zIndex: 20001,
+-    elevation: 21,
+   },
+   header: {
++    minHeight: 56,
+     flexDirection: "row",
+     alignItems: "center",
+-    paddingHorizontal: 16,
+-    paddingVertical: 12,
++    paddingHorizontal: 12,
+     borderBottomWidth: 1,
+     borderBottomColor: colors.border,
+     backgroundColor: colors.secondary,
+   },
+-  backButton: {
+-    padding: 8,
++  close: {
++    minHeight: 48,
++    minWidth: 72,
++    justifyContent: "center",
+   },
+-  backText: {
+-    color: colors.text,
+-    fontSize: 18,
++  closeText: {
++    color: colors.cyan,
++    fontWeight: "800",
+   },
+   title: {
+     flex: 1,
+     textAlign: "center",
+     color: colors.text,
+     fontSize: 18,
+-    fontWeight: "700",
+-    letterSpacing: 1,
+-  },
+-  connectionDot: {
+-    width: 12,
+-    height: 12,
+-    borderRadius: 6,
+-  },
+-  body: {
+-    flex: 1,
+-    paddingHorizontal: 12,
+-  },
+-  bodyContent: {
+-    paddingVertical: 12,
+-    paddingBottom: 32,
+-  },
+-  sectionCard: {
+-    backgroundColor: colors.secondary,
+-    borderRadius: 12,
+-    borderWidth: 1,
+-    borderColor: colors.border,
+-    padding: 12,
+-  },
+-  sectionHeader: {
+-    flexDirection: "row",
+-    justifyContent: "space-between",
+-    alignItems: "center",
+-    marginBottom: 12,
+-  },
+-  sectionTitle: {
+-    color: colors.text,
+-    fontSize: 16,
+-    fontWeight: "700",
+-  },
+-  statusPill: {
+-    paddingVertical: 6,
+-    paddingHorizontal: 10,
+-    borderRadius: 12,
+-  },
+-  pillSuccess: {
+-    backgroundColor: colors.success,
+-  },
+-  pillDanger: {
+-    backgroundColor: colors.danger,
+-  },
+-  pillPending: {
+-    backgroundColor: colors.accent,
++    fontWeight: "800",
++    letterSpacing: 0.6,
+   },
+-  pillText: {
+-    color: "#0A1628",
+-    fontWeight: "700",
+-    fontSize: 12,
++  headerSpacer: {
++    width: 72,
+   },
+-  loadingContainer: {
++  migration: {
+     flexDirection: "row",
+     alignItems: "center",
+-    justifyContent: "center",
+-    paddingVertical: 24,
+-  },
+-  loadingText: {
+-    color: colors.textSecondary,
+-    marginLeft: 10,
++    gap: 12,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    backgroundColor: "#1f2937",
++    borderBottomWidth: 1,
++    borderBottomColor: colors.border,
+   },
+-  summaryGrid: {
+-    flexDirection: "row",
+-    flexWrap: "wrap",
+-    marginTop: 12,
+-    marginHorizontal: -4,
++  migrationCopy: {
++    flex: 1,
+   },
+-  summaryItem: {
+-    width: "50%",
+-    padding: 4,
++  migrationTitle: {
++    color: colors.warning,
++    fontWeight: "800",
+   },
+-  summaryLabel: {
++  migrationBody: {
+     color: colors.textSecondary,
+     fontSize: 12,
+-  },
+-  summaryValue: {
+-    color: colors.text,
+-    fontSize: 14,
+-    fontWeight: "600",
+     marginTop: 2,
+   },
+-  messageBox: {
+-    backgroundColor: colors.primary,
++  importButton: {
++    minHeight: 48,
++    minWidth: 96,
+     borderRadius: 10,
+-    padding: 10,
+-    borderWidth: 1,
+-    borderColor: colors.border,
+-    marginTop: 10,
+-  },
+-  messageLabel: {
+-    color: colors.textSecondary,
+-    fontSize: 12,
+-    marginBottom: 4,
+-  },
+-  messageValue: {
+-    color: colors.text,
+-    fontSize: 14,
+-  },
+-  messageSubValue: {
+-    color: colors.textSecondary,
+-    fontSize: 12,
+-    marginTop: 5,
+-  },
+-  reconnectButton: {
+-    minHeight: 46,
+-    marginTop: 12,
+-    borderRadius: 10,
+-    backgroundColor: colors.accent,
+-    flexDirection: "row",
++    backgroundColor: colors.warning,
+     alignItems: "center",
+     justifyContent: "center",
+-    gap: 8,
++    paddingHorizontal: 16,
+   },
+-  reconnectButtonText: {
+-    color: "#ffffff",
+-    fontSize: 14,
+-    fontWeight: "700",
++  importText: {
++    color: "#041018",
++    fontWeight: "800",
+   },
+-  buttonDisabled: {
+-    opacity: 0.5,
++  loading: {
++    flex: 1,
++    alignItems: "center",
++    justifyContent: "center",
++    gap: 10,
+   },
+-  helperText: {
++  loadingText: {
+     color: colors.textSecondary,
+-    fontSize: 12,
+-    lineHeight: 18,
+-    marginTop: 12,
+   },
+-  feedback: {
+-    marginTop: 10,
+-    color: colors.success,
++  body: {
++    flex: 1,
++    flexDirection: "row",
+   },
+   error: {
+-    marginTop: 10,
+     color: colors.danger,
++    paddingHorizontal: 16,
++    paddingVertical: 8,
++  },
++  disabled: {
++    opacity: 0.5,
+   },
+ });
+diff --git a/src/config/px4Endpoints.ts b/src/config/px4Endpoints.ts
+index cd5ad56..e8e1640 100644
+--- a/src/config/px4Endpoints.ts
++++ b/src/config/px4Endpoints.ts
+@@ -152,8 +152,12 @@ export const PX4_PATH = {
+ 
+ export const PX4_RTK = {
+   STATUS: "/api/rtk/status",
+-  CONFIG: "/api/rtk/config",
+-  RECONNECT: "/api/rtk/reconnect",
++  START: "/api/rtk/start",
++  STOP: "/api/rtk/stop",
++  PROFILES: "/api/rtk/profiles",
++  PROFILE: (id: number) => `/api/rtk/profiles/${id}`,
++  ACTIVATE: (id: number) => `/api/rtk/profiles/${id}/activate`,
++  ACTIVE_PROFILE: "/api/rtk/active-profile",
+ } as const;
+ 
+ // ── Legacy spray compatibility ────────────────────────────────────────────────
+diff --git a/src/hooks/useRoverTelemetry.ts b/src/hooks/useRoverTelemetry.ts
+index f5722e3..df5651f 100644
+--- a/src/hooks/useRoverTelemetry.ts
++++ b/src/hooks/useRoverTelemetry.ts
+@@ -43,7 +43,12 @@ import { toRtkUiState } from "../adapters/px4RtkUiStateAdapter";
+ import { normalizePx4Mode } from "../adapters/px4ModeAdapter";
+ import { PX4_SYSTEM, PX4_TELEMETRY, PX4_RTK } from "../config/px4Endpoints";
+ import type { Px4HealthzResponse } from "../types/px4/telemetry";
+-import type { RtkStatusResponse } from "../services/rtkService";
++import {
++  getRtkStatus,
++  startRtk,
++  stopRtk,
++  type RtkStatusResponse,
++} from "../services/rtkService";
+ import { apiGet, apiPost } from "../services/apiClient";
+ import {
+   clearMission as clearBackendMission,
+@@ -2921,66 +2926,46 @@ attitude: adapted.attitude,
+         nrpRosLegacyDisabled("restartFailsafeMission"),
+       injectRTK: () => nrpRosLegacyDisabled("injectRTK"),
+       stopRTK: async () => {
+-        console.log("[RTK DEBUG] Sending RTK stop request", {
+-          endpoint: API_ENDPOINTS.RTK_STOP,
+-        });
+-        try {
+-          const res = await postService(API_ENDPOINTS.RTK_STOP);
+-          console.log("[RTK DEBUG] RTK stop response", res);
+-          return res;
+-        } catch (err) {
+-          console.error("[RTK DEBUG] RTK stop error", err);
+-          throw err;
+-        }
++        const intent = await stopRtk();
++        return {
++          success: intent.success,
++          message: intent.message,
++        };
+       },
+-      getRTKStatus: () => getService(API_ENDPOINTS.RTK_STATUS),
+-
+-      // New RTK methods per documentation
+-      startNTRIPStream: async (params) => {
+-        console.log("[RTK DEBUG] Starting NTRIP stream with params", params);
+-        try {
+-          const res = await postService(API_ENDPOINTS.RTK_NTRIP_START, params);
+-          console.log("[RTK DEBUG] NTRIP start response", res);
+-          return res as import("../types/rtk").NTRIPStartResponse;
+-        } catch (err) {
+-          console.error("[RTK DEBUG] NTRIP start error", err);
+-          throw err;
+-        }
++      getRTKStatus: () => getRtkStatus(),
++
++      startNTRIPStream: async (_params) => {
++        const intent = await startRtk();
++        return {
++          success: intent.success,
++          message: intent.message,
++          source: "NTRIP" as const,
++        };
+       },
+ 
+-      // PX4: no separate NTRIP stop — use RTK_STOP
+       stopNTRIPStream: async () => {
+-        const res = await postService(API_ENDPOINTS.RTK_STOP);
+-        return res as import("../types/rtk").NTRIPStopResponse;
++        const intent = await stopRtk();
++        return {
++          success: intent.success,
++          message: intent.message,
++          source: "NTRIP" as const,
++        };
+       },
+ 
+-      startLoRaStream: async () =>
+-        nrpRosLegacyDisabled("startLoRaStream") as Promise<
+-          import("../types/rtk").LoRaStartResponse
+-        >,
++      startLoRaStream: async () => {
++        throw new Error("LoRa RTK is not supported by the production backend.");
++      },
+ 
+       stopLoRaStream: async () => {
+-        console.log("[RTK DEBUG] Stopping LoRa stream via REST");
+-        try {
+-          const res = await postService(API_ENDPOINTS.RTK_LORA_STOP);
+-          console.log("[RTK DEBUG] LoRa stop response", res);
+-          return res as import("../types/rtk").LoRaStopResponse;
+-        } catch (err) {
+-          console.error("[RTK DEBUG] LoRa stop error", err);
+-          throw err;
+-        }
++        throw new Error("LoRa RTK is not supported by the production backend.");
+       },
+ 
+       stopAllRTKStreams: async () => {
+-        console.log("[RTK DEBUG] Stopping all RTK streams");
+-        try {
+-          const res = await postService(API_ENDPOINTS.RTK_STOP);
+-          console.log("[RTK DEBUG] Stop all response", res);
+-          return res as import("../types/rtk").RTKStopAllResponse;
+-        } catch (err) {
+-          console.error("[RTK DEBUG] Stop all error", err);
+-          throw err;
+-        }
++        const intent = await stopRtk();
++        return {
++          success: intent.success,
++          message: intent.message,
++        };
+       },
+ 
+       // NRP_ROS LEGACY DISABLED — LoRa socket emits (use rtkService REST on PX4)
+diff --git a/src/screens/MissionReportScreen.tsx b/src/screens/MissionReportScreen.tsx
+index 9e7957f..c2142d2 100644
+--- a/src/screens/MissionReportScreen.tsx
++++ b/src/screens/MissionReportScreen.tsx
+@@ -53,14 +53,10 @@ import { MissionCompletionDialog } from "../components/missionreport/MissionComp
+ import { LogClearDialog } from "../components/missionreport/LogClearDialog";
+ import { useScreenReadiness } from "../hooks/useComponentReadiness";
+ import PersistentStorage from "../services/PersistentStorage";
+-import { getAllProfiles } from "../services/ntripProfileStorage";
+-import {
+-  getRtkStatus,
+-  startNtripStream,
+-  stopAllRtk,
+-} from "../services/rtkService";
++import { getRtkStatus, startRtk } from "../services/rtkService";
++import { formatRtkApiError } from "../services/rtkService";
++import { decideMissionRtkQuickStart } from "../adapters/rtkControlAdapter";
+ import { armVehicle, setManualMode } from "../services/vehicleControlService";
+-import type { NTRIPProfile } from "../types/ntrip";
+ // NOTE: calculateAccuracy and formatAccuracyDisplay commented out - now using backend wp_dist_cm
+ // import { calculateAccuracy, formatAccuracyDisplay } from '../utils/accuracyCalculation';
+ import { getAccuracyLevel } from "../utils/accuracyCalculation";
+@@ -150,27 +146,8 @@ type WpStatus = {
+  * calculateAccuracy return shape.
+  */
+ 
+-const getRtkFailureMessage = (err: unknown, fallback: string) => {
+-  if (err instanceof Error) {
+-    const responseBody =
+-      "responseBody" in err
+-        ? String((err as { responseBody?: unknown }).responseBody ?? "")
+-        : "";
+-    if (responseBody) {
+-      try {
+-        const parsed = JSON.parse(responseBody);
+-        const detail = parsed?.detail;
+-        if (typeof detail === "string") {
+-          return `${err.message}: ${detail}`;
+-        }
+-      } catch {
+-        return `${err.message}: ${responseBody}`;
+-      }
+-    }
+-    return err.message;
+-  }
+-  return fallback;
+-};
++const getRtkFailureMessage = (err: unknown, fallback: string) =>
++  formatRtkApiError(err, fallback);
+ 
+ type TrajectoryMapReference = {
+   /**
+@@ -1423,140 +1400,70 @@ export default function MissionReportScreen({
+     refreshTrajectoryPreview,
+   ]);
+ 
+-  const getLatestNtripProfile = async (): Promise<NTRIPProfile | null> => {
+-    const profiles = await getAllProfiles();
+-    if (profiles.length === 0) return null;
+-    return [...profiles].sort((a, b) => {
+-      const bTime = Date.parse(b.updatedAt || b.createdAt || "");
+-      const aTime = Date.parse(a.updatedAt || a.createdAt || "");
+-      return (
+-        (Number.isFinite(bTime) ? bTime : 0) -
+-        (Number.isFinite(aTime) ? aTime : 0)
+-      );
+-    })[0];
+-  };
+-
+   const refreshQuickNtripStatus = async () => {
++    if (isOfflineMode()) {
++      setIsQuickNtripConnected(false);
++      return;
++    }
+     try {
+-      const status = await getRtkStatus();
+-      const source = String(
+-        status.active_source ?? status.desired_source ?? status.mode ?? "",
+-      ).toLowerCase();
++      const response = await getRtkStatus();
++      const desired = response.status.persisted.desired_state;
++      const manager = response.status.runtime.manager?.state;
+       setIsQuickNtripConnected(
+-        Boolean(status.running && source.includes("ntrip")),
++        desired === "RUNNING" ||
++          (manager != null && manager !== "STOPPED"),
+       );
+-    } catch (err) {
+-      console.warn("[RTK] Quick status check failed", err);
++    } catch {
+       setIsQuickNtripConnected(false);
+     }
+   };
+ 
+   useEffect(() => {
+-    if (!isVisible || isOfflineMode()) return;
+-    refreshQuickNtripStatus();
+-    const timer = setInterval(refreshQuickNtripStatus, 3000);
+-    return () => clearInterval(timer);
+-  }, [isVisible]);
++    if (!isVisible || isOfflineMode() || showRTKInjection) {
++      return undefined;
++    }
++    void refreshQuickNtripStatus();
++    return undefined;
++  }, [isVisible, showRTKInjection]);
+ 
+   const handleQuickStartNtrip = async () => {
+     if (isQuickNtripStarting || isQuickNtripConnected) return;
+ 
+     setIsQuickNtripStarting(true);
+     try {
+-      const profile = await getLatestNtripProfile();
+-      if (!profile) {
+-        Alert.alert(
+-          "No NTRIP Profile",
+-          "Create an NTRIP profile in Settings before using quick start.",
+-        );
+-        return;
+-      }
+-
+-      const host = profile.casterAddress.trim();
+-      const port = Number.parseInt(profile.port || "2101", 10);
+-      const mountpoint = profile.mountpoint.trim();
+-      const user = profile.username.trim();
+-      const pass = profile.password.trim();
++      const response = await getRtkStatus();
++      const decision = decideMissionRtkQuickStart({
++        connected: connectionState === "connected",
++        activeProfileId: response.status.persisted.active_profile_id,
++      });
+ 
+-      if (
+-        !host ||
+-        !mountpoint ||
+-        !user ||
+-        !pass ||
+-        !Number.isFinite(port) ||
+-        port < 1 ||
+-        port > 65535
+-      ) {
++      if (decision === "offline") {
+         Alert.alert(
+-          "Profile Incomplete",
+-          "NTRIP profile requires host, valid port, mountpoint, username, and password.",
++          "Rover Offline",
++          "Connect to the rover before starting RTK.",
+         );
+         return;
+       }
+ 
+-      const currentStatus = await getRtkStatus().catch(() => null);
+-      const activeSource = String(
+-        currentStatus?.active_source ?? currentStatus?.mode ?? "",
+-      ).toLowerCase();
+-      if (currentStatus?.running && activeSource.includes("lora")) {
+-        await stopAllRtk();
++      if (decision === "open_config") {
++        openRTKInjection();
++        return;
+       }
+ 
+-      console.log("[RTK] Quick NTRIP start", {
+-        profile: profile.name,
+-        host,
+-        port,
+-        mountpoint,
+-        user,
+-        pass: "<redacted>",
+-      });
+-
+-      const status = await startNtripStream({
+-        host,
+-        port,
+-        mountpoint,
+-        user,
+-        pass,
+-      });
+-
+-      console.log("[RTK] Quick NTRIP response", {
+-        mode: status.mode,
+-        running: status.running,
+-        healthy: status.healthy,
+-        active_source: status.active_source,
+-        desired_source: status.desired_source,
+-        lifecycle_state: status.lifecycle_state,
+-        last_error: status.last_error,
+-        last_process_error: status.last_process_error,
+-      });
+-
+-      if (status.running) {
+-        setIsQuickNtripConnected(true);
+-        showNotification(
+-          "success",
+-          "NTRIP Started",
+-          `${profile.name} • ${status.healthy ? "healthy" : (status.lifecycle_state ?? "starting")}`,
+-        );
+-      } else {
+-        setIsQuickNtripConnected(false);
+-        const message =
+-          status.last_error ||
+-          status.last_process_error ||
+-          `NTRIP did not start (${status.lifecycle_state ?? status.source_state ?? "unknown"})`;
+-        showNotification("error", "NTRIP Failed", message, 5000);
+-        Alert.alert("NTRIP Failed", message);
+-      }
+-    } catch (err) {
+-      console.error("[RTK] Quick NTRIP start failed", err);
+-      const message = getRtkFailureMessage(
+-        err,
+-        "Failed to start NTRIP stream.",
++      const intent = await startRtk();
++      setIsQuickNtripConnected(intent.persisted.desired_state === "RUNNING");
++      showNotification(
++        "success",
++        "RTK Start Requested",
++        intent.message || "Desired RUNNING accepted. Waiting for backend status.",
+       );
+-      showNotification("error", "NTRIP Failed", message, 5000);
+-      Alert.alert("NTRIP Failed", message);
++    } catch (err) {
++      const message = getRtkFailureMessage(err, "Failed to start RTK.");
++      showNotification("error", "RTK Start Failed", message, 5000);
++      Alert.alert("RTK Start Failed", message);
+     } finally {
+       setIsQuickNtripStarting(false);
+-      refreshQuickNtripStatus();
++      void refreshQuickNtripStatus();
+     }
+   };
+ 
+diff --git a/src/screens/SettingsScreen.tsx b/src/screens/SettingsScreen.tsx
+index 1e6b3a2..c5f8ca9 100644
+--- a/src/screens/SettingsScreen.tsx
++++ b/src/screens/SettingsScreen.tsx
+@@ -1,4 +1,4 @@
+-import React, { useState, useCallback, useEffect, useRef } from "react";
++import React, { useState, useCallback, useEffect } from "react";
+ import {
+   View,
+   Text,
+@@ -7,7 +7,6 @@ import {
+   TouchableOpacity,
+   Switch,
+   Modal,
+-  TextInput,
+   Alert,
+ } from "react-native";
+ import AsyncStorage from "@react-native-async-storage/async-storage";
+@@ -16,17 +15,9 @@ import { useRover } from "../context/RoverContext";
+ import { FailsafeModeSelector } from "../components/pathplan/FailsafeModeSelector";
+ import { ServoConfigModal } from "../components/settings/ServoConfigModal";
+ import { ParamBrowserModal } from "../components/settings/ParamBrowserModal";
+-import { NTRIPProfile } from "../types/ntrip";
+-import { NTRIPProfileList } from "../components/missionreport/NTRIPProfileList";
+-import { NTRIPProfileEditor } from "../components/missionreport/NTRIPProfileEditor";
+-import {
+-  getRtkStatus,
+-  startLoraStream,
+-  startNtripStream,
+-  stopAllRtk,
+-  stopLoraStream,
+-  type RtkStatusResponse,
+-} from "../services/rtkService";
++import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
++import { getRtkStatus, stopRtk } from "../services/rtkService";
++import { toRtkControlView } from "../adapters/rtkControlAdapter";
+ import { useAuth } from "../hooks/useAuth";
+ import { getSprayConfig, setSprayConfig } from "../services/sprayConfigService";
+ 
+@@ -108,405 +99,66 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+   const [isLoadingLed, setIsLoadingLed] = useState(false);
+   const [lastLedUpdate, setLastLedUpdate] = useState<string>("");
+ 
+-  // RTK Injection State
++  // RTK Injection State — backend-owned profiles; no local runtime authority.
+   const [showRTKModal, setShowRTKModal] = useState(false);
+-  const [modalScreen, setModalScreen] = useState<"list" | "editor">("list");
+-  const [selectedProfile, setSelectedProfile] = useState<NTRIPProfile | null>(
+-    null,
+-  );
+-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+-  const [isRTKStreamRunning, setIsRTKStreamRunning] = useState(false);
+-  const [rtkTotalBytes, setRtkTotalBytes] = useState(0);
+-  const [isRTKSubmitting, setIsRTKSubmitting] = useState(false);
+-  const [rtkFeedback, setRtkFeedback] = useState<string | null>(null);
+-  const [rtkError, setRtkError] = useState<string | null>(null);
+-  const [rtkHealthy, setRtkHealthy] = useState(false);
+-  const [rtkActiveSource, setRtkActiveSource] = useState<string | null>(null);
++  const [rtkHeadline, setRtkHeadline] = useState("Off");
+   const [rtkStatusMessage, setRtkStatusMessage] = useState("Idle");
+-  const rtkMonitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+-
+-  // LoRa RTK State
++  const [isRTKSubmitting, setIsRTKSubmitting] = useState(false);
++  const [canStopRtk, setCanStopRtk] = useState(false);
+ 
+   // MAVLink Param Browser State
+   const [showParamBrowser, setShowParamBrowser] = useState(false);
+-  const [rtkSource, setRtkSource] = useState<"ntrip" | "lora">("ntrip");
+-  const [loraRunning, setLoraRunning] = useState(false);
+-  const [loraConnected, setLoraConnected] = useState(false);
+-  const [loraSerialPort, setLoraSerialPort] = useState("/dev/ttyUSB0");
+-  const [loraBaudrate, setLoraBaudrate] = useState("115200");
+-  const [loraFeedback, setLoraFeedback] = useState<string | null>(null);
+-  const [loraError, setLoraError] = useState<string | null>(null);
+ 
+   // Toast/Success Message State
+   const [successMessage, setSuccessMessage] = useState<string>("");
+ 
+-  // RTK Monitor Functions
+-  const stopRTKMonitor = useCallback(() => {
+-    if (rtkMonitorRef.current) {
+-      clearInterval(rtkMonitorRef.current);
+-      rtkMonitorRef.current = null;
+-    }
+-  }, []);
+-
+-  const applyRtkStatus = useCallback((status: RtkStatusResponse) => {
+-    const source = (
+-      status.active_source ??
+-      status.source ??
+-      status.mode ??
+-      ""
+-    ).toLowerCase();
+-    const running = Boolean(status.running ?? status.active);
+-    const healthy = Boolean(
+-      status.stream_healthy ?? status.healthy ?? status.connected,
+-    );
+-    const bytesReceived = status.bytes_received ?? 0;
+-    const sourceIsLora =
+-      running && (source.includes("lora") || Boolean(status.serial_open));
+-    const sourceIsNtrip = running && !sourceIsLora;
+-    const sourceLabel =
+-      status.active_source ?? status.source ?? status.mode ?? null;
+-
+-    setRtkTotalBytes(bytesReceived);
+-    setRtkHealthy(healthy);
+-    setRtkActiveSource(sourceLabel);
+-    setIsRTKStreamRunning(sourceIsNtrip);
+-    setLoraRunning(sourceIsLora);
+-    setLoraConnected(sourceIsLora && (Boolean(status.serial_open) || healthy));
+-
+-    if (!running) {
+-      setRtkStatusMessage("Idle");
+-      return false;
++  const refreshSettingsRtkStatus = useCallback(async () => {
++    try {
++      const rtkStatus = await getRtkStatus();
++      const view = toRtkControlView(rtkStatus, {
++        connected: connectionState === "connected",
++      });
++      setRtkHeadline(view.headlineLabel);
++      setCanStopRtk(view.canStop);
++      setRtkStatusMessage(
++        `${view.desiredState ?? "—"} · ${view.managerState ?? "—"} · ${
++          view.correctionState ?? "no stream"
++        }`,
++      );
++    } catch {
++      setRtkHeadline("Rover Offline");
++      setCanStopRtk(false);
++      setRtkStatusMessage("Unable to read backend RTK status");
+     }
++  }, [connectionState]);
+ 
+-    const age = status.last_valid_rtcm_age_s ?? status.last_frame_age_s;
+-    const ageLabel =
+-      typeof age === "number" ? ` • RTCM age ${age.toFixed(1)}s` : "";
+-    setRtkStatusMessage(`${healthy ? "Healthy" : "Running"}${ageLabel}`);
+-    return true;
+-  }, []);
+-
+-  const startRTKMonitor = useCallback(() => {
+-    if (rtkMonitorRef.current) return;
+-    rtkMonitorRef.current = setInterval(async () => {
+-      try {
+-        const rtkStatus = await getRtkStatus();
+-        const running = applyRtkStatus(rtkStatus);
+-        if (!running) {
+-          stopRTKMonitor();
+-        }
+-      } catch (e) {
+-        console.error("RTK monitor error:", e);
+-      }
+-    }, 250);
+-  }, [applyRtkStatus, stopRTKMonitor]);
+-
+-  // Check RTK status on component mount and modal open
+   useEffect(() => {
+-    if (visible) {
+-      const checkRTKStatus = async () => {
+-        try {
+-          const rtkStatus = await getRtkStatus();
+-          const running = applyRtkStatus(rtkStatus);
+-          if (running) {
+-            startRTKMonitor();
+-          }
+-        } catch (err) {
+-          console.error("Failed to get initial RTK status:", err);
+-        }
+-      };
+-      checkRTKStatus();
++    if (!visible || showRTKModal) {
++      return undefined;
+     }
+-    return () => {
+-      stopRTKMonitor();
+-    };
+-  }, [visible, applyRtkStatus, startRTKMonitor, stopRTKMonitor]);
++    void refreshSettingsRtkStatus();
++    return undefined;
++  }, [visible, showRTKModal, refreshSettingsRtkStatus]);
+ 
+-  // RTK Button Handlers
+   const handleOpenRTKModal = () => {
+-    setModalScreen("list");
+-    setSelectedProfile(null);
+-    setRtkFeedback(null);
+-    setRtkError(null);
+-    setLoraFeedback(null);
+-    setLoraError(null);
+     setShowRTKModal(true);
+   };
+ 
+-  const handleSelectRTKProfile = async (profile: NTRIPProfile) => {
+-    setIsRTKSubmitting(true);
+-    setRtkFeedback(null);
+-    setRtkError(null);
+-
+-    try {
+-      const host = profile.casterAddress.trim();
+-      const port = Number.parseInt(profile.port || "2101", 10);
+-      const mountpoint = profile.mountpoint.trim();
+-      const user = profile.username.trim();
+-      const pass = profile.password.trim();
+-
+-      if (
+-        !host ||
+-        !mountpoint ||
+-        !user ||
+-        !pass ||
+-        !Number.isFinite(port) ||
+-        port < 1 ||
+-        port > 65535
+-      ) {
+-        const message =
+-          "NTRIP profile requires host, valid port, mountpoint, username, and password.";
+-        setRtkError(message);
+-        Alert.alert("Profile Incomplete", message);
+-        return;
+-      }
+-
+-      // Stop LoRa first if it is active; the backend has one RTK injection source at a time.
+-      if (loraRunning) {
+-        await stopLoraStream().catch(() => undefined);
+-        setLoraRunning(false);
+-        setLoraConnected(false);
+-      }
+-
+-      console.log("[RTK] Starting NTRIP stream", {
+-        host,
+-        port,
+-        mountpoint,
+-        user,
+-        pass: "<redacted>",
+-      });
+-
+-      const response = await startNtripStream({
+-        host,
+-        port,
+-        mountpoint,
+-        user,
+-        pass,
+-      });
+-      console.log("[RTK] NTRIP start response", {
+-        mode: response.mode,
+-        running: response.running,
+-        healthy: response.healthy,
+-        active_source: response.active_source,
+-        desired_source: response.desired_source,
+-        lifecycle_state: response.lifecycle_state,
+-        last_error: response.last_error,
+-        last_process_error: response.last_process_error,
+-      });
+-
+-      if (applyRtkStatus(response)) {
+-        setRtkFeedback("RTK stream started successfully.");
+-        setIsRTKStreamRunning(true);
+-        setActiveProfileId(profile.id);
+-        startRTKMonitor();
+-
+-        setTimeout(async () => {
+-          try {
+-            const status = await getRtkStatus();
+-            console.log("[RTK] NTRIP verify status", {
+-              mode: status.mode,
+-              running: status.running,
+-              healthy: status.healthy,
+-              active_source: status.active_source,
+-              desired_source: status.desired_source,
+-              lifecycle_state: status.lifecycle_state,
+-              last_error: status.last_error,
+-              last_process_error: status.last_process_error,
+-            });
+-            const running = applyRtkStatus(status);
+-            if (running) {
+-              Alert.alert("Success", `Connected to ${profile.name}`);
+-            } else {
+-              const message =
+-                status.last_error ||
+-                status.last_process_error ||
+-                "Stream started but connection failed. Check credentials and network.";
+-              setRtkError(message);
+-              setIsRTKStreamRunning(false);
+-              setActiveProfileId(null);
+-              stopRTKMonitor();
+-              Alert.alert("Connection Failed", message);
+-            }
+-          } catch (err) {
+-            console.warn("[RTK] Failed to verify connection status:", err);
+-          }
+-        }, 1000);
+-      } else {
+-        const message =
+-          response.last_error ||
+-          response.last_process_error ||
+-          `NTRIP did not start (state: ${response.lifecycle_state ?? response.source_state ?? "unknown"}).`;
+-        console.warn("[RTK] NTRIP start returned non-running status", response);
+-        setRtkError(message);
+-        Alert.alert("Connection Failed", message);
+-      }
+-    } catch (err) {
+-      console.error("[RTK] NTRIP start failed", err);
+-      const errorMsg = getRtkFailureMessage(err, "Failed to start RTK stream.");
+-      setRtkError(errorMsg);
+-      Alert.alert("Error", errorMsg);
+-    } finally {
+-      setIsRTKSubmitting(false);
+-    }
+-  };
+-
+   const handleStopRTKStream = async () => {
+     setIsRTKSubmitting(true);
+-    setRtkFeedback(null);
+-    setRtkError(null);
+-
+-    try {
+-      const response = await stopAllRtk();
+-      console.log("[RTK] Stop all response", {
+-        mode: response.mode,
+-        running: response.running,
+-        lifecycle_state: response.lifecycle_state,
+-        last_error: response.last_error,
+-      });
+-      applyRtkStatus(response);
+-      setRtkFeedback("RTK stream stopped successfully.");
+-      setIsRTKStreamRunning(false);
+-      setLoraRunning(false);
+-      setLoraConnected(false);
+-      setRtkHealthy(false);
+-      setRtkActiveSource(null);
+-      setRtkStatusMessage("Idle");
+-      setActiveProfileId(null);
+-      stopRTKMonitor();
+-    } catch (err) {
+-      console.error("[RTK] Stop all failed", err);
+-      setRtkError(getRtkFailureMessage(err, "Failed to stop RTK stream."));
+-    } finally {
+-      setIsRTKSubmitting(false);
+-    }
+-  };
+-
+-  const handleAddNewRTKProfile = () => {
+-    setSelectedProfile(null);
+-    setModalScreen("editor");
+-  };
+-
+-  const handleEditRTKProfile = (profile: NTRIPProfile) => {
+-    setSelectedProfile(profile);
+-    setModalScreen("editor");
+-  };
+-
+-  const handleRTKProfileSaved = () => {
+-    setModalScreen("list");
+-    setSelectedProfile(null);
+-  };
+-
+-  const handleCancelRTKEdit = () => {
+-    setModalScreen("list");
+-    setSelectedProfile(null);
+-  };
+-
+-  // LoRa Handlers
+-  const handleStartLora = async () => {
+-    setIsRTKSubmitting(true);
+-    setLoraFeedback(null);
+-    setLoraError(null);
+-
+-    try {
+-      const serialPort = loraSerialPort.trim();
+-      const baudrate = Number.parseInt(loraBaudrate || "115200", 10);
+-
+-      if (!serialPort || !Number.isFinite(baudrate) || baudrate <= 0) {
+-        const message = "LoRa requires a serial port and a valid baud rate.";
+-        setLoraError(message);
+-        Alert.alert("LoRa Config Incomplete", message);
+-        return;
+-      }
+-
+-      // Stop NTRIP first if running
+-      if (isRTKStreamRunning) {
+-        await stopAllRtk();
+-        setIsRTKStreamRunning(false);
+-        setActiveProfileId(null);
+-        stopRTKMonitor();
+-      }
+-
+-      console.log("[RTK] Starting LoRa stream", {
+-        serial_port: serialPort,
+-        baudrate,
+-      });
+-      const response = await startLoraStream({
+-        serial_port: serialPort,
+-        baudrate,
+-      });
+-      console.log("[RTK] LoRa start response", {
+-        mode: response.mode,
+-        running: response.running,
+-        healthy: response.healthy,
+-        active_source: response.active_source,
+-        desired_source: response.desired_source,
+-        lifecycle_state: response.lifecycle_state,
+-        last_error: response.last_error,
+-      });
+-      if (applyRtkStatus(response)) {
+-        setLoraFeedback("LoRa stream started successfully.");
+-        setLoraRunning(true);
+-        startRTKMonitor();
+-      } else {
+-        setLoraError(
+-          response.last_error ||
+-            `LoRa did not start (state: ${response.lifecycle_state ?? response.source_state ?? "unknown"}).`,
+-        );
+-      }
+-    } catch (err) {
+-      console.error("[RTK] LoRa start failed", err);
+-      setLoraError(getRtkFailureMessage(err, "Failed to start LoRa stream."));
+-    } finally {
+-      setIsRTKSubmitting(false);
+-    }
+-  };
+-
+-  const handleStopLora = async () => {
+-    setIsRTKSubmitting(true);
+-    setLoraFeedback(null);
+-    setLoraError(null);
+-
+     try {
+-      const response = await stopLoraStream();
+-      console.log("[RTK] LoRa stop response", {
+-        mode: response.mode,
+-        running: response.running,
+-        lifecycle_state: response.lifecycle_state,
+-        last_error: response.last_error,
+-      });
+-      applyRtkStatus(response);
+-      setLoraFeedback("LoRa stream stopped successfully.");
+-      setLoraRunning(false);
+-      setLoraConnected(false);
+-      setRtkHealthy(false);
+-      setRtkActiveSource(null);
+-      setRtkStatusMessage("Idle");
+-      stopRTKMonitor();
++      await stopRtk();
++      await refreshSettingsRtkStatus();
+     } catch (err) {
+-      console.error("[RTK] LoRa stop failed", err);
+-      setLoraError(getRtkFailureMessage(err, "Failed to stop LoRa stream."));
++      Alert.alert(
++        "RTK Stop Failed",
++        getRtkFailureMessage(err, "Failed to stop RTK."),
++      );
+     } finally {
+       setIsRTKSubmitting(false);
+     }
+   };
+ 
+-  const handleSwitchRTKSource = async (source: "ntrip" | "lora") => {
+-    if (source === rtkSource) return;
+-    // Stop the other source if active
+-    if (source === "ntrip" && loraRunning) {
+-      await stopLoraStream().catch(() => undefined);
+-      setLoraRunning(false);
+-    } else if (source === "lora" && isRTKStreamRunning) {
+-      await stopAllRtk().catch(() => undefined);
+-      setIsRTKStreamRunning(false);
+-      stopRTKMonitor();
+-    }
+-    setRtkSource(source);
+-    setRtkFeedback(null);
+-    setRtkError(null);
+-    setLoraFeedback(null);
+-    setLoraError(null);
+-  };
+-
+   // GPS failsafe mode is now persisted by backend, no need for AsyncStorage
+ 
+   // Load all settings on mount
+@@ -1260,31 +912,19 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+ 
+               <View style={styles.settingRow}>
+                 <View style={styles.settingInfo}>
+-                  <Text style={styles.settingLabel}>
+-                    {loraRunning ? "LoRa Connection" : "NTRIP Connection"}
+-                  </Text>
++                  <Text style={styles.settingLabel}>{rtkHeadline}</Text>
+                   <Text style={styles.settingDescription}>
+-                    {isRTKStreamRunning
+-                      ? `NTRIP Connected • ${rtkTotalBytes} bytes received • ${rtkStatusMessage}`
+-                      : loraRunning
+-                        ? `LoRa Connected • ${rtkTotalBytes} bytes received • ${rtkStatusMessage}`
+-                        : "Not connected - Configure NTRIP or LoRa"}
++                    {rtkStatusMessage}
+                   </Text>
+                 </View>
+                 <View
+                   style={[
+                     styles.statusBadge,
+-                    isRTKStreamRunning || loraRunning
+-                      ? styles.statusBadgeOn
+-                      : styles.statusBadgeOff,
++                    canStopRtk ? styles.statusBadgeOn : styles.statusBadgeOff,
+                   ]}
+                 >
+                   <Text style={styles.statusBadgeText}>
+-                    {isRTKStreamRunning || loraRunning
+-                      ? rtkHealthy
+-                        ? "HEALTHY"
+-                        : "ACTIVE"
+-                      : "INACTIVE"}
++                    {rtkHeadline.toUpperCase()}
+                   </Text>
+                 </View>
+               </View>
+@@ -1305,26 +945,22 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+                 </Text>
+                 <View style={styles.configureButtonContent}>
+                   <Text style={styles.configureButtonTitle}>
+-                    {isRTKStreamRunning
+-                      ? "Manage RTK Connection"
+-                      : "Configure RTK Injection"}
++                    Configure RTK Injection
+                   </Text>
+                   <Text style={styles.configureButtonDescription}>
+-                    {isRTKSubmitting
+-                      ? "Processing..."
+-                      : "Set up NTRIP caster or LoRa receiver"}
++                    Backend RTK profiles, activate, start, and stop
+                   </Text>
+                 </View>
+                 <Text style={styles.configureButtonArrow}>›</Text>
+               </TouchableOpacity>
+ 
+-              {(isRTKStreamRunning || loraRunning) && (
++              {canStopRtk && (
+                 <TouchableOpacity
+                   style={[
+                     styles.configureButton,
+                     { backgroundColor: "#dc2626", marginTop: 12 },
+                   ]}
+-                  onPress={loraRunning ? handleStopLora : handleStopRTKStream}
++                  onPress={handleStopRTKStream}
+                   disabled={isRTKSubmitting}
+                 >
+                   <Text style={styles.configureButtonIcon}>⏹️</Text>
+@@ -1332,7 +968,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+                     <Text
+                       style={[styles.configureButtonTitle, { color: "#fff" }]}
+                     >
+-                      Stop {loraRunning ? "LoRa" : "NTRIP"} Stream
++                      Stop RTK
+                     </Text>
+                     <Text
+                       style={[
+@@ -1340,8 +976,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+                         { color: "#fca5a5" },
+                       ]}
+                     >
+-                      Disconnect from{" "}
+-                      {loraRunning ? "LoRa receiver" : "NTRIP caster"}
++                      Persist STOPPED on the rover
+                     </Text>
+                   </View>
+                 </TouchableOpacity>
+@@ -1715,245 +1350,15 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
+           onClose={() => setShowParamBrowser(false)}
+         />
+ 
+-        {/* RTK Profile Manager Modal */}
+-        <Modal
++        <RTKInjectionScreen
+           visible={showRTKModal}
+-          animationType="slide"
+-          transparent={true}
+-          onRequestClose={() => setShowRTKModal(false)}
+-        >
+-          <View style={rtkModalStyles.modalOverlay}>
+-            <View style={rtkModalStyles.modalContent}>
+-              <View style={rtkModalStyles.modalHeader}>
+-                <Text style={rtkModalStyles.modalTitle}>RTK Injection</Text>
+-                <TouchableOpacity onPress={() => setShowRTKModal(false)}>
+-                  <Text style={rtkModalStyles.modalCloseButton}>✕</Text>
+-                </TouchableOpacity>
+-              </View>
+-
+-              {/* Source Toggle: NTRIP | LoRa */}
+-              <View style={rtkModalStyles.sourceToggle}>
+-                <TouchableOpacity
+-                  style={[
+-                    rtkModalStyles.toggleButton,
+-                    rtkSource === "ntrip" && rtkModalStyles.toggleActive,
+-                  ]}
+-                  onPress={() => handleSwitchRTKSource("ntrip")}
+-                >
+-                  <Text
+-                    style={[
+-                      rtkModalStyles.toggleText,
+-                      rtkSource === "ntrip" && rtkModalStyles.toggleTextActive,
+-                    ]}
+-                  >
+-                    📡 NTRIP
+-                  </Text>
+-                </TouchableOpacity>
+-                <TouchableOpacity
+-                  style={[
+-                    rtkModalStyles.toggleButton,
+-                    rtkSource === "lora" && rtkModalStyles.toggleActive,
+-                  ]}
+-                  onPress={() => handleSwitchRTKSource("lora")}
+-                >
+-                  <Text
+-                    style={[
+-                      rtkModalStyles.toggleText,
+-                      rtkSource === "lora" && rtkModalStyles.toggleTextActive,
+-                    ]}
+-                  >
+-                    📻 LoRa
+-                  </Text>
+-                </TouchableOpacity>
+-              </View>
+-
+-              {/* NTRIP Tab */}
+-              {rtkSource === "ntrip" && (
+-                <View style={rtkModalStyles.modalBody}>
+-                  {modalScreen === "list" ? (
+-                    <NTRIPProfileList
+-                      onSelectProfile={handleSelectRTKProfile}
+-                      onAddNew={handleAddNewRTKProfile}
+-                      onEditProfile={handleEditRTKProfile}
+-                      isConnecting={isRTKSubmitting}
+-                      activeProfileId={activeProfileId}
+-                      isStreamRunning={isRTKStreamRunning}
+-                    />
+-                  ) : (
+-                    <NTRIPProfileEditor
+-                      profile={selectedProfile}
+-                      onSave={handleRTKProfileSaved}
+-                      onCancel={handleCancelRTKEdit}
+-                    />
+-                  )}
+-
+-                  {rtkFeedback && (
+-                    <View style={rtkModalStyles.feedbackBox}>
+-                      <Text style={rtkModalStyles.feedbackText}>
+-                        {rtkFeedback}
+-                      </Text>
+-                    </View>
+-                  )}
+-
+-                  {rtkError && (
+-                    <View style={rtkModalStyles.errorBox}>
+-                      <Text style={rtkModalStyles.errorText}>{rtkError}</Text>
+-                    </View>
+-                  )}
+-                </View>
+-              )}
+-
+-              {/* LoRa Tab */}
+-              {rtkSource === "lora" && (
+-                <View style={rtkModalStyles.modalBody}>
+-                  <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+-                    {/* LoRa Status Header */}
+-                    <View style={rtkModalStyles.loraStatusHeader}>
+-                      <Text style={rtkModalStyles.loraSectionTitle}>
+-                        LoRa USB Receiver
+-                      </Text>
+-                      <View
+-                        style={[
+-                          rtkModalStyles.loraPill,
+-                          loraRunning
+-                            ? rtkModalStyles.loraPillSuccess
+-                            : rtkModalStyles.loraPillDanger,
+-                        ]}
+-                      >
+-                        <Text style={rtkModalStyles.loraPillText}>
+-                          {loraRunning ? "Streaming" : "Stopped"}
+-                        </Text>
+-                      </View>
+-                    </View>
+-
+-                    <View style={rtkModalStyles.manualEntrySection}>
+-                      <Text style={rtkModalStyles.manualEntryTitle}>
+-                        Receiver Port
+-                      </Text>
+-                      <TextInput
+-                        style={rtkModalStyles.input}
+-                        placeholder="/dev/ttyUSB0"
+-                        placeholderTextColor="#94a3b8"
+-                        value={loraSerialPort}
+-                        onChangeText={setLoraSerialPort}
+-                        autoCapitalize="none"
+-                        autoCorrect={false}
+-                      />
+-                      <TextInput
+-                        style={rtkModalStyles.input}
+-                        placeholder="115200"
+-                        placeholderTextColor="#94a3b8"
+-                        value={loraBaudrate}
+-                        onChangeText={setLoraBaudrate}
+-                        keyboardType="numeric"
+-                      />
+-                    </View>
+-
+-                    {/* LoRa Stats Grid */}
+-                    <View style={rtkModalStyles.loraStatsGrid}>
+-                      <View style={rtkModalStyles.loraStatBox}>
+-                        <Text style={rtkModalStyles.loraStatLabel}>
+-                          Connection
+-                        </Text>
+-                        <Text
+-                          style={[
+-                            rtkModalStyles.loraStatValue,
+-                            { color: loraConnected ? "#10b981" : "#ef4444" },
+-                          ]}
+-                        >
+-                          {loraConnected ? "Connected" : "Not Connected"}
+-                        </Text>
+-                      </View>
+-                      <View style={rtkModalStyles.loraStatBox}>
+-                        <Text style={rtkModalStyles.loraStatLabel}>Source</Text>
+-                        <Text style={rtkModalStyles.loraStatValue}>
+-                          {rtkActiveSource ?? "None"}
+-                        </Text>
+-                      </View>
+-                      <View style={rtkModalStyles.loraStatBox}>
+-                        <Text style={rtkModalStyles.loraStatLabel}>Bytes</Text>
+-                        <Text style={rtkModalStyles.loraStatValue}>
+-                          {(rtkTotalBytes / 1024).toFixed(2)} KB
+-                        </Text>
+-                      </View>
+-                      <View style={rtkModalStyles.loraStatBox}>
+-                        <Text style={rtkModalStyles.loraStatLabel}>Health</Text>
+-                        <Text
+-                          style={[
+-                            rtkModalStyles.loraStatValue,
+-                            { color: rtkHealthy ? "#10b981" : "#f59e0b" },
+-                          ]}
+-                        >
+-                          {rtkHealthy
+-                            ? "Healthy"
+-                            : loraRunning
+-                              ? "Running"
+-                              : "Idle"}
+-                        </Text>
+-                      </View>
+-                    </View>
+-
+-                    {/* LoRa Status Message */}
+-                    <View style={rtkModalStyles.loraMessageBox}>
+-                      <Text style={rtkModalStyles.loraMessageLabel}>
+-                        Status
+-                      </Text>
+-                      <Text style={rtkModalStyles.loraMessageValue}>
+-                        {rtkStatusMessage}
+-                      </Text>
+-                    </View>
+-
+-                    {/* LoRa Action Buttons */}
+-                    <View style={rtkModalStyles.loraButtonRow}>
+-                      <TouchableOpacity
+-                        style={[
+-                          rtkModalStyles.loraButton,
+-                          rtkModalStyles.loraButtonStart,
+-                          loraRunning && rtkModalStyles.loraButtonDisabled,
+-                        ]}
+-                        onPress={handleStartLora}
+-                        disabled={loraRunning || isRTKSubmitting}
+-                      >
+-                        <Text style={rtkModalStyles.loraButtonText}>
+-                          ▶ Start Stream
+-                        </Text>
+-                      </TouchableOpacity>
+-                      <TouchableOpacity
+-                        style={[
+-                          rtkModalStyles.loraButton,
+-                          rtkModalStyles.loraButtonStop,
+-                          !loraRunning && rtkModalStyles.loraButtonDisabled,
+-                        ]}
+-                        onPress={handleStopLora}
+-                        disabled={!loraRunning || isRTKSubmitting}
+-                      >
+-                        <Text style={rtkModalStyles.loraButtonText}>
+-                          ⏹ Stop Stream
+-                        </Text>
+-                      </TouchableOpacity>
+-                    </View>
+-
+-                    {loraFeedback && (
+-                      <View style={rtkModalStyles.feedbackBox}>
+-                        <Text style={rtkModalStyles.feedbackText}>
+-                          {loraFeedback}
+-                        </Text>
+-                      </View>
+-                    )}
+-
+-                    {loraError && (
+-                      <View style={rtkModalStyles.errorBox}>
+-                        <Text style={rtkModalStyles.errorText}>
+-                          {loraError}
+-                        </Text>
+-                      </View>
+-                    )}
+-                  </ScrollView>
+-                </View>
+-              )}
+-            </View>
+-          </View>
+-        </Modal>
++          onClose={() => {
++            setShowRTKModal(false);
++            void refreshSettingsRtkStatus();
++          }}
++          services={services}
++          isConnected={connectionState === "connected"}
++        />
+       </View>
+     </Modal>
+   );
+@@ -2408,240 +1813,3 @@ const styles = StyleSheet.create({
+     fontWeight: "bold",
+   },
+ });
+-
+-// RTK Modal Styles
+-const rtkModalStyles = StyleSheet.create({
+-  modalOverlay: {
+-    flex: 1,
+-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+-    justifyContent: "center",
+-    alignItems: "center",
+-  },
+-  modalContent: {
+-    backgroundColor: "#1a1a2e",
+-    borderRadius: 16,
+-    padding: 20,
+-    width: "90%",
+-    height: "85%",
+-    maxHeight: "85%",
+-    borderWidth: 2,
+-    borderColor: "#3b82f6",
+-  },
+-  modalBody: {
+-    flex: 1,
+-    minHeight: 0,
+-  },
+-  modalHeader: {
+-    flexDirection: "row",
+-    justifyContent: "space-between",
+-    alignItems: "center",
+-    marginBottom: 16,
+-    paddingBottom: 12,
+-    borderBottomWidth: 1,
+-    borderBottomColor: "#3b82f6",
+-  },
+-  modalTitle: {
+-    fontSize: 22,
+-    fontWeight: "bold",
+-    color: "#fff",
+-  },
+-  modalCloseButton: {
+-    fontSize: 24,
+-    color: "#94a3b8",
+-    padding: 4,
+-  },
+-  feedbackBox: {
+-    backgroundColor: "rgba(16, 185, 129, 0.2)",
+-    borderWidth: 1,
+-    borderColor: "#10b981",
+-    borderRadius: 8,
+-    padding: 12,
+-    marginTop: 12,
+-  },
+-  feedbackText: {
+-    color: "#10b981",
+-    fontSize: 14,
+-  },
+-  errorBox: {
+-    backgroundColor: "rgba(239, 68, 68, 0.2)",
+-    borderWidth: 1,
+-    borderColor: "#ef4444",
+-    borderRadius: 8,
+-    padding: 12,
+-    marginTop: 12,
+-  },
+-  errorText: {
+-    color: "#ef4444",
+-    fontSize: 14,
+-  },
+-  // Source Toggle
+-  sourceToggle: {
+-    flexDirection: "row",
+-    marginBottom: 16,
+-    borderWidth: 1,
+-    borderColor: "#3b82f6",
+-    borderRadius: 10,
+-    overflow: "hidden",
+-  },
+-  toggleButton: {
+-    flex: 1,
+-    paddingVertical: 12,
+-    alignItems: "center",
+-    backgroundColor: "#1a1a2e",
+-  },
+-  toggleActive: {
+-    backgroundColor: "#3b82f6",
+-  },
+-  toggleText: {
+-    color: "#94a3b8",
+-    fontSize: 14,
+-    fontWeight: "700",
+-  },
+-  toggleTextActive: {
+-    color: "#ffffff",
+-  },
+-  // LoRa Tab Styles
+-  loraStatusHeader: {
+-    flexDirection: "row",
+-    justifyContent: "space-between",
+-    alignItems: "center",
+-    marginBottom: 16,
+-  },
+-  loraSectionTitle: {
+-    color: "#ffffff",
+-    fontSize: 16,
+-    fontWeight: "700",
+-  },
+-  loraPill: {
+-    paddingVertical: 6,
+-    paddingHorizontal: 12,
+-    borderRadius: 12,
+-  },
+-  loraPillSuccess: {
+-    backgroundColor: "#10b981",
+-  },
+-  loraPillDanger: {
+-    backgroundColor: "#ef4444",
+-  },
+-  loraPillText: {
+-    color: "#ffffff",
+-    fontWeight: "700",
+-    fontSize: 12,
+-  },
+-  loraStatsGrid: {
+-    flexDirection: "row",
+-    flexWrap: "wrap",
+-    gap: 8,
+-    marginBottom: 12,
+-  },
+-  loraStatBox: {
+-    flex: 1,
+-    minWidth: "45%",
+-    backgroundColor: "#0f172a",
+-    borderRadius: 10,
+-    padding: 12,
+-    borderWidth: 1,
+-    borderColor: "#374151",
+-  },
+-  loraStatLabel: {
+-    color: "#94a3b8",
+-    fontSize: 12,
+-    marginBottom: 4,
+-  },
+-  loraStatValue: {
+-    color: "#ffffff",
+-    fontSize: 15,
+-    fontWeight: "700",
+-  },
+-  loraMessageBox: {
+-    backgroundColor: "#0f172a",
+-    borderRadius: 10,
+-    padding: 12,
+-    borderWidth: 1,
+-    borderColor: "#374151",
+-    marginBottom: 16,
+-  },
+-  loraMessageLabel: {
+-    color: "#94a3b8",
+-    fontSize: 12,
+-    marginBottom: 4,
+-  },
+-  loraMessageValue: {
+-    color: "#ffffff",
+-    fontSize: 14,
+-  },
+-  loraButtonRow: {
+-    flexDirection: "row",
+-    gap: 12,
+-    marginBottom: 12,
+-  },
+-  loraButton: {
+-    flex: 1,
+-    paddingVertical: 14,
+-    borderRadius: 10,
+-    alignItems: "center",
+-  },
+-  loraButtonStart: {
+-    backgroundColor: "#3b82f6",
+-  },
+-  loraButtonStop: {
+-    backgroundColor: "#ef4444",
+-  },
+-  loraButtonDisabled: {
+-    opacity: 0.4,
+-  },
+-  loraButtonText: {
+-    color: "#ffffff",
+-    fontWeight: "700",
+-    fontSize: 14,
+-  },
+-  manualEntrySection: {
+-    marginTop: 20,
+-    paddingTop: 16,
+-    borderTopWidth: 1,
+-    borderTopColor: "#374151",
+-  },
+-  manualEntryTitle: {
+-    fontSize: 16,
+-    fontWeight: "bold",
+-    color: "#fff",
+-    marginBottom: 12,
+-  },
+-  input: {
+-    backgroundColor: "#1a1a1a",
+-    borderRadius: 8,
+-    padding: 12,
+-    marginBottom: 10,
+-    color: "#fff",
+-    borderWidth: 1,
+-    borderColor: "#374151",
+-  },
+-  buttonRow: {
+-    flexDirection: "row",
+-    gap: 12,
+-    marginTop: 8,
+-  },
+-  button: {
+-    flex: 1,
+-    backgroundColor: "#3b82f6",
+-    borderRadius: 8,
+-    padding: 14,
+-    alignItems: "center",
+-  },
+-  buttonDisabled: {
+-    backgroundColor: "#4b5563",
+-    opacity: 0.6,
+-  },
+-  stopButton: {
+-    flex: 1,
+-    backgroundColor: "#ef4444",
+-    borderRadius: 8,
+-    padding: 14,
+-    alignItems: "center",
+-  },
+-  buttonText: {
+-    color: "#fff",
+-    fontSize: 16,
+-    fontWeight: "bold",
+-  },
+-});
+diff --git a/src/services/apiClient.ts b/src/services/apiClient.ts
+index 3cdf175..463b14e 100644
+--- a/src/services/apiClient.ts
++++ b/src/services/apiClient.ts
+@@ -310,6 +310,19 @@ export async function apiPut<T>(
+   );
+ }
+ 
++export async function apiPatch<T>(
++  path: string,
++  body?: unknown,
++  options?: ApiRequestOptions,
++): Promise<T> {
++  return request<T>(
++    "PATCH",
++    path,
++    body,
++    options,
++  );
++}
++
+ export async function apiDelete<T>(
+   path: string,
+   options?: ApiRequestOptions,
+@@ -352,6 +365,7 @@ export const apiClient = {
+   apiGet,
+   apiPost,
+   apiPut,
++  apiPatch,
+   apiDelete,
+   apiPostMultipart,
+   configureApiClient,
+diff --git a/src/services/rtkService.ts b/src/services/rtkService.ts
+index 47b7396..028fc9d 100644
+--- a/src/services/rtkService.ts
++++ b/src/services/rtkService.ts
+@@ -1,293 +1,217 @@
+ /**
+- * Production RTK/NTRIP API client.
++ * Production RTK client for the backend-owned profile + lifecycle API.
+  *
+- * Contract:
+- *   GET  /api/rtk/config
+- *   PUT  /api/rtk/config
+- *   POST /api/rtk/reconnect
+- *   GET  /api/rtk/status
++ * Contract (rover_ws e57e050):
++ *   GET    /api/rtk/profiles
++ *   POST   /api/rtk/profiles
++ *   GET    /api/rtk/profiles/{id}
++ *   PATCH  /api/rtk/profiles/{id}
++ *   DELETE /api/rtk/profiles/{id}
++ *   POST   /api/rtk/profiles/{id}/activate
++ *   DELETE /api/rtk/active-profile
++ *   GET    /api/rtk/status
++ *   POST   /api/rtk/start
++ *   POST   /api/rtk/stop
+  *
+- * A successful PUT means "configuration persisted and reload accepted".
+- * It does not mean the caster authenticated or RTCM is flowing. Only
+- * healthy=true + correction_fresh=true is treated as an active RTK stream.
++ * POST /start acknowledges desired RUNNING intent only.
++ * It does not mean corrections are healthy or GNSS is RTK FIXED.
++ *
++ * NTRIP passwords are write-only. They are never logged, never stored in
++ * returned snapshots, and omitted from PATCH when unchanged.
+  */
+ 
+-import { apiGet, apiPost, apiPut } from './apiClient';
+-import { PX4_RTK } from '../config/px4Endpoints';
++import {
++  apiDelete,
++  apiGet,
++  apiPatch,
++  apiPost,
++} from "./apiClient";
++import { ApiError, NetworkError } from "./apiError";
++import { PX4_RTK } from "../config/px4Endpoints";
++import type {
++  FastApiErrorBody,
++  RtkActivateResponse,
++  RtkApiErrorDetail,
++  RtkIntentResponse,
++  RtkParsedApiError,
++  RtkProfile,
++  RtkProfileCreateRequest,
++  RtkProfileDeleteResponse,
++  RtkProfileListResponse,
++  RtkProfileResponse,
++  RtkProfileUpdateRequest,
++  RtkStatusResponse,
++} from "../types/rtk";
++
++export type {
++  RtkStatusResponse,
++  RtkProfile,
++  RtkProfileCreateRequest,
++  RtkProfileUpdateRequest,
++} from "../types/rtk";
+ 
+-export interface ActiveRtkConfiguration {
+-  host: string;
+-  port: number;
+-  mountpoint: string;
+-  username: string;
+-  password_configured: boolean;
+-  caster_url: string;
+-}
++/**
++ * Build a PATCH body. Blank / missing password means "unchanged" and is
++ * omitted entirely. Password whitespace is preserved exactly.
++ */
++export function buildRtkProfileUpdateBody(
++  dto: RtkProfileUpdateRequest,
++): RtkProfileUpdateRequest {
++  const body: RtkProfileUpdateRequest = { ...dto };
+ 
+-export interface RtkConfigurationState {
+-  configured: boolean;
+-  active: ActiveRtkConfiguration | null;
+-  last_good_available: boolean;
+-  persistent: boolean;
+-  changes_only_on_explicit_update: boolean;
+-}
++  if (body.password === undefined || body.password === null || body.password === "") {
++    delete body.password;
++  }
+ 
+-export interface GetRtkConfigurationResponse {
+-  success: boolean;
+-  configuration: RtkConfigurationState;
++  return body;
+ }
+ 
+-export interface UpdateRtkConfigurationRequest {
+-  caster_url?: string;
+-  host?: string;
+-  port?: number;
+-  mountpoint?: string;
+-  username?: string;
+-  password?: string;
++function isRtkApiErrorDetail(value: unknown): value is RtkApiErrorDetail {
++  if (!value || typeof value !== "object") {
++    return false;
++  }
++  const record = value as Record<string, unknown>;
++  return typeof record.code === "string" || typeof record.message === "string";
+ }
+ 
+-export interface RtkReloadResult {
+-  accepted: boolean;
+-  message: string;
+-  requested_at: string;
+-}
++export function parseRtkApiError(error: unknown): RtkParsedApiError {
++  if (error instanceof NetworkError) {
++    return {
++      statusCode: null,
++      code: "NETWORK",
++      message: error.message || "Rover offline",
++    };
++  }
+ 
+-export interface UpdateRtkConfigurationResponse {
+-  success: boolean;
+-  message: string;
+-  configuration: ActiveRtkConfiguration & {
+-    configured: boolean;
+-    active: boolean;
+-    persisted: boolean;
+-  };
+-  reload: RtkReloadResult;
+-}
++  if (error instanceof ApiError) {
++    let code: string | null = null;
++    let message = error.message;
++
++    if (error.responseBody) {
++      try {
++        const parsed = JSON.parse(error.responseBody) as FastApiErrorBody;
++        const detail = parsed.detail;
++
++        if (typeof detail === "string" && detail.trim()) {
++          message = detail;
++        } else if (isRtkApiErrorDetail(detail)) {
++          if (typeof detail.code === "string" && detail.code) {
++            code = detail.code;
++          }
++          if (typeof detail.message === "string" && detail.message) {
++            message = detail.message;
++          }
++        } else if (Array.isArray(detail) && detail.length > 0) {
++          const first = detail[0];
++          if (first && typeof first.msg === "string" && first.msg) {
++            message = first.msg;
++          }
++        }
++      } catch {
++        // Keep the already-classified ApiError message.
++      }
++    }
+ 
+-export interface ReconnectRtkResponse {
+-  success: boolean;
+-  message: string;
+-  configuration: RtkConfigurationState;
+-  reload: RtkReloadResult;
+-}
++    return {
++      statusCode: error.statusCode,
++      code,
++      message,
++    };
++  }
+ 
+-export interface BackendRtkStatusResponse {
+-  healthy: boolean;
+-  connected?: boolean;
+-  configured?: boolean;
+-  persistent?: boolean;
+-  status: string;
+-  correction_age_sec: number | null;
+-  correction_fresh: boolean;
+-  fix_type: number;
+-  fix_name: string;
+-  rtk_fixed: boolean;
+-  satellites_visible: number;
+-  hdop: number | null;
+-  vdop: number | null;
+-  total_bytes?: number;
+-  total_chunks?: number;
+-  last_error?: string | null;
+-  last_error_code?: string | null;
+-  retry_in_sec?: number | null;
+-  mavros_subscribers?: number;
+-  caster_host?: string | null;
+-  caster_port?: number | null;
+-  mountpoint?: string | null;
+-  password_configured?: boolean;
+-  gps_updated_at: string | null;
+-  rtk_updated_at: string | null;
+-}
++  if (error instanceof Error && error.message) {
++    return {
++      statusCode: null,
++      code: null,
++      message: error.message,
++    };
++  }
+ 
+-export interface RtkStatusResponse extends BackendRtkStatusResponse {
+-  mode: 'NTRIP';
+-  running: boolean;
+-  active_source: 'ntrip';
+-  desired_source: 'ntrip';
+-  lifecycle_state: string;
+-  source_state: string;
+-  stream_healthy: boolean;
+-  gps_fix_type: number;
+-  last_valid_rtcm_age_s: number | null;
+-  last_frame_age_s: number | null;
+-  last_error: string | null;
+-  last_process_error: string | null;
+-  active?: boolean;
+-  connected?: boolean;
+-  source?: 'ntrip' | 'lora' | string | null;
+-  bytes_received?: number;
+-  serial_open?: boolean;
++  return {
++    statusCode: null,
++    code: null,
++    message: "RTK request failed",
++  };
+ }
+ 
+-export interface NtripStartRequest {
+-  host: string;
+-  port: number;
+-  mountpoint: string;
+-  user?: string;
+-  username?: string;
+-  pass?: string;
+-  password?: string;
++export function formatRtkApiError(error: unknown, fallback: string): string {
++  const parsed = parseRtkApiError(error);
++  if (!parsed.message) {
++    return fallback;
++  }
++  if (parsed.code && parsed.code !== "NETWORK") {
++    return parsed.message;
++  }
++  return parsed.message || fallback;
+ }
+ 
+-export interface LoraStartRequest {
+-  serial_port: string;
+-  baudrate?: number;
++export async function listRtkProfiles(): Promise<RtkProfileListResponse> {
++  return apiGet<RtkProfileListResponse>(PX4_RTK.PROFILES);
+ }
+ 
+-export type RtkConnectionOutcome =
+-  | { kind: 'healthy'; status: RtkStatusResponse }
+-  | { kind: 'failed'; status: RtkStatusResponse }
+-  | { kind: 'pending'; status: RtkStatusResponse };
+-
+-const TERMINAL_FAILURE_STATES = new Set([
+-  'AUTH_FAILED',
+-  'CONFIG_REQUIRED',
+-  'DNS_FAILED',
+-  'NETWORK_TIMEOUT',
+-  'NETWORK_ERROR',
+-  'CASTER_UNREACHABLE',
+-  'CASTER_REJECTED',
+-  'STREAM_STALE',
+-  'ERROR',
+-  'UNAVAILABLE',
+-]);
++export async function getRtkProfile(id: number): Promise<RtkProfile> {
++  const response = await apiGet<RtkProfileResponse>(PX4_RTK.PROFILE(id));
++  return response.profile;
++}
+ 
+-export function isRtkStreamHealthy(status: RtkStatusResponse | null | undefined): boolean {
+-  return Boolean(status?.healthy && status?.correction_fresh);
++export async function createRtkProfile(
++  dto: RtkProfileCreateRequest,
++): Promise<RtkProfile> {
++  const response = await apiPost<RtkProfileResponse>(PX4_RTK.PROFILES, dto);
++  return response.profile;
+ }
+ 
+-export function isRtkTerminalFailure(status: RtkStatusResponse): boolean {
+-  return TERMINAL_FAILURE_STATES.has(
+-    String(status.status || '').trim().toUpperCase(),
++export async function updateRtkProfile(
++  id: number,
++  dto: RtkProfileUpdateRequest,
++): Promise<RtkProfile> {
++  const response = await apiPatch<RtkProfileResponse>(
++    PX4_RTK.PROFILE(id),
++    buildRtkProfileUpdateBody(dto),
+   );
++  return response.profile;
+ }
+ 
+-export async function getRtkConfiguration(): Promise<GetRtkConfigurationResponse> {
+-  return apiGet<GetRtkConfigurationResponse>(PX4_RTK.CONFIG);
++export async function deleteRtkProfile(
++  id: number,
++): Promise<RtkProfileDeleteResponse> {
++  return apiDelete<RtkProfileDeleteResponse>(PX4_RTK.PROFILE(id));
+ }
+ 
+-export async function updateRtkConfiguration(
+-  request: UpdateRtkConfigurationRequest,
+-): Promise<UpdateRtkConfigurationResponse> {
+-  return apiPut<UpdateRtkConfigurationResponse>(PX4_RTK.CONFIG, request);
++export async function activateRtkProfile(
++  id: number,
++): Promise<RtkActivateResponse> {
++  return apiPost<RtkActivateResponse>(PX4_RTK.ACTIVATE(id));
+ }
+ 
+-export async function reconnectRtk(): Promise<ReconnectRtkResponse> {
+-  return apiPost<ReconnectRtkResponse>(PX4_RTK.RECONNECT);
++export async function clearActiveRtkProfile(): Promise<RtkActivateResponse> {
++  return apiDelete<RtkActivateResponse>(PX4_RTK.ACTIVE_PROFILE);
+ }
+ 
+ export async function getRtkStatus(): Promise<RtkStatusResponse> {
+-  const raw = await apiGet<BackendRtkStatusResponse>(PX4_RTK.STATUS);
+-  const state = String(raw.status ?? 'UNAVAILABLE').trim().toUpperCase();
+-  const streamHealthy = Boolean(raw.healthy && raw.correction_fresh);
+-
+-  return {
+-    ...raw,
+-    status: state,
+-    mode: 'NTRIP',
+-    running: streamHealthy,
+-    active_source: 'ntrip',
+-    desired_source: 'ntrip',
+-    lifecycle_state: state,
+-    source_state: state,
+-    stream_healthy: streamHealthy,
+-    gps_fix_type: raw.fix_type,
+-    last_valid_rtcm_age_s: raw.correction_age_sec,
+-    last_frame_age_s: raw.correction_age_sec,
+-    last_error:
+-      raw.last_error ??
+-      (TERMINAL_FAILURE_STATES.has(state) ? state : null),
+-    last_process_error: null,
+-    active: streamHealthy,
+-    connected: streamHealthy,
+-    source: 'ntrip',
+-    bytes_received: raw.total_bytes ?? 0,
+-    serial_open: false,
+-  };
+-}
+-
+-export async function waitForRtkOutcome(
+-  timeoutMs = 20_000,
+-  pollIntervalMs = 750,
+-): Promise<RtkConnectionOutcome> {
+-  const deadline = Date.now() + timeoutMs;
+-  let latest = await getRtkStatus();
+-
+-  while (Date.now() < deadline) {
+-    if (isRtkStreamHealthy(latest)) {
+-      return { kind: 'healthy', status: latest };
+-    }
+-
+-    if (isRtkTerminalFailure(latest)) {
+-      return { kind: 'failed', status: latest };
+-    }
+-
+-    await new Promise<void>((resolve) => {
+-      setTimeout(resolve, pollIntervalMs);
+-    });
+-    latest = await getRtkStatus();
+-  }
+-
+-  return { kind: 'pending', status: latest };
+-}
+-
+-export async function applyNtripConfiguration(
+-  request: UpdateRtkConfigurationRequest,
+-): Promise<{
+-  update: UpdateRtkConfigurationResponse;
+-  outcome: RtkConnectionOutcome;
+-}> {
+-  const update = await updateRtkConfiguration(request);
+-  const outcome = await waitForRtkOutcome();
+-  return { update, outcome };
+-}
+-
+-export async function startNtripStream(
+-  request: NtripStartRequest,
+-): Promise<RtkStatusResponse> {
+-  const username = request.username ?? request.user ?? '';
+-  const password = request.password ?? request.pass ?? '';
+-
+-  const { outcome } = await applyNtripConfiguration({
+-    host: request.host.trim(),
+-    port: request.port,
+-    mountpoint: request.mountpoint.trim().replace(/^\/+/, ''),
+-    username: username.trim(),
+-    ...(password.trim() ? { password } : {}),
+-  });
+-
+-  return outcome.status;
+-}
+-
+-export async function stopAllRtk(): Promise<RtkStatusResponse> {
+-  throw new Error(
+-    'RTK stop is not supported. The persistent bridge reconnects automatically.',
+-  );
+-}
+-
+-export async function stopNtripStream(): Promise<RtkStatusResponse> {
+-  return stopAllRtk();
++  return apiGet<RtkStatusResponse>(PX4_RTK.STATUS);
+ }
+ 
+-export async function startLoraStream(
+-  _request?: LoraStartRequest,
+-): Promise<RtkStatusResponse> {
+-  throw new Error('LoRa RTK is not supported by the current backend.');
++export async function startRtk(): Promise<RtkIntentResponse> {
++  return apiPost<RtkIntentResponse>(PX4_RTK.START);
+ }
+ 
+-export async function stopLoraStream(): Promise<RtkStatusResponse> {
+-  throw new Error('LoRa RTK is not supported by the current backend.');
++export async function stopRtk(): Promise<RtkIntentResponse> {
++  return apiPost<RtkIntentResponse>(PX4_RTK.STOP);
+ }
+ 
+ export default {
+-  getRtkConfiguration,
+-  updateRtkConfiguration,
+-  reconnectRtk,
++  listRtkProfiles,
++  getRtkProfile,
++  createRtkProfile,
++  updateRtkProfile,
++  deleteRtkProfile,
++  activateRtkProfile,
++  clearActiveRtkProfile,
+   getRtkStatus,
+-  waitForRtkOutcome,
+-  applyNtripConfiguration,
+-  startNtripStream,
+-  stopAllRtk,
+-  stopNtripStream,
+-  startLoraStream,
+-  stopLoraStream,
++  startRtk,
++  stopRtk,
++  buildRtkProfileUpdateBody,
++  parseRtkApiError,
++  formatRtkApiError,
+ };
+diff --git a/src/types/rtk.ts b/src/types/rtk.ts
+index bfda1ba..eb7243c 100644
+--- a/src/types/rtk.ts
++++ b/src/types/rtk.ts
+@@ -1,10 +1,412 @@
++/**
++ * Exact backend RTK contract from rover_ws commit e57e050.
++ *
++ * Backend owns profile persistence, desired RUNNING/STOPPED intent,
++ * worker lifecycle, and RTCM injection. The tablet is not an NTRIP
++ * authority. Profile responses never include the NTRIP password.
++ */
++
++// ---------------------------------------------------------------------------
++// Enumerations — exact backend string values
++// ---------------------------------------------------------------------------
++
++/** Operator-requested persisted lifecycle target (`DesiredState`). */
++export const RTK_DESIRED_STATES = ["STOPPED", "RUNNING"] as const;
++export type RtkDesiredState = (typeof RTK_DESIRED_STATES)[number];
++
++/** Supervisor state (`ManagerState`). */
++export const RTK_MANAGER_STATES = [
++  "STOPPED",
++  "WAITING_FOR_MAVROS",
++  "STARTING",
++  "RUNNING",
++  "RUNNING_MAVROS_STALE",
++  "BACKOFF",
++  "STOPPING",
++  "ERROR",
++] as const;
++export type RtkManagerState = (typeof RTK_MANAGER_STATES)[number];
++
++/** Latched terminal manager error (`ErrorReason`). */
++export const RTK_ERROR_REASONS = [
++  "CONFIG_INVALID",
++  "OWNERSHIP_CONFLICT",
++  "AUTH_FAILED",
++  "MOUNTPOINT_REJECTED",
++  "RESTART_BUDGET_EXHAUSTED",
++] as const;
++export type RtkErrorReason = (typeof RTK_ERROR_REASONS)[number];
++
++/** Semantic child-exit reasons (`WorkerExitReason`). */
++export const RTK_WORKER_EXIT_REASONS = [
++  "CLEAN",
++  "RETRYABLE_FAILURE",
++  "CONFIG_INVALID",
++  "OWNERSHIP_CONFLICT",
++  "AUTH_FAILED",
++  "MOUNTPOINT_REJECTED",
++] as const;
++export type RtkWorkerExitReason = (typeof RTK_WORKER_EXIT_REASONS)[number];
++
++/** Worker status vocabulary (`WorkerStatusKind`). */
++export const RTK_WORKER_STATUS_KINDS = [
++  "STARTED",
++  "READY",
++  "TERMINAL_ERROR",
++] as const;
++export type RtkWorkerStatusKind = (typeof RTK_WORKER_STATUS_KINDS)[number];
++
++/**
++ * TLS policy (`WorkerConfig.tls_mode`).
++ * REQUIRED = verified TLS, no plaintext fallback.
++ * DISABLED = explicit insecure plaintext operator policy.
++ */
++export const RTK_TLS_MODES = ["REQUIRED", "DISABLED"] as const;
++export type RtkTlsMode = (typeof RTK_TLS_MODES)[number];
++
++/** Correction-stream `state` values projected by the ROS bridge. */
++export const RTK_CORRECTION_STREAM_STATES = [
++  "DISCONNECTED",
++  "WAITING_FOR_FIRST_PUBLISHED_FRAME",
++  "HEALTHY",
++  "UNHEALTHY",
++  "UNAVAILABLE",
++  "UNKNOWN",
++] as const;
++export type RtkCorrectionStreamState =
++  (typeof RTK_CORRECTION_STREAM_STATES)[number];
++
++/** GGA/VRS transmitter `state` values. */
++export const RTK_GGA_STATES = [
++  "DISABLED",
++  "WAITING_FOR_FIX",
++  "NO_FIX",
++  "STALE",
++  "READY",
++  "UNKNOWN",
++] as const;
++export type RtkGgaState = (typeof RTK_GGA_STATES)[number];
++
++/** FastAPI `detail.code` values from rtk_routes.py. */
++export const RTK_API_ERROR_CODES = [
++  "RTK_CONTROL_UNAVAILABLE",
++  "RTK_PROFILE_INVALID",
++  "RTK_PROFILE_NOT_FOUND",
++  "RTK_PROFILE_CONFLICT",
++  "RTK_STATE_CONFLICT",
++  "RTK_CONTROL_INCONSISTENT",
++  "RTK_RUNTIME_UNAVAILABLE",
++  "RTK_PERSISTENCE_UNAVAILABLE",
++  "RTK_CONTROL_FAILED",
++] as const;
++export type RtkApiErrorCode = (typeof RTK_API_ERROR_CODES)[number];
++
++// ---------------------------------------------------------------------------
++// Profile
++// ---------------------------------------------------------------------------
++
++/** Credential-free persisted RTK profile (`_profile_payload`). */
++export interface RtkProfile {
++  id: number;
++  name: string;
++  caster_host: string;
++  caster_port: number;
++  mountpoint: string;
++  username: string;
++  password_configured: boolean;
++  rtcm_topic: string;
++  connect_timeout_sec: number;
++  socket_timeout_sec: number;
++  healthy_age_sec: number;
++  stale_reconnect_sec: number;
++  reconnect_delay_sec: number;
++  first_data_timeout_sec: number;
++  gga_enabled: boolean;
++  gga_interval_sec: number;
++  gga_max_age_sec: number;
++  tls_mode: RtkTlsMode;
++  max_mavros_rtcm_frame_bytes: number;
++  enabled: boolean;
++  revision: number;
++  created_at_epoch: number;
++  updated_at_epoch: number;
++}
++
++export const RTK_PROFILE_CREATE_DEFAULTS = {
++  rtcm_topic: "/mavros/gps_rtk/send_rtcm",
++  connect_timeout_sec: 10.0,
++  socket_timeout_sec: 1.0,
++  healthy_age_sec: 5.0,
++  stale_reconnect_sec: 10.0,
++  reconnect_delay_sec: 5.0,
++  first_data_timeout_sec: 10.0,
++  gga_enabled: false,
++  gga_interval_sec: 10.0,
++  gga_max_age_sec: 5.0,
++  tls_mode: "REQUIRED" as RtkTlsMode,
++  max_mavros_rtcm_frame_bytes: 720,
++  enabled: true,
++} as const;
++
++/**
++ * POST /api/rtk/profiles body.
++ * `password` is write-only and required. Do not trim it.
++ */
++export interface RtkProfileCreateRequest {
++  name: string;
++  caster_host: string;
++  caster_port: number;
++  mountpoint: string;
++  username: string;
++  password: string;
++  rtcm_topic?: string;
++  connect_timeout_sec?: number;
++  socket_timeout_sec?: number;
++  healthy_age_sec?: number;
++  stale_reconnect_sec?: number;
++  reconnect_delay_sec?: number;
++  first_data_timeout_sec?: number;
++  gga_enabled?: boolean;
++  gga_interval_sec?: number;
++  gga_max_age_sec?: number;
++  tls_mode?: RtkTlsMode;
++  max_mavros_rtcm_frame_bytes?: number;
++  enabled?: boolean;
++}
++
++/**
++ * PATCH /api/rtk/profiles/{id} body.
++ * Omit `password` entirely when unchanged. Blank editor field means omit,
++ * not send "". Explicit JSON null is also treated as omit by the backend.
++ */
++export interface RtkProfileUpdateRequest {
++  name?: string;
++  caster_host?: string;
++  caster_port?: number;
++  mountpoint?: string;
++  username?: string;
++  password?: string;
++  rtcm_topic?: string;
++  connect_timeout_sec?: number;
++  socket_timeout_sec?: number;
++  healthy_age_sec?: number;
++  stale_reconnect_sec?: number;
++  reconnect_delay_sec?: number;
++  first_data_timeout_sec?: number;
++  gga_enabled?: boolean;
++  gga_interval_sec?: number;
++  gga_max_age_sec?: number;
++  tls_mode?: RtkTlsMode;
++  max_mavros_rtcm_frame_bytes?: number;
++  enabled?: boolean;
++}
++
++/**
++ * Fields whose change on the active profile forces persisted STOPPED.
++ * `name` is NOT runtime-significant. `password` is compared via the
++ * stored secret (any provided replacement is runtime-significant).
++ */
++export const RTK_RUNTIME_SIGNIFICANT_FIELDS = [
++  "caster_host",
++  "caster_port",
++  "mountpoint",
++  "username",
++  "password",
++  "rtcm_topic",
++  "connect_timeout_sec",
++  "socket_timeout_sec",
++  "healthy_age_sec",
++  "stale_reconnect_sec",
++  "reconnect_delay_sec",
++  "first_data_timeout_sec",
++  "gga_enabled",
++  "gga_interval_sec",
++  "gga_max_age_sec",
++  "tls_mode",
++  "max_mavros_rtcm_frame_bytes",
++  "enabled",
++] as const;
++
++export type RtkRuntimeSignificantField =
++  (typeof RTK_RUNTIME_SIGNIFICANT_FIELDS)[number];
++
++export interface RtkProfileListResponse {
++  profiles: RtkProfile[];
++  count: number;
++}
++
++export interface RtkProfileResponse {
++  profile: RtkProfile;
++}
++
++export interface RtkProfileDeleteResponse {
++  success: boolean;
++  deleted_profile_id: number;
++}
++
++// ---------------------------------------------------------------------------
++// Persisted runtime + control snapshots
++// ---------------------------------------------------------------------------
++
++export interface RtkPersistedRuntimeState {
++  active_profile_id: number | null;
++  desired_state: RtkDesiredState;
++  revision: number;
++  updated_at_epoch: number;
++}
++
++export interface RtkActivateResponse {
++  success: boolean;
++  persisted: RtkPersistedRuntimeState;
++}
++
++export interface RtkIntentResponse {
++  success: boolean;
++  message: string;
++  persisted: RtkPersistedRuntimeState;
++}
++
++export interface RtkSupervisorSnapshot {
++  running: boolean;
++  shutdown_requested: boolean;
++  mavros_ready: boolean;
++  last_error_code: string | null;
++}
++
++export interface RtkManagerSnapshot {
++  desired_state: RtkDesiredState;
++  state: RtkManagerState;
++  mavros_ready: boolean;
++  active_run_id: string | null;
++  child_started: boolean;
++  child_ready: boolean;
++  next_restart_at_monotonic_sec: number | null;
++  consecutive_failures: number;
++  restart_count_in_window: number;
++  error_reason: RtkErrorReason | null;
++}
++
++export interface RtkProcessSnapshot {
++  active_run_id: string | null;
++  pid: number | null;
++  stop_requested: boolean;
++  stop_deadline_monotonic_sec: number | null;
++  kill_sent: boolean;
++  exit_reported: boolean;
++}
++
++export interface RtkWorkerStatusSnapshot {
++  run_id: string;
++  kind: RtkWorkerStatusKind;
++  detail_code: string | null;
++}
++
++export interface RtkRuntimeSnapshot {
++  supervisor: RtkSupervisorSnapshot;
++  manager: RtkManagerSnapshot | null;
++  process: RtkProcessSnapshot | null;
++  last_worker_status: RtkWorkerStatusSnapshot | null;
++  last_process_returncode: number | null;
++  last_protocol_fault_run_id: string | null;
++}
++
++export interface RtkGgaTelemetry {
++  enabled: boolean;
++  state: RtkGgaState | string;
++  source_age_sec: number | null;
++  last_sent_age_sec: number | null;
++  sent_total: number;
++  send_errors: number;
++}
++
++export interface RtkCorrectionStream {
++  state: RtkCorrectionStreamState | string;
++  connected: boolean;
++  healthy: boolean;
++  correction_age_sec: number | null;
++  socket_bytes_received: number;
++  valid_frames: number;
++  published_frames: number;
++  crc_failures: number;
++  invalid_headers: number;
++  resync_bytes_discarded: number;
++  partial_frame_timeouts: number;
++  oversize_drops: number;
++  publish_errors: number;
++  mavros_ready: boolean;
++  mavros_rtcm_subscribers: number;
++  worker_mavros_subscribers: number;
++  max_mavros_rtcm_frame_bytes: number | null;
++  gga: RtkGgaTelemetry;
++}
++
++/**
++ * GNSS solution is independent from correction-stream health.
++ * MAVLink GPS_FIX_TYPE: 5 = RTK FLOAT, 6 = RTK FIXED.
++ */
++export interface RtkGnssSolution {
++  fix_type: number;
++  fix_name: string;
++  rtk_float: boolean;
++  rtk_fixed: boolean;
++  satellites_visible: number;
++  horizontal_accuracy_m: number | null;
++  vertical_accuracy_m: number | null;
++  hdop: number | null;
++  vdop: number | null;
++}
++
++/** Inner `status` object of GET /api/rtk/status. */
++export interface RtkStatus {
++  persisted: RtkPersistedRuntimeState;
++  active_profile: RtkProfile | null;
++  runtime: RtkRuntimeSnapshot;
++  correction_stream: RtkCorrectionStream;
++  gnss_solution: RtkGnssSolution;
++}
++
++/** Exact GET /api/rtk/status HTTP body. */
++export interface RtkStatusResponse {
++  status: RtkStatus;
++}
++
++// ---------------------------------------------------------------------------
++// FastAPI error body
++// ---------------------------------------------------------------------------
++
++export interface RtkApiErrorDetail {
++  code: string;
++  message: string;
++}
++
++export interface FastApiValidationErrorItem {
++  loc: Array<string | number>;
++  msg: string;
++  type: string;
++}
++
++export interface FastApiErrorBody {
++  detail: RtkApiErrorDetail | string | FastApiValidationErrorItem[];
++}
++
++export interface RtkParsedApiError {
++  statusCode: number | null;
++  code: string | null;
++  message: string;
++}
++
++/**
++ * Deprecated RoverServices compatibility types. LoRa is not part of the
++ * production RTK API. These exist only so the telemetry service object still
++ * typechecks; they are not a runtime NTRIP authority.
++ */
+ export type LoraRTKStatusState =
+-  | 'connecting'
+-  | 'connected'
+-  | 'streaming'
+-  | 'error'
+-  | 'disconnected'
+-  | 'status_update';
++  | "connecting"
++  | "connected"
++  | "streaming"
++  | "error"
++  | "disconnected"
++  | "status_update";
+ 
+ export interface LoraRTKStatus {
+   status?: LoraRTKStatusState;
+@@ -15,22 +417,8 @@ export interface LoraRTKStatus {
+   error_count?: number;
+   is_connected?: boolean;
+   is_running?: boolean;
+-  connection_time?: string;
+-  uptime_seconds?: number;
+-  source_active?: boolean;
+-  status_message?: string;
+-}
+-
+-// NTRIP Caster Configuration
+-export interface NTRIPCasterInfo {
+-  host: string;
+-  port: number;
+-  mountpoint: string;
+-  user: string;
+-  password: string;
+ }
+ 
+-// NTRIP Start Request Parameters
+ export interface NTRIPStartParams {
+   ntrip_url?: string;
+   host?: string;
+@@ -41,52 +429,34 @@ export interface NTRIPStartParams {
+   [key: string]: unknown;
+ }
+ 
+-// NTRIP Start Response
+ export interface NTRIPStartResponse {
+   success: boolean;
+   message: string;
+-  source: 'NTRIP';
+-  caster?: NTRIPCasterInfo;
++  source: "NTRIP";
+ }
+ 
+-// NTRIP Stop Response
+ export interface NTRIPStopResponse {
+   success: boolean;
+   message: string;
+-  source: 'NTRIP';
++  source: "NTRIP";
+ }
+ 
+-// LoRa Start Response
+ export interface LoRaStartResponse {
+   success: boolean;
+   message: string;
+-  source: 'LoRa';
+-  status?: LoraRTKStatus;
++  source: "LoRa";
+ }
+ 
+-// LoRa Stop Response
+ export interface LoRaStopResponse {
+   success: boolean;
+   message: string;
+-  source: 'LoRa';
++  source: "LoRa";
+ }
+ 
+-// Unified RTK Status Response
+-export interface RTKStatusResponse {
+-  success: boolean;
+-  ntrip: {
+-    running: boolean;
+-    caster: NTRIPCasterInfo | null;
+-    total_bytes: number;
+-  };
+-  lora: {
+-    running: boolean;
+-    status: LoraRTKStatus | null;
+-  };
+-}
+-
+-// Stop All RTK Streams Response
+ export interface RTKStopAllResponse {
+   success: boolean;
+   message: string;
+ }
++
++/** @deprecated Use RtkStatusResponse. Kept for RoverServices typing. */
++export type RTKStatusResponse = RtkStatusResponse;
+
+
+==============================================================================================================
+NEW PRODUCTION FILE CONTENT
+==============================================================================================================
+
+
+### FILE: src/adapters/rtkControlAdapter.ts
+----------------------------------------------------------------------------------------------------
+/**
+ * Pure mapping from GET /api/rtk/status to a deterministic RTK UI view.
+ *
+ * This adapter never makes network requests. A successful POST /api/rtk/start
+ * is not an input and must never be treated as RTK Fixed / corrections healthy.
+ *
+ * Correction-stream health is independent from GNSS solution state.
+ */
+
+import type {
+  RtkCorrectionStream,
+  RtkDesiredState,
+  RtkErrorReason,
+  RtkGnssSolution,
+  RtkGgaTelemetry,
+  RtkManagerState,
+  RtkProfile,
+  RtkStatus,
+  RtkStatusResponse,
+} from "../types/rtk";
+
+export type RtkHeadlineState =
+  | "rover_offline"
+  | "off"
+  | "start_requested"
+  | "waiting_for_mavros"
+  | "starting"
+  | "rtk_fixed"
+  | "rtk_float"
+  | "corrections_active"
+  | "degraded"
+  | "mavros_lost"
+  | "reconnecting"
+  | "stopping"
+  | "terminal_error";
+
+export type RtkHeadlineTone =
+  | "idle"
+  | "healthy"
+  | "transitional"
+  | "degraded"
+  | "terminal";
+
+export const RTK_HEADLINE_LABEL: Record<RtkHeadlineState, string> = {
+  rover_offline: "Rover Offline",
+  off: "Off",
+  start_requested: "Start Requested",
+  waiting_for_mavros: "Waiting for MAVROS",
+  starting: "Starting",
+  rtk_fixed: "RTK Fixed",
+  rtk_float: "RTK Float",
+  corrections_active: "Corrections Active",
+  degraded: "Degraded",
+  mavros_lost: "MAVROS Lost",
+  reconnecting: "Reconnecting",
+  stopping: "Stopping",
+  terminal_error: "Terminal Error",
+};
+
+export interface RtkControlViewModel {
+  headline: RtkHeadlineState;
+  headlineLabel: string;
+  tone: RtkHeadlineTone;
+  desiredState: RtkDesiredState | null;
+  managerState: RtkManagerState | null;
+  supervisorRunning: boolean | null;
+  mavrosReady: boolean | null;
+  errorReason: RtkErrorReason | null;
+  correctionState: string | null;
+  correctionConnected: boolean;
+  correctionHealthy: boolean;
+  correctionAgeSec: number | null;
+  publishedFrames: number | null;
+  socketBytesReceived: number | null;
+  gnssFixType: number | null;
+  gnssFixName: string | null;
+  rtkFloat: boolean;
+  rtkFixed: boolean;
+  satellitesVisible: number | null;
+  ggaEnabled: boolean;
+  ggaState: string | null;
+  activeProfile: RtkProfile | null;
+  activeProfileId: number | null;
+  canStart: boolean;
+  canStop: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  disabledReason: string | null;
+}
+
+export interface RtkControlViewOptions {
+  connected?: boolean;
+  mutationBusy?: boolean;
+}
+
+const IDLE_VIEW: RtkControlViewModel = {
+  headline: "rover_offline",
+  headlineLabel: RTK_HEADLINE_LABEL.rover_offline,
+  tone: "terminal",
+  desiredState: null,
+  managerState: null,
+  supervisorRunning: null,
+  mavrosReady: null,
+  errorReason: null,
+  correctionState: null,
+  correctionConnected: false,
+  correctionHealthy: false,
+  correctionAgeSec: null,
+  publishedFrames: null,
+  socketBytesReceived: null,
+  gnssFixType: null,
+  gnssFixName: null,
+  rtkFloat: false,
+  rtkFixed: false,
+  satellitesVisible: null,
+  ggaEnabled: false,
+  ggaState: null,
+  activeProfile: null,
+  activeProfileId: null,
+  canStart: false,
+  canStop: false,
+  canEdit: false,
+  canDelete: false,
+  disabledReason: "Rover Offline",
+};
+
+export function unwrapRtkStatus(
+  input: RtkStatusResponse | RtkStatus | null | undefined,
+): RtkStatus | null {
+  if (!input) {
+    return null;
+  }
+  if ("status" in input && input.status && typeof input.status === "object") {
+    return input.status;
+  }
+  if ("persisted" in input && "runtime" in input) {
+    return input as RtkStatus;
+  }
+  return null;
+}
+
+function toneForHeadline(headline: RtkHeadlineState): RtkHeadlineTone {
+  switch (headline) {
+    case "rtk_fixed":
+    case "rtk_float":
+    case "corrections_active":
+      return "healthy";
+    case "start_requested":
+    case "waiting_for_mavros":
+    case "starting":
+    case "reconnecting":
+    case "stopping":
+      return "transitional";
+    case "degraded":
+    case "mavros_lost":
+      return "degraded";
+    case "terminal_error":
+    case "rover_offline":
+      return "terminal";
+    case "off":
+    default:
+      return "idle";
+  }
+}
+
+function runningHeadline(
+  correctionHealthy: boolean,
+  gnss: RtkGnssSolution | undefined,
+): RtkHeadlineState {
+  const fixType = gnss?.fix_type ?? 0;
+  if (correctionHealthy && (gnss?.rtk_fixed === true || fixType === 6)) {
+    return "rtk_fixed";
+  }
+  if (correctionHealthy && (gnss?.rtk_float === true || fixType === 5)) {
+    return "rtk_float";
+  }
+  if (correctionHealthy) {
+    return "corrections_active";
+  }
+  return "degraded";
+}
+
+export function deriveRtkHeadline(status: RtkStatus): RtkHeadlineState {
+  const desired = status.persisted.desired_state;
+  const managerState = status.runtime.manager?.state ?? null;
+  const correctionHealthy = Boolean(status.correction_stream?.healthy);
+  const gnss = status.gnss_solution;
+
+  if (managerState === "STOPPING") {
+    return "stopping";
+  }
+
+  if (managerState === "ERROR") {
+    return "terminal_error";
+  }
+
+  if (desired === "STOPPED" && (managerState === null || managerState === "STOPPED")) {
+    return "off";
+  }
+
+  if (managerState === "WAITING_FOR_MAVROS") {
+    return "waiting_for_mavros";
+  }
+
+  if (managerState === "STARTING") {
+    return "starting";
+  }
+
+  if (managerState === "RUNNING") {
+    return runningHeadline(correctionHealthy, gnss);
+  }
+
+  if (managerState === "RUNNING_MAVROS_STALE") {
+    return "mavros_lost";
+  }
+
+  if (managerState === "BACKOFF") {
+    return "reconnecting";
+  }
+
+  if (desired === "STOPPED") {
+    return "off";
+  }
+
+  if (desired === "RUNNING" && (managerState === null || managerState === "STOPPED")) {
+    return "start_requested";
+  }
+
+  return "starting";
+}
+
+function deriveDisabledReason(args: {
+  connected: boolean;
+  mutationBusy: boolean;
+  headline: RtkHeadlineState;
+  canStart: boolean;
+  canStop: boolean;
+  activeProfile: RtkProfile | null;
+  activeEnabled: boolean;
+}): string | null {
+  if (!args.connected) {
+    return "Rover Offline";
+  }
+  if (args.mutationBusy) {
+    return "RTK command in progress";
+  }
+  if (args.headline === "terminal_error") {
+    return "Terminal RTK error — Stop to reset";
+  }
+  if (!args.canStart && !args.canStop) {
+    if (!args.activeProfile) {
+      return "Activate a backend RTK profile before starting";
+    }
+    if (!args.activeEnabled) {
+      return "Active RTK profile is disabled";
+    }
+  }
+  return null;
+}
+
+export function toRtkControlView(
+  input: RtkStatusResponse | RtkStatus | null | undefined,
+  options: RtkControlViewOptions = {},
+): RtkControlViewModel {
+  const connected = options.connected !== false;
+  const mutationBusy = Boolean(options.mutationBusy);
+
+  if (!connected) {
+    return {
+      ...IDLE_VIEW,
+      headline: "rover_offline",
+      headlineLabel: RTK_HEADLINE_LABEL.rover_offline,
+      tone: "terminal",
+      canStart: false,
+      canStop: false,
+      canEdit: false,
+      canDelete: false,
+      disabledReason: "Rover Offline",
+    };
+  }
+
+  const status = unwrapRtkStatus(input);
+  if (!status) {
+    return {
+      ...IDLE_VIEW,
+      headline: "off",
+      headlineLabel: RTK_HEADLINE_LABEL.off,
+      tone: "idle",
+      canEdit: !mutationBusy,
+      canDelete: false,
+      disabledReason: mutationBusy
+        ? "RTK command in progress"
+        : "No RTK status yet",
+    };
+  }
+
+  const headline = deriveRtkHeadline(status);
+  const stream: RtkCorrectionStream | undefined = status.correction_stream;
+  const gnss: RtkGnssSolution | undefined = status.gnss_solution;
+  const gga: RtkGgaTelemetry | undefined = stream?.gga;
+  const managerState = status.runtime.manager?.state ?? null;
+  const desired = status.persisted.desired_state;
+  const activeProfile = status.active_profile;
+  const activeEnabled = Boolean(activeProfile?.enabled);
+  const hasActiveProfile =
+    activeProfile != null && status.persisted.active_profile_id != null;
+
+  const canStart =
+    !mutationBusy &&
+    hasActiveProfile &&
+    activeEnabled &&
+    desired === "STOPPED" &&
+    managerState !== "STOPPING" &&
+    managerState !== "ERROR";
+
+  const canStop =
+    !mutationBusy &&
+    (desired === "RUNNING" ||
+      (managerState != null &&
+        managerState !== "STOPPED" &&
+        managerState !== "ERROR") ||
+      managerState === "ERROR");
+
+  const canEdit = !mutationBusy;
+  const canDelete = !mutationBusy;
+
+  return {
+    headline,
+    headlineLabel: RTK_HEADLINE_LABEL[headline],
+    tone: toneForHeadline(headline),
+    desiredState: desired,
+    managerState,
+    supervisorRunning: status.runtime.supervisor?.running ?? null,
+    mavrosReady:
+      status.runtime.manager?.mavros_ready ??
+      status.runtime.supervisor?.mavros_ready ??
+      stream?.mavros_ready ??
+      null,
+    errorReason: status.runtime.manager?.error_reason ?? null,
+    correctionState: stream?.state ?? null,
+    correctionConnected: Boolean(stream?.connected),
+    correctionHealthy: Boolean(stream?.healthy),
+    correctionAgeSec:
+      typeof stream?.correction_age_sec === "number"
+        ? stream.correction_age_sec
+        : null,
+    publishedFrames:
+      typeof stream?.published_frames === "number"
+        ? stream.published_frames
+        : null,
+    socketBytesReceived:
+      typeof stream?.socket_bytes_received === "number"
+        ? stream.socket_bytes_received
+        : null,
+    gnssFixType: typeof gnss?.fix_type === "number" ? gnss.fix_type : null,
+    gnssFixName: gnss?.fix_name ?? null,
+    rtkFloat: Boolean(gnss?.rtk_float) || gnss?.fix_type === 5,
+    rtkFixed: Boolean(gnss?.rtk_fixed) || gnss?.fix_type === 6,
+    satellitesVisible:
+      typeof gnss?.satellites_visible === "number"
+        ? gnss.satellites_visible
+        : null,
+    ggaEnabled: Boolean(gga?.enabled),
+    ggaState: gga?.state ?? null,
+    activeProfile,
+    activeProfileId: status.persisted.active_profile_id,
+    canStart,
+    canStop,
+    canEdit,
+    canDelete,
+    disabledReason: deriveDisabledReason({
+      connected,
+      mutationBusy,
+      headline,
+      canStart,
+      canStop,
+      activeProfile,
+      activeEnabled,
+    }),
+  };
+}
+
+export function isRuntimeSignificantProfileChange(
+  patch: Record<string, unknown>,
+): boolean {
+  const keys = [
+    "caster_host",
+    "caster_port",
+    "mountpoint",
+    "username",
+    "password",
+    "rtcm_topic",
+    "connect_timeout_sec",
+    "socket_timeout_sec",
+    "healthy_age_sec",
+    "stale_reconnect_sec",
+    "reconnect_delay_sec",
+    "first_data_timeout_sec",
+    "gga_enabled",
+    "gga_interval_sec",
+    "gga_max_age_sec",
+    "tls_mode",
+    "max_mavros_rtcm_frame_bytes",
+    "enabled",
+  ];
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+}
+
+export function decideMissionRtkQuickStart(args: {
+  connected: boolean;
+  activeProfileId: number | null | undefined;
+}): "offline" | "open_config" | "start" {
+  if (!args.connected) {
+    return "offline";
+  }
+  if (args.activeProfileId == null) {
+    return "open_config";
+  }
+  return "start";
+}
+
+
+
+### FILE: src/adapters/rtkProfileFormAdapter.ts
+----------------------------------------------------------------------------------------------------
+/**
+ * Pure helpers for the RTK profile editor.
+ *
+ * Password whitespace is preserved. Blank edit password is omitted from PATCH.
+ * TLS defaults to REQUIRED. DISABLED requires an explicit operator warning.
+ */
+
+import {
+  RTK_PROFILE_CREATE_DEFAULTS,
+  type RtkProfile,
+  type RtkProfileCreateRequest,
+  type RtkProfileUpdateRequest,
+  type RtkTlsMode,
+} from "../types/rtk";
+import { isRuntimeSignificantProfileChange } from "./rtkControlAdapter";
+
+export interface RtkProfileEditorForm {
+  name: string;
+  caster_host: string;
+  caster_port: string;
+  mountpoint: string;
+  username: string;
+  password: string;
+  tls_mode: RtkTlsMode;
+  enabled: boolean;
+  gga_enabled: boolean;
+  gga_interval_sec: string;
+  gga_max_age_sec: string;
+  connect_timeout_sec: string;
+  socket_timeout_sec: string;
+  healthy_age_sec: string;
+  stale_reconnect_sec: string;
+  reconnect_delay_sec: string;
+  first_data_timeout_sec: string;
+  max_mavros_rtcm_frame_bytes: string;
+}
+
+export const EMPTY_RTK_PROFILE_FORM: RtkProfileEditorForm = {
+  name: "",
+  caster_host: "",
+  caster_port: "2101",
+  mountpoint: "",
+  username: "",
+  password: "",
+  tls_mode: "REQUIRED",
+  enabled: true,
+  gga_enabled: false,
+  gga_interval_sec: String(RTK_PROFILE_CREATE_DEFAULTS.gga_interval_sec),
+  gga_max_age_sec: String(RTK_PROFILE_CREATE_DEFAULTS.gga_max_age_sec),
+  connect_timeout_sec: String(RTK_PROFILE_CREATE_DEFAULTS.connect_timeout_sec),
+  socket_timeout_sec: String(RTK_PROFILE_CREATE_DEFAULTS.socket_timeout_sec),
+  healthy_age_sec: String(RTK_PROFILE_CREATE_DEFAULTS.healthy_age_sec),
+  stale_reconnect_sec: String(RTK_PROFILE_CREATE_DEFAULTS.stale_reconnect_sec),
+  reconnect_delay_sec: String(RTK_PROFILE_CREATE_DEFAULTS.reconnect_delay_sec),
+  first_data_timeout_sec: String(RTK_PROFILE_CREATE_DEFAULTS.first_data_timeout_sec),
+  max_mavros_rtcm_frame_bytes: String(
+    RTK_PROFILE_CREATE_DEFAULTS.max_mavros_rtcm_frame_bytes,
+  ),
+};
+
+export function profileToEditorForm(profile: RtkProfile): RtkProfileEditorForm {
+  return {
+    name: profile.name,
+    caster_host: profile.caster_host,
+    caster_port: String(profile.caster_port),
+    mountpoint: profile.mountpoint,
+    username: profile.username,
+    password: "",
+    tls_mode: profile.tls_mode,
+    enabled: profile.enabled,
+    gga_enabled: profile.gga_enabled,
+    gga_interval_sec: String(profile.gga_interval_sec),
+    gga_max_age_sec: String(profile.gga_max_age_sec),
+    connect_timeout_sec: String(profile.connect_timeout_sec),
+    socket_timeout_sec: String(profile.socket_timeout_sec),
+    healthy_age_sec: String(profile.healthy_age_sec),
+    stale_reconnect_sec: String(profile.stale_reconnect_sec),
+    reconnect_delay_sec: String(profile.reconnect_delay_sec),
+    first_data_timeout_sec: String(profile.first_data_timeout_sec),
+    max_mavros_rtcm_frame_bytes: String(profile.max_mavros_rtcm_frame_bytes),
+  };
+}
+
+function parsePort(value: string): number | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+  const port = Number.parseInt(value, 10);
+  if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  return port;
+}
+
+function parsePositiveNumber(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function parsePositiveInt(value: string): number | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return null;
+  }
+  return parsed;
+}
+
+export interface RtkProfileFormErrors {
+  name?: string;
+  caster_host?: string;
+  caster_port?: string;
+  mountpoint?: string;
+  username?: string;
+  password?: string;
+  gga_interval_sec?: string;
+  gga_max_age_sec?: string;
+  connect_timeout_sec?: string;
+  socket_timeout_sec?: string;
+  healthy_age_sec?: string;
+  stale_reconnect_sec?: string;
+  reconnect_delay_sec?: string;
+  first_data_timeout_sec?: string;
+  max_mavros_rtcm_frame_bytes?: string;
+}
+
+export function validateRtkProfileForm(
+  form: RtkProfileEditorForm,
+  mode: "create" | "edit",
+): RtkProfileFormErrors {
+  const errors: RtkProfileFormErrors = {};
+
+  if (!form.name.trim()) {
+    errors.name = "Name is required";
+  }
+  if (!form.caster_host.trim()) {
+    errors.caster_host = "Caster host is required";
+  }
+  if (parsePort(form.caster_port) == null) {
+    errors.caster_port = "Port must be 1–65535";
+  }
+  if (!form.mountpoint.trim()) {
+    errors.mountpoint = "Mountpoint is required";
+  }
+  if (!form.username.trim()) {
+    errors.username = "Username is required";
+  }
+  if (mode === "create" && form.password === "") {
+    errors.password = "Password is required";
+  }
+
+  const numeric: Array<keyof RtkProfileFormErrors> = [
+    "gga_interval_sec",
+    "gga_max_age_sec",
+    "connect_timeout_sec",
+    "socket_timeout_sec",
+    "healthy_age_sec",
+    "stale_reconnect_sec",
+    "reconnect_delay_sec",
+    "first_data_timeout_sec",
+  ];
+  for (const field of numeric) {
+    if (parsePositiveNumber(String(form[field as keyof RtkProfileEditorForm])) == null) {
+      errors[field] = "Must be greater than 0";
+    }
+  }
+  if (parsePositiveInt(form.max_mavros_rtcm_frame_bytes) == null) {
+    errors.max_mavros_rtcm_frame_bytes = "Must be an integer 1–1029";
+  }
+
+  const healthy = parsePositiveNumber(form.healthy_age_sec);
+  const stale = parsePositiveNumber(form.stale_reconnect_sec);
+  if (healthy != null && stale != null && stale <= healthy) {
+    errors.stale_reconnect_sec = "Must be greater than healthy age";
+  }
+
+  return errors;
+}
+
+export function buildRtkProfileCreateRequest(
+  form: RtkProfileEditorForm,
+): RtkProfileCreateRequest {
+  return {
+    name: form.name.trim(),
+    caster_host: form.caster_host.trim(),
+    caster_port: parsePort(form.caster_port) ?? 2101,
+    mountpoint: form.mountpoint.trim().replace(/^\/+/, ""),
+    username: form.username.trim(),
+    password: form.password,
+    tls_mode: form.tls_mode,
+    enabled: form.enabled,
+    gga_enabled: form.gga_enabled,
+    gga_interval_sec: parsePositiveNumber(form.gga_interval_sec) ?? 10,
+    gga_max_age_sec: parsePositiveNumber(form.gga_max_age_sec) ?? 5,
+    connect_timeout_sec: parsePositiveNumber(form.connect_timeout_sec) ?? 10,
+    socket_timeout_sec: parsePositiveNumber(form.socket_timeout_sec) ?? 1,
+    healthy_age_sec: parsePositiveNumber(form.healthy_age_sec) ?? 5,
+    stale_reconnect_sec: parsePositiveNumber(form.stale_reconnect_sec) ?? 10,
+    reconnect_delay_sec: parsePositiveNumber(form.reconnect_delay_sec) ?? 5,
+    first_data_timeout_sec: parsePositiveNumber(form.first_data_timeout_sec) ?? 10,
+    max_mavros_rtcm_frame_bytes:
+      parsePositiveInt(form.max_mavros_rtcm_frame_bytes) ?? 720,
+    rtcm_topic: RTK_PROFILE_CREATE_DEFAULTS.rtcm_topic,
+  };
+}
+
+export function buildRtkProfileUpdateRequest(
+  form: RtkProfileEditorForm,
+  original: RtkProfile,
+): RtkProfileUpdateRequest {
+  const create = buildRtkProfileCreateRequest(form);
+  const patch: RtkProfileUpdateRequest = {};
+
+  if (create.name !== original.name) patch.name = create.name;
+  if (create.caster_host !== original.caster_host) patch.caster_host = create.caster_host;
+  if (create.caster_port !== original.caster_port) patch.caster_port = create.caster_port;
+  if (create.mountpoint !== original.mountpoint) patch.mountpoint = create.mountpoint;
+  if (create.username !== original.username) patch.username = create.username;
+  if (create.tls_mode !== original.tls_mode) patch.tls_mode = create.tls_mode;
+  if (create.enabled !== original.enabled) patch.enabled = create.enabled;
+  if (create.gga_enabled !== original.gga_enabled) patch.gga_enabled = create.gga_enabled;
+  if (create.gga_interval_sec !== original.gga_interval_sec) {
+    patch.gga_interval_sec = create.gga_interval_sec;
+  }
+  if (create.gga_max_age_sec !== original.gga_max_age_sec) {
+    patch.gga_max_age_sec = create.gga_max_age_sec;
+  }
+  if (create.connect_timeout_sec !== original.connect_timeout_sec) {
+    patch.connect_timeout_sec = create.connect_timeout_sec;
+  }
+  if (create.socket_timeout_sec !== original.socket_timeout_sec) {
+    patch.socket_timeout_sec = create.socket_timeout_sec;
+  }
+  if (create.healthy_age_sec !== original.healthy_age_sec) {
+    patch.healthy_age_sec = create.healthy_age_sec;
+  }
+  if (create.stale_reconnect_sec !== original.stale_reconnect_sec) {
+    patch.stale_reconnect_sec = create.stale_reconnect_sec;
+  }
+  if (create.reconnect_delay_sec !== original.reconnect_delay_sec) {
+    patch.reconnect_delay_sec = create.reconnect_delay_sec;
+  }
+  if (create.first_data_timeout_sec !== original.first_data_timeout_sec) {
+    patch.first_data_timeout_sec = create.first_data_timeout_sec;
+  }
+  if (create.max_mavros_rtcm_frame_bytes !== original.max_mavros_rtcm_frame_bytes) {
+    patch.max_mavros_rtcm_frame_bytes = create.max_mavros_rtcm_frame_bytes;
+  }
+
+  if (form.password !== "") {
+    patch.password = form.password;
+  }
+
+  return patch;
+}
+
+export function editorNeedsTlsDisabledConfirmation(
+  nextMode: RtkTlsMode,
+  previousMode?: RtkTlsMode,
+): boolean {
+  return nextMode === "DISABLED" && previousMode !== "DISABLED";
+}
+
+export function editorWarnsForcedStop(
+  patch: RtkProfileUpdateRequest,
+  original: RtkProfile,
+  activeProfileId: number | null,
+  desiredState: "STOPPED" | "RUNNING" | null,
+): boolean {
+  if (original.id !== activeProfileId) {
+    return false;
+  }
+  if (desiredState !== "RUNNING") {
+    return false;
+  }
+  return isRuntimeSignificantProfileChange(patch as Record<string, unknown>);
+}
+
+
+
+### FILE: src/hooks/useRtkControl.ts
+----------------------------------------------------------------------------------------------------
+/**
+ * Screen-local RTK control lifecycle.
+ *
+ * Polls GET /api/rtk/status every 3 seconds only while the shared RTK UI is
+ * visible. One in-flight poll at a time. Mutations are exclusive. Stale async
+ * completions after close/unmount are ignored.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  toRtkControlView,
+  type RtkControlViewModel,
+} from "../adapters/rtkControlAdapter";
+import {
+  activateRtkProfile,
+  clearActiveRtkProfile,
+  createRtkProfile,
+  deleteRtkProfile,
+  formatRtkApiError,
+  getRtkStatus,
+  listRtkProfiles,
+  parseRtkApiError,
+  startRtk,
+  stopRtk,
+  updateRtkProfile,
+} from "../services/rtkService";
+import type {
+  RtkIntentResponse,
+  RtkParsedApiError,
+  RtkProfile,
+  RtkProfileCreateRequest,
+  RtkProfileUpdateRequest,
+  RtkStatusResponse,
+} from "../types/rtk";
+
+export const RTK_STATUS_POLL_MS = 3000;
+
+export interface UseRtkControlOptions {
+  visible: boolean;
+  connected?: boolean;
+}
+
+export interface RtkMutationResult<T> {
+  ok: true;
+  value: T;
+}
+
+export interface RtkMutationFailure {
+  ok: false;
+  error: RtkParsedApiError;
+}
+
+export type RtkMutationOutcome<T> = RtkMutationResult<T> | RtkMutationFailure;
+
+export interface UseRtkControlResult {
+  profiles: RtkProfile[];
+  selectedProfileId: number | null;
+  selectedProfile: RtkProfile | null;
+  activeProfile: RtkProfile | null;
+  status: RtkStatusResponse | null;
+  view: RtkControlViewModel;
+  initialLoading: boolean;
+  refreshing: boolean;
+  mutationBusy: boolean;
+  error: RtkParsedApiError | null;
+  canStart: boolean;
+  canStop: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  disabledReason: string | null;
+  selectProfile: (id: number | null) => void;
+  refresh: () => Promise<void>;
+  createProfile: (
+    dto: RtkProfileCreateRequest,
+  ) => Promise<RtkMutationOutcome<RtkProfile>>;
+  updateProfile: (
+    id: number,
+    dto: RtkProfileUpdateRequest,
+  ) => Promise<RtkMutationOutcome<RtkProfile>>;
+  removeProfile: (id: number) => Promise<RtkMutationOutcome<true>>;
+  activateProfile: (id: number) => Promise<RtkMutationOutcome<true>>;
+  clearActive: () => Promise<RtkMutationOutcome<true>>;
+  start: () => Promise<RtkMutationOutcome<RtkIntentResponse>>;
+  stop: () => Promise<RtkMutationOutcome<RtkIntentResponse>>;
+}
+
+function fail(error: unknown, fallback: string): RtkMutationFailure {
+  const parsed = parseRtkApiError(error);
+  return {
+    ok: false,
+    error: {
+      ...parsed,
+      message: parsed.message || fallback,
+    },
+  };
+}
+
+export function useRtkControl(
+  options: UseRtkControlOptions,
+): UseRtkControlResult {
+  const visible = options.visible;
+  const connected = options.connected !== false;
+
+  const [profiles, setProfiles] = useState<RtkProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const [status, setStatus] = useState<RtkStatusResponse | null>(null);
+  const [initialLoading, setInitialLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [error, setError] = useState<RtkParsedApiError | null>(null);
+
+  const generationRef = useRef(0);
+  const visibleRef = useRef(visible);
+  const pollInFlightRef = useRef(false);
+  const mutationBusyRef = useRef(false);
+  const latestStatusRequestRef = useRef(0);
+  const latestProfilesRequestRef = useRef(0);
+
+  visibleRef.current = visible;
+  mutationBusyRef.current = mutationBusy;
+
+  const applyIfCurrent = useCallback((generation: number): boolean => {
+    return visibleRef.current && generation === generationRef.current;
+  }, []);
+
+  const loadStatus = useCallback(async (generation: number): Promise<void> => {
+    const requestId = ++latestStatusRequestRef.current;
+    try {
+      const next = await getRtkStatus();
+      if (!applyIfCurrent(generation) || requestId !== latestStatusRequestRef.current) {
+        return;
+      }
+      setStatus(next);
+    } catch (loadError) {
+      if (!applyIfCurrent(generation) || requestId !== latestStatusRequestRef.current) {
+        return;
+      }
+      setError(parseRtkApiError(loadError));
+    }
+  }, [applyIfCurrent]);
+
+  const loadProfiles = useCallback(async (generation: number): Promise<void> => {
+    const requestId = ++latestProfilesRequestRef.current;
+    try {
+      const result = await listRtkProfiles();
+      if (!applyIfCurrent(generation) || requestId !== latestProfilesRequestRef.current) {
+        return;
+      }
+      setProfiles(result.profiles);
+      setSelectedProfileId((current) => {
+        if (current != null && result.profiles.some((profile) => profile.id === current)) {
+          return current;
+        }
+        return current;
+      });
+    } catch (loadError) {
+      if (!applyIfCurrent(generation) || requestId !== latestProfilesRequestRef.current) {
+        return;
+      }
+      setError(parseRtkApiError(loadError));
+    }
+  }, [applyIfCurrent]);
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!visibleRef.current) {
+      return;
+    }
+    const generation = generationRef.current;
+    setRefreshing(true);
+    try {
+      await Promise.all([loadProfiles(generation), loadStatus(generation)]);
+    } finally {
+      if (applyIfCurrent(generation)) {
+        setRefreshing(false);
+        setInitialLoading(false);
+      }
+    }
+  }, [applyIfCurrent, loadProfiles, loadStatus]);
+
+  useEffect(() => {
+    if (!visible) {
+      return undefined;
+    }
+
+    const generation = ++generationRef.current;
+    setInitialLoading(true);
+    setError(null);
+    void refresh();
+
+    const timer = setInterval(() => {
+      if (!visibleRef.current) {
+        return;
+      }
+      if (pollInFlightRef.current) {
+        return;
+      }
+      pollInFlightRef.current = true;
+      void loadStatus(generation).finally(() => {
+        pollInFlightRef.current = false;
+      });
+    }, RTK_STATUS_POLL_MS);
+
+    return () => {
+      generationRef.current += 1;
+      pollInFlightRef.current = false;
+      clearInterval(timer);
+    };
+  }, [visible, loadStatus, refresh]);
+
+  useEffect(() => {
+    if (!status) {
+      return;
+    }
+    const activeId = status.status.persisted.active_profile_id;
+    setSelectedProfileId((current) => {
+      if (current != null) {
+        return current;
+      }
+      return activeId;
+    });
+  }, [status]);
+
+  const runMutation = useCallback(
+    async <T,>(
+      operation: () => Promise<T>,
+      fallback: string,
+    ): Promise<RtkMutationOutcome<T>> => {
+      if (mutationBusyRef.current) {
+        return {
+          ok: false,
+          error: {
+            statusCode: null,
+            code: "RTK_BUSY",
+            message: "Another RTK command is already in progress",
+          },
+        };
+      }
+
+      mutationBusyRef.current = true;
+      setMutationBusy(true);
+      setError(null);
+
+      try {
+        const value = await operation();
+        await refresh();
+        return { ok: true, value };
+      } catch (mutationError) {
+        const failed = fail(mutationError, fallback);
+        if (visibleRef.current) {
+          setError(failed.error);
+        }
+        await refresh();
+        return failed;
+      } finally {
+        mutationBusyRef.current = false;
+        if (visibleRef.current) {
+          setMutationBusy(false);
+        }
+      }
+    },
+    [refresh],
+  );
+
+  const createProfile = useCallback(
+    (dto: RtkProfileCreateRequest) =>
+      runMutation(async () => {
+        const profile = await createRtkProfile(dto);
+        setSelectedProfileId(profile.id);
+        return profile;
+      }, "Unable to create RTK profile"),
+    [runMutation],
+  );
+
+  const updateSelected = useCallback(
+    (id: number, dto: RtkProfileUpdateRequest) =>
+      runMutation(async () => {
+        const profile = await updateRtkProfile(id, dto);
+        setSelectedProfileId(profile.id);
+        return profile;
+      }, "Unable to update RTK profile"),
+    [runMutation],
+  );
+
+  const removeProfile = useCallback(
+    (id: number) =>
+      runMutation(async () => {
+        await deleteRtkProfile(id);
+        setSelectedProfileId((current) => (current === id ? null : current));
+        return true as const;
+      }, "Unable to delete RTK profile"),
+    [runMutation],
+  );
+
+  const activateProfile = useCallback(
+    (id: number) =>
+      runMutation(async () => {
+        await activateRtkProfile(id);
+        return true as const;
+      }, "Unable to activate RTK profile"),
+    [runMutation],
+  );
+
+  const clearActive = useCallback(
+    () =>
+      runMutation(async () => {
+        await clearActiveRtkProfile();
+        return true as const;
+      }, "Unable to clear the active RTK profile"),
+    [runMutation],
+  );
+
+  const start = useCallback(
+    () =>
+      runMutation(async () => {
+        const intent = await startRtk();
+        setStatus((previous) => {
+          if (!previous) {
+            return previous;
+          }
+          return {
+            status: {
+              ...previous.status,
+              persisted: intent.persisted,
+            },
+          };
+        });
+        return intent;
+      }, "Unable to start RTK"),
+    [runMutation],
+  );
+
+  const stop = useCallback(
+    () =>
+      runMutation(async () => {
+        const intent = await stopRtk();
+        setStatus((previous) => {
+          if (!previous) {
+            return previous;
+          }
+          return {
+            status: {
+              ...previous.status,
+              persisted: intent.persisted,
+            },
+          };
+        });
+        return intent;
+      }, "Unable to stop RTK"),
+    [runMutation],
+  );
+
+  const view = useMemo(
+    () =>
+      toRtkControlView(status, {
+        connected,
+        mutationBusy,
+      }),
+    [connected, mutationBusy, status],
+  );
+
+  const selectedProfile =
+    profiles.find((profile) => profile.id === selectedProfileId) ?? null;
+
+  const activeProfile =
+    profiles.find(
+      (profile) => profile.id === status?.status.persisted.active_profile_id,
+    ) ??
+    status?.status.active_profile ??
+    null;
+
+  return {
+    profiles,
+    selectedProfileId,
+    selectedProfile,
+    activeProfile,
+    status,
+    view,
+    initialLoading,
+    refreshing,
+    mutationBusy,
+    error,
+    canStart: view.canStart,
+    canStop: view.canStop,
+    canEdit: view.canEdit,
+    canDelete: view.canDelete && selectedProfile != null,
+    disabledReason: view.disabledReason ?? (error ? error.message : null),
+    selectProfile: setSelectedProfileId,
+    refresh,
+    createProfile,
+    updateProfile: updateSelected,
+    removeProfile,
+    activateProfile,
+    clearActive,
+    start,
+    stop,
+  };
+}
+
+export function rtkErrorMessage(error: unknown, fallback: string): string {
+  return formatRtkApiError(error, fallback);
+}
+
+
+
+### FILE: src/services/rtkLocalMigration.ts
+----------------------------------------------------------------------------------------------------
+/**
+ * One-release migration from tablet AsyncStorage NTRIP profiles to backend
+ * RTK profiles. Local profiles are never runtime authority and are never
+ * uploaded automatically.
+ */
+
+import type { NTRIPProfile } from "../types/ntrip";
+import type { RtkProfile, RtkTlsMode } from "../types/rtk";
+import { createRtkProfile, formatRtkApiError } from "./rtkService";
+import {
+  deleteProfile as deleteLocalProfile,
+  getAllProfiles as getLocalProfiles,
+} from "./ntripProfileStorage";
+
+export interface RtkLocalMigrationItem {
+  localId: string;
+  name: string;
+  caster_host: string;
+  caster_port: number;
+  mountpoint: string;
+  username: string;
+  password: string;
+  tls_mode: RtkTlsMode;
+}
+
+export interface RtkLocalMigrationFailure {
+  localId: string;
+  name: string;
+  message: string;
+}
+
+export interface RtkLocalMigrationResult {
+  imported: Array<{ localId: string; profile: RtkProfile }>;
+  failed: RtkLocalMigrationFailure[];
+  skipped: string[];
+}
+
+function parseLocalPort(port: string): number {
+  const parsed = Number.parseInt(port || "2101", 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
+    return 2101;
+  }
+  return parsed;
+}
+
+export function localProfileToMigrationItem(
+  profile: NTRIPProfile,
+  tlsMode: RtkTlsMode = "REQUIRED",
+): RtkLocalMigrationItem {
+  return {
+    localId: profile.id,
+    name: profile.name,
+    caster_host: profile.casterAddress,
+    caster_port: parseLocalPort(profile.port),
+    mountpoint: profile.mountpoint,
+    username: profile.username,
+    password: profile.password,
+    tls_mode: tlsMode,
+  };
+}
+
+export async function listLocalRtkProfilesForMigration(): Promise<NTRIPProfile[]> {
+  return getLocalProfiles();
+}
+
+export async function importLocalRtkProfiles(options: {
+  items: RtkLocalMigrationItem[];
+  tlsMode: RtkTlsMode;
+  confirmDisabledTls: boolean;
+}): Promise<RtkLocalMigrationResult> {
+  if (options.tlsMode === "DISABLED" && !options.confirmDisabledTls) {
+    throw new Error(
+      "DISABLED TLS requires explicit confirmation because credentials will be sent over plaintext NTRIP.",
+    );
+  }
+
+  const imported: RtkLocalMigrationResult["imported"] = [];
+  const failed: RtkLocalMigrationFailure[] = [];
+  const skipped: string[] = [];
+
+  for (const item of options.items) {
+    try {
+      const profile = await createRtkProfile({
+        name: item.name,
+        caster_host: item.caster_host,
+        caster_port: item.caster_port,
+        mountpoint: item.mountpoint,
+        username: item.username,
+        password: item.password,
+        tls_mode: options.tlsMode,
+      });
+
+      await deleteLocalProfile(item.localId);
+      imported.push({ localId: item.localId, profile });
+    } catch (error) {
+      failed.push({
+        localId: item.localId,
+        name: item.name,
+        message: formatRtkApiError(error, "Unable to import local RTK profile"),
+      });
+    }
+  }
+
+  return { imported, failed, skipped };
+}
+
+export async function importSelectedLocalRtkProfiles(options: {
+  localIds: string[];
+  tlsMode: RtkTlsMode;
+  confirmDisabledTls: boolean;
+}): Promise<RtkLocalMigrationResult> {
+  const locals = await getLocalProfiles();
+  const selected = locals.filter((profile) => options.localIds.includes(profile.id));
+  return importLocalRtkProfiles({
+    items: selected.map((profile) =>
+      localProfileToMigrationItem(profile, options.tlsMode),
+    ),
+    tlsMode: options.tlsMode,
+    confirmDisabledTls: options.confirmDisabledTls,
+  });
+}
+
+
+
+### FILE: src/components/rtk/RtkStatusStrip.tsx
+----------------------------------------------------------------------------------------------------
+import React from "react";
+import { StyleSheet, Text, View } from "react-native";
+
+import type { RtkControlViewModel } from "../../adapters/rtkControlAdapter";
+import { colors } from "../../theme/colors";
+
+interface Props {
+  view: RtkControlViewModel;
+}
+
+function toneColor(tone: RtkControlViewModel["tone"]): string {
+  switch (tone) {
+    case "healthy":
+      return colors.success;
+    case "transitional":
+    case "degraded":
+      return colors.warning;
+    case "terminal":
+      return colors.danger;
+    default:
+      return colors.textSecondary;
+  }
+}
+
+function formatAge(age: number | null): string {
+  if (age == null) {
+    return "—";
+  }
+  return `${age.toFixed(1)} s`;
+}
+
+export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
+  const color = toneColor(view.tone);
+
+  return (
+    <View style={styles.wrap}>
+      <View style={[styles.headline, { borderColor: color }]}>
+        <View style={[styles.dot, { backgroundColor: color }]} />
+        <Text style={[styles.headlineText, { color }]}>{view.headlineLabel}</Text>
+        <Text style={styles.desired}>
+          Desired {view.desiredState ?? "—"} · Manager {view.managerState ?? "—"}
+        </Text>
+      </View>
+
+      <View style={styles.grid}>
+        <Metric label="Corrections" value={view.correctionState ?? "—"} />
+        <Metric label="Correction age" value={formatAge(view.correctionAgeSec)} />
+        <Metric
+          label="Published frames"
+          value={view.publishedFrames == null ? "—" : String(view.publishedFrames)}
+        />
+        <Metric
+          label="Socket bytes"
+          value={
+            view.socketBytesReceived == null
+              ? "—"
+              : String(view.socketBytesReceived)
+          }
+        />
+        <Metric
+          label="GNSS fix"
+          value={
+            view.gnssFixName
+              ? `${view.gnssFixName.replace(/_/g, " ")} (${view.gnssFixType ?? "—"})`
+              : "—"
+          }
+        />
+        <Metric
+          label="RTK solution"
+          value={view.rtkFixed ? "RTK Fixed" : view.rtkFloat ? "RTK Float" : "No RTK"}
+        />
+        {view.ggaEnabled ? (
+          <Metric label="GGA" value={view.ggaState ?? "—"} />
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
+const Metric: React.FC<{ label: string; value: string }> = ({
+  label,
+  value,
+}) => (
+  <View style={styles.metric}>
+    <Text style={styles.metricLabel}>{label}</Text>
+    <Text style={styles.metricValue}>{value}</Text>
+  </View>
+);
+
+const styles = StyleSheet.create({
+  wrap: {
+    backgroundColor: colors.secondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  headline: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.primary,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  headlineText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  desired: {
+    marginLeft: "auto",
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  metric: {
+    width: "33.33%",
+    paddingVertical: 6,
+    paddingRight: 8,
+  },
+  metricLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  metricValue: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+});
+
+
+
+### FILE: src/components/rtk/RtkProfileList.tsx
+----------------------------------------------------------------------------------------------------
+import React from "react";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import type { RtkProfile } from "../../types/rtk";
+import { colors } from "../../theme/colors";
+
+interface Props {
+  profiles: RtkProfile[];
+  selectedProfileId: number | null;
+  activeProfileId: number | null;
+  disabled?: boolean;
+  onSelect: (id: number) => void;
+  onCreate: () => void;
+}
+
+export const RtkProfileList: React.FC<Props> = ({
+  profiles,
+  selectedProfileId,
+  activeProfileId,
+  disabled = false,
+  onSelect,
+  onCreate,
+}) => {
+  return (
+    <View style={styles.wrap}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Backend profiles</Text>
+        <Pressable
+          onPress={onCreate}
+          disabled={disabled}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.createButton,
+            disabled && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={styles.createText}>Create Profile</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+        {profiles.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No backend RTK profiles</Text>
+            <Text style={styles.emptyBody}>
+              Create a profile on the rover. Local tablet profiles are not
+              runtime authority.
+            </Text>
+          </View>
+        ) : (
+          profiles.map((profile) => {
+            const selected = profile.id === selectedProfileId;
+            const active = profile.id === activeProfileId;
+            return (
+              <Pressable
+                key={profile.id}
+                onPress={() => onSelect(profile.id)}
+                disabled={disabled}
+                style={({ pressed }) => [
+                  styles.row,
+                  selected && styles.rowSelected,
+                  pressed && styles.pressed,
+                  disabled && styles.disabled,
+                ]}
+              >
+                <Text style={styles.name}>{profile.name}</Text>
+                <Text style={styles.meta}>
+                  {profile.caster_host}:{profile.caster_port}/{profile.mountpoint}
+                </Text>
+                <View style={styles.badges}>
+                  {active ? <Badge label="Active" tone="accent" /> : null}
+                  <Badge
+                    label={profile.enabled ? "Enabled" : "Disabled"}
+                    tone={profile.enabled ? "success" : "muted"}
+                  />
+                  <Badge
+                    label={`TLS ${profile.tls_mode}`}
+                    tone={profile.tls_mode === "REQUIRED" ? "success" : "warning"}
+                  />
+                  <Badge label={`rev ${profile.revision}`} tone="muted" />
+                </View>
+              </Pressable>
+            );
+          })
+        )}
+      </ScrollView>
+    </View>
+  );
+};
+
+const Badge: React.FC<{
+  label: string;
+  tone: "accent" | "success" | "warning" | "muted";
+}> = ({ label, tone }) => (
+  <View style={[styles.badge, badgeTone[tone]]}>
+    <Text style={styles.badgeText}>{label}</Text>
+  </View>
+);
+
+const badgeTone = StyleSheet.create({
+  accent: { backgroundColor: colors.cyan },
+  success: { backgroundColor: colors.success },
+  warning: { backgroundColor: colors.warning },
+  muted: { backgroundColor: colors.textMuted },
+});
+
+const styles = StyleSheet.create({
+  wrap: {
+    flex: 1,
+    minWidth: 280,
+    borderRightWidth: 1,
+    borderRightColor: colors.border,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  title: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  createButton: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
+    padding: 12,
+    gap: 10,
+    paddingBottom: 24,
+  },
+  empty: {
+    padding: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.primary,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  emptyBody: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  row: {
+    minHeight: 72,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.primary,
+    padding: 12,
+    gap: 4,
+  },
+  rowSelected: {
+    borderColor: colors.cyan,
+    backgroundColor: "#0b2533",
+  },
+  name: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  meta: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  badges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  badge: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  badgeText: {
+    color: "#041018",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  disabled: {
+    opacity: 0.55,
+  },
+  pressed: {
+    opacity: 0.85,
+  },
+});
+
+
+
+### FILE: src/components/rtk/RtkProfileEditor.tsx
+----------------------------------------------------------------------------------------------------
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
+import {
+  EMPTY_RTK_PROFILE_FORM,
+  buildRtkProfileCreateRequest,
+  buildRtkProfileUpdateRequest,
+  editorNeedsTlsDisabledConfirmation,
+  editorWarnsForcedStop,
+  profileToEditorForm,
+  validateRtkProfileForm,
+  type RtkProfileEditorForm,
+} from "../../adapters/rtkProfileFormAdapter";
+import type { RtkDesiredState, RtkProfile } from "../../types/rtk";
+import { colors } from "../../theme/colors";
+
+interface Props {
+  mode: "create" | "edit" | "idle";
+  profile: RtkProfile | null;
+  activeProfileId: number | null;
+  desiredState: RtkDesiredState | null;
+  busy?: boolean;
+  disabled?: boolean;
+  disabledReason?: string | null;
+  canStart?: boolean;
+  canStop?: boolean;
+  onCreate: (dto: ReturnType<typeof buildRtkProfileCreateRequest>) => Promise<unknown>;
+  onUpdate: (
+    id: number,
+    dto: ReturnType<typeof buildRtkProfileUpdateRequest>,
+  ) => Promise<unknown>;
+  onDelete: (id: number) => Promise<unknown>;
+  onActivate: (id: number) => Promise<unknown>;
+  onClearActive: () => Promise<unknown>;
+  onStart: () => Promise<unknown>;
+  onStop: () => Promise<unknown>;
+}
+
+export const RtkProfileEditor: React.FC<Props> = ({
+  mode,
+  profile,
+  activeProfileId,
+  desiredState,
+  busy = false,
+  disabled = false,
+  disabledReason,
+  canStart = false,
+  canStop = false,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onActivate,
+  onClearActive,
+  onStart,
+  onStop,
+}) => {
+  const [form, setForm] = useState<RtkProfileEditorForm>(EMPTY_RTK_PROFILE_FORM);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [errors, setErrors] = useState<ReturnType<typeof validateRtkProfileForm>>({});
+
+  useEffect(() => {
+    if (mode === "edit" && profile) {
+      setForm(profileToEditorForm(profile));
+      setErrors({});
+      return;
+    }
+    if (mode === "create") {
+      setForm(EMPTY_RTK_PROFILE_FORM);
+      setErrors({});
+    }
+  }, [mode, profile]);
+
+  const title = useMemo(() => {
+    if (mode === "create") return "Create profile";
+    if (mode === "edit" && profile) return `Edit ${profile.name}`;
+    return "Select or create a profile";
+  }, [mode, profile]);
+
+  const setField = <K extends keyof RtkProfileEditorForm>(
+    key: K,
+    value: RtkProfileEditorForm[K],
+  ) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const confirmTlsIfNeeded = async (): Promise<boolean> => {
+    if (!editorNeedsTlsDisabledConfirmation(form.tls_mode, profile?.tls_mode)) {
+      return true;
+    }
+    return new Promise((resolve) => {
+      Alert.alert(
+        "Disable TLS?",
+        "Credentials will be sent over plaintext NTRIP. REQUIRED TLS is the secure default.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Use plaintext", style: "destructive", onPress: () => resolve(true) },
+        ],
+      );
+    });
+  };
+
+  const confirmForcedStopIfNeeded = async (
+    patch: ReturnType<typeof buildRtkProfileUpdateRequest>,
+  ): Promise<boolean> => {
+    if (!profile || !editorWarnsForcedStop(patch, profile, activeProfileId, desiredState)) {
+      return true;
+    }
+    return new Promise((resolve) => {
+      Alert.alert(
+        "Stop RTK to apply?",
+        "This change is runtime-significant. The backend will force the active profile to STOPPED.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Save and stop", style: "destructive", onPress: () => resolve(true) },
+        ],
+      );
+    });
+  };
+
+  const handleSave = async () => {
+    const nextErrors = validateRtkProfileForm(form, mode === "create" ? "create" : "edit");
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+    if (!(await confirmTlsIfNeeded())) {
+      return;
+    }
+    if (mode === "create") {
+      await onCreate(buildRtkProfileCreateRequest(form));
+      return;
+    }
+    if (mode === "edit" && profile) {
+      const patch = buildRtkProfileUpdateRequest(form, profile);
+      if (!(await confirmForcedStopIfNeeded(patch))) {
+        return;
+      }
+      await onUpdate(profile.id, patch);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!profile) return;
+    Alert.alert("Delete profile?", `${profile.name} will be removed from the rover.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          void onDelete(profile.id);
+        },
+      },
+    ]);
+  };
+
+  if (mode === "idle") {
+    return (
+      <View style={styles.idle}>
+        <Text style={styles.idleTitle}>No profile selected</Text>
+        <Text style={styles.idleBody}>
+          Choose a backend profile or create one. Mission Progress never sends
+          NTRIP credentials.
+        </Text>
+      </View>
+    );
+  }
+
+  const controlsDisabled = disabled || busy;
+
+  return (
+    <View style={styles.wrap}>
+      <Text style={styles.title}>{title}</Text>
+      {disabledReason ? <Text style={styles.reason}>{disabledReason}</Text> : null}
+
+      <ScrollView style={styles.form} contentContainerStyle={styles.formContent}>
+        <Field
+          label="Name"
+          value={form.name}
+          onChange={(value) => setField("name", value)}
+          error={errors.name}
+          editable={!controlsDisabled}
+        />
+        <Field
+          label="Caster host"
+          value={form.caster_host}
+          onChange={(value) => setField("caster_host", value)}
+          error={errors.caster_host}
+          autoCapitalize="none"
+          editable={!controlsDisabled}
+        />
+        <Field
+          label="Port"
+          value={form.caster_port}
+          onChange={(value) => setField("caster_port", value)}
+          error={errors.caster_port}
+          keyboardType="numeric"
+          editable={!controlsDisabled}
+        />
+        <Field
+          label="Mountpoint"
+          value={form.mountpoint}
+          onChange={(value) => setField("mountpoint", value)}
+          error={errors.mountpoint}
+          autoCapitalize="none"
+          editable={!controlsDisabled}
+        />
+        <Field
+          label="Username"
+          value={form.username}
+          onChange={(value) => setField("username", value)}
+          error={errors.username}
+          autoCapitalize="none"
+          editable={!controlsDisabled}
+        />
+        <Field
+          label={mode === "create" ? "Password" : "Password (leave blank to keep)"}
+          value={form.password}
+          onChange={(value) => setField("password", value)}
+          error={errors.password}
+          autoCapitalize="none"
+          secureTextEntry
+          editable={!controlsDisabled}
+        />
+
+        <Text style={styles.label}>TLS</Text>
+        <View style={styles.tlsRow}>
+          <Pressable
+            disabled={controlsDisabled}
+            onPress={() => setField("tls_mode", "REQUIRED")}
+            style={[
+              styles.tlsButton,
+              form.tls_mode === "REQUIRED" && styles.tlsSelected,
+            ]}
+          >
+            <Text style={styles.tlsText}>REQUIRED</Text>
+          </Pressable>
+          <Pressable
+            disabled={controlsDisabled}
+            onPress={() => setField("tls_mode", "DISABLED")}
+            style={[
+              styles.tlsButton,
+              form.tls_mode === "DISABLED" && styles.tlsDanger,
+            ]}
+          >
+            <Text style={styles.tlsText}>DISABLED</Text>
+          </Pressable>
+        </View>
+        {form.tls_mode === "DISABLED" ? (
+          <Text style={styles.warn}>
+            DISABLED sends NTRIP credentials over plaintext. Confirm before saving.
+          </Text>
+        ) : null}
+
+        <View style={styles.switchRow}>
+          <Text style={styles.label}>Enabled</Text>
+          <Switch
+            value={form.enabled}
+            onValueChange={(value) => setField("enabled", value)}
+            disabled={controlsDisabled}
+          />
+        </View>
+
+        <Pressable
+          onPress={() => setShowAdvanced((value) => !value)}
+          style={styles.advancedToggle}
+        >
+          <Text style={styles.advancedText}>
+            {showAdvanced ? "Hide advanced" : "Advanced"}
+          </Text>
+        </Pressable>
+
+        {showAdvanced ? (
+          <View style={styles.advanced}>
+            <View style={styles.switchRow}>
+              <Text style={styles.label}>GGA / VRS</Text>
+              <Switch
+                value={form.gga_enabled}
+                onValueChange={(value) => setField("gga_enabled", value)}
+                disabled={controlsDisabled}
+              />
+            </View>
+            <Field
+              label="GGA interval (s)"
+              value={form.gga_interval_sec}
+              onChange={(value) => setField("gga_interval_sec", value)}
+              error={errors.gga_interval_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="GGA max age (s)"
+              value={form.gga_max_age_sec}
+              onChange={(value) => setField("gga_max_age_sec", value)}
+              error={errors.gga_max_age_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Connect timeout (s)"
+              value={form.connect_timeout_sec}
+              onChange={(value) => setField("connect_timeout_sec", value)}
+              error={errors.connect_timeout_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Socket timeout (s)"
+              value={form.socket_timeout_sec}
+              onChange={(value) => setField("socket_timeout_sec", value)}
+              error={errors.socket_timeout_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Healthy age (s)"
+              value={form.healthy_age_sec}
+              onChange={(value) => setField("healthy_age_sec", value)}
+              error={errors.healthy_age_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Stale reconnect (s)"
+              value={form.stale_reconnect_sec}
+              onChange={(value) => setField("stale_reconnect_sec", value)}
+              error={errors.stale_reconnect_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Reconnect delay (s)"
+              value={form.reconnect_delay_sec}
+              onChange={(value) => setField("reconnect_delay_sec", value)}
+              error={errors.reconnect_delay_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="First data timeout (s)"
+              value={form.first_data_timeout_sec}
+              onChange={(value) => setField("first_data_timeout_sec", value)}
+              error={errors.first_data_timeout_sec}
+              keyboardType="decimal-pad"
+              editable={!controlsDisabled}
+            />
+            <Field
+              label="Max RTCM frame bytes"
+              value={form.max_mavros_rtcm_frame_bytes}
+              onChange={(value) => setField("max_mavros_rtcm_frame_bytes", value)}
+              error={errors.max_mavros_rtcm_frame_bytes}
+              keyboardType="numeric"
+              editable={!controlsDisabled}
+            />
+          </View>
+        ) : null}
+      </ScrollView>
+
+      <View style={styles.actions}>
+        <Pressable
+          onPress={() => void handleSave()}
+          disabled={controlsDisabled}
+          style={[styles.action, styles.save, controlsDisabled && styles.disabled]}
+        >
+          <Text style={styles.actionText}>{mode === "create" ? "Create" : "Save"}</Text>
+        </Pressable>
+        {profile ? (
+          <Pressable
+            onPress={() => void onActivate(profile.id)}
+            disabled={controlsDisabled}
+            style={[styles.action, styles.secondary, controlsDisabled && styles.disabled]}
+          >
+            <Text style={styles.actionText}>Activate</Text>
+          </Pressable>
+        ) : null}
+        {profile && profile.id === activeProfileId ? (
+          <Pressable
+            onPress={() => void onClearActive()}
+            disabled={controlsDisabled}
+            style={[styles.action, styles.secondary, controlsDisabled && styles.disabled]}
+          >
+            <Text style={styles.actionText}>Clear active</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => void onStart()}
+          disabled={!canStart || controlsDisabled}
+          style={[
+            styles.action,
+            styles.save,
+            (!canStart || controlsDisabled) && styles.disabled,
+          ]}
+        >
+          <Text style={styles.actionText}>Start</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void onStop()}
+          disabled={!canStop || controlsDisabled}
+          style={[
+            styles.action,
+            styles.stop,
+            (!canStop || controlsDisabled) && styles.disabled,
+          ]}
+        >
+          <Text style={styles.actionText}>Stop</Text>
+        </Pressable>
+        {profile ? (
+          <Pressable
+            onPress={handleDelete}
+            disabled={controlsDisabled}
+            style={[styles.action, styles.stop, controlsDisabled && styles.disabled]}
+          >
+            <Text style={styles.actionText}>Delete</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
+const Field: React.FC<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+  editable?: boolean;
+  autoCapitalize?: "none" | "sentences";
+  keyboardType?: "default" | "numeric" | "decimal-pad";
+  secureTextEntry?: boolean;
+}> = ({
+  label,
+  value,
+  onChange,
+  error,
+  editable = true,
+  autoCapitalize = "sentences",
+  keyboardType = "default",
+  secureTextEntry,
+}) => (
+  <View style={styles.field}>
+    <Text style={styles.label}>{label}</Text>
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      editable={editable}
+      autoCapitalize={autoCapitalize}
+      autoCorrect={false}
+      keyboardType={keyboardType}
+      secureTextEntry={secureTextEntry}
+      style={styles.input}
+      placeholderTextColor={colors.textMuted}
+    />
+    {error ? <Text style={styles.error}>{error}</Text> : null}
+  </View>
+);
+
+const styles = StyleSheet.create({
+  wrap: {
+    flex: 1,
+    minWidth: 320,
+  },
+  idle: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  idleTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  idleBody: {
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  title: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  reason: {
+    color: colors.warning,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
+  form: {
+    flex: 1,
+  },
+  formContent: {
+    padding: 16,
+    paddingBottom: 28,
+    gap: 8,
+  },
+  field: {
+    gap: 4,
+  },
+  label: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  input: {
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.inputBg,
+    color: colors.text,
+    paddingHorizontal: 12,
+  },
+  error: {
+    color: colors.danger,
+    fontSize: 12,
+  },
+  tlsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  tlsButton: {
+    minHeight: 48,
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tlsSelected: {
+    borderColor: colors.success,
+    backgroundColor: "#0d2a22",
+  },
+  tlsDanger: {
+    borderColor: colors.danger,
+    backgroundColor: "#2a1010",
+  },
+  tlsText: {
+    color: colors.text,
+    fontWeight: "800",
+  },
+  warn: {
+    color: colors.warning,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  switchRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  advancedToggle: {
+    minHeight: 48,
+    justifyContent: "center",
+  },
+  advancedText: {
+    color: colors.cyan,
+    fontWeight: "700",
+  },
+  advanced: {
+    gap: 8,
+  },
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  action: {
+    minHeight: 48,
+    minWidth: 96,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  save: {
+    backgroundColor: colors.accent,
+  },
+  secondary: {
+    backgroundColor: "#1e3a54",
+  },
+  stop: {
+    backgroundColor: colors.danger,
+  },
+  actionText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+});
+
+
+==============================================================================================================
+LEGACY RTK SEARCH
+==============================================================================================================
+src/types/rtk.ts:399: * Deprecated RoverServices compatibility types. LoRa is not part of the
+src/types/rtk.ts:444:export interface LoRaStartResponse {
+src/types/rtk.ts:447:  source: "LoRa";
+src/types/rtk.ts:450:export interface LoRaStopResponse {
+src/types/rtk.ts:453:  source: "LoRa";
+src/adapters/px4RtkStatusAdapter.ts:5: * LoRa is not part of the production RTK API.
+src/hooks/useRoverTelemetry.ts:1010:  startLoRaStream: () => Promise<import("../types/rtk").LoRaStartResponse>;
+src/hooks/useRoverTelemetry.ts:1011:  stopLoRaStream: () => Promise<import("../types/rtk").LoRaStopResponse>;
+src/hooks/useRoverTelemetry.ts:1015:  // Legacy LoRa Socket.IO methods (keeping for compatibility)
+src/hooks/useRoverTelemetry.ts:2955:      startLoRaStream: async () => {
+src/hooks/useRoverTelemetry.ts:2956:        throw new Error("LoRa RTK is not supported by the production backend.");
+src/hooks/useRoverTelemetry.ts:2959:      stopLoRaStream: async () => {
+src/hooks/useRoverTelemetry.ts:2960:        throw new Error("LoRa RTK is not supported by the production backend.");
+src/hooks/useRoverTelemetry.ts:2971:      // NRP_ROS LEGACY DISABLED — LoRa socket emits (use rtkService REST on PX4)
+src/services/__tests__/rtkService.test.ts:336:  it("does not expose /api/rtk/config or /api/rtk/reconnect constants", () => {
+src/services/__tests__/rtkService.test.ts:340:    expect(values).not.toContain("/api/rtk/config");
+src/services/__tests__/rtkService.test.ts:341:    expect(values).not.toContain("/api/rtk/reconnect");
+
+
+==============================================================================================================
+DIRECT NETWORK / POLLING SEARCH
+==============================================================================================================
+src/services/PersistentStorage.ts:117:    this.waypointDebounceTimer = setTimeout(() => {
+src/services/missionStagingService.ts:125:  const response = await fetch(url, {
+src/services/beaconListener.ts:229:      const timeout = setTimeout(() => {
+src/services/apiClient.ts:169:    setTimeout(
+src/services/apiClient.ts:178:      await fetch(
+src/services/roverPresence.ts:50:  const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+src/services/roverPresence.ts:53:    const response = await fetch(`${url.replace(/\/$/, "")}/api/health`, {
+src/hooks/useRtkControl.ts:99:export function useRtkControl(
+src/hooks/useRtkControl.ts:191:    const timer = setInterval(() => {
+src/hooks/useBackendMissionStatus.ts:976:      setInterval(() => {
+src/hooks/useVirtualJoystick.ts:271:      displayIntentTimerRef.current = setTimeout(() => {
+src/hooks/useVirtualJoystick.ts:303:    commandTimerRef.current = setTimeout(() => {
+src/hooks/useVirtualJoystick.ts:424:    releaseTimeoutRef.current = setTimeout(() => {
+src/hooks/useVirtualJoystick.ts:651:    acquireTimeoutRef.current = setTimeout(() => {
+src/hooks/__tests__/useRtkControl.test.tsx:217:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:248:    renderHook(() => useRtkControl({ visible: false, connected: true }));
+src/hooks/__tests__/useRtkControl.test.tsx:266:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:269:    rerender(() => useRtkControl({ visible: false, connected: true }));
+src/hooks/__tests__/useRtkControl.test.tsx:290:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:324:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:344:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:361:      useRtkControl({ visible: true, connected: true }),
+src/hooks/__tests__/useRtkControl.test.tsx:383:      useRtkControl({ visible: true, connected: true }),
+src/hooks/useRoverTelemetry.ts:1641:      const timeoutId = setTimeout(() => {
+src/hooks/useRoverTelemetry.ts:1853:      setTimeout(() => {
+src/hooks/useRoverTelemetry.ts:1889:    reconnectTimerRef.current = setTimeout(() => {
+src/hooks/useRoverTelemetry.ts:1957:    connectDelayRef.current = setTimeout(async () => {
+src/hooks/useRoverTelemetry.ts:2587:            missionStatusDebounceRef.current = setTimeout(() => {
+src/hooks/useRoverTelemetry.ts:2669:        // const pingInterval = setInterval(() => { socket.emit('ping'); }, 5000);
+src/screens/MissionReportScreen.tsx:991:    notificationTimeoutRef.current = setTimeout(() => {
+src/screens/MissionReportScreen.tsx:1252:    const timer = setInterval(() => {
+src/screens/MissionReportScreen.tsx:1303:    const timer = setInterval(() => {
+src/screens/MissionReportScreen.tsx:1561:      const previewTimer = setTimeout(() => {
+src/screens/MissionReportScreen.tsx:2005:        const completionTimer = setTimeout(() => {
+src/screens/MissionReportScreen.tsx:2180:      const t = setTimeout(() => {
+src/screens/MissionReportScreen.tsx:2925:    setTimeout(() => {
+src/screens/MissionReportScreen.tsx:2931:    setTimeout(() => {
+src/screens/MissionReportScreen.tsx:2939:    setTimeout(() => {
+src/screens/MissionReportScreen.tsx:3341:              undoTimerRef.current = setTimeout(() => {
+src/screens/RoverDiscoveryScreen.tsx:158:    const healthTimer = setInterval(() => {
+src/screens/RoverDiscoveryScreen.tsx:161:    const dotTimer = setInterval(() => setNow(Date.now()), 2000);
+src/screens/RoverDiscoveryScreen.tsx:321:          const r = await axios.get(`${manualUrl}${probePath}`, {
+src/screens/PathPlanScreen.tsx:358:      interval = setInterval(fetchServoConfig, 2000);
+src/screens/PathPlanScreen.tsx:839:      autoSaveTimersRef.current.homePosition = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:850:    autoSaveTimersRef.current.drawingMode = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:861:      autoSaveTimersRef.current.activeTool = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:872:    autoSaveTimersRef.current.uiState = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:882:    autoSaveTimersRef.current.mapVisualization = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:903:    const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:1066:      const uploadTimer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:1412:    const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:1956:    const safetyTimer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:1994:        const timer = setTimeout(
+src/screens/PathPlanScreen.tsx:2024:        const timer = setTimeout(
+src/screens/PathPlanScreen.tsx:2218:              const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:2752:            const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:2764:      const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:4002:                              const timer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:4065:                                  const uploadTimer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:4121:                          const uploadTimer = setTimeout(() => {
+src/screens/PathPlanScreen.tsx:4158:                  const timer = setTimeout(() => {
+src/screens/SettingsScreen.tsx:168:      const timer = setTimeout(() => {
+src/screens/SettingsScreen.tsx:371:        setTimeout(() => setSuccessMessage(""), 3000);
+src/screens/SettingsScreen.tsx:437:        setTimeout(() => setSuccessMessage(""), 3000);
+src/screens/SettingsScreen.tsx:577:        setTimeout(() => setSuccessMessage(""), 3000);
+src/screens/SettingsScreen.tsx:649:      setTimeout(() => setSuccessMessage(""), 3000);
+src/screens/SettingsScreen.tsx:793:          setTimeout(() => setSuccessMessage(""), 3000);
+src/components/settings/ServoConfigModal.tsx:138:      setTimeout(() => {
+src/components/TelemetryDisplay.tsx:42:    setTimeout(() => {
+src/components/pathplan/PathPlanMap.tsx:748:          setTimeout(loadNext, 0);
+src/components/pathplan/PathPlanMap.tsx:924:    setTimeout(() => {
+src/components/pathplan/PathPlanMap.tsx:1218:      setTimeout(() => {
+src/components/pathplan/PathPlanMap.tsx:1416:            setTimeout(clearDragVisuals, 800);
+src/components/pathplan/PathPlanMap.tsx:1444:            setTimeout(clearDragVisuals, 800);
+src/components/pathplan/FailsafeRelaxNotification.tsx:31:      dismissTimerRef.current = setTimeout(() => {
+src/components/pathplan/ManualPathConnectionCanvas.tsx:430:    idleTimerRef.current = setTimeout(() => {
+src/components/pathplan/ManualPathConnectionCanvas.tsx:673:            setTimeout(() => {
+src/components/pathplan/FailsafeStrictPopup.tsx:52:      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+src/components/pathplan/ManualPathConnectionCanvas.backup.tsx:335:    idleTimerRef.current = setTimeout(() => {
+src/components/pathplan/ManualPathConnectionCanvas.backup.tsx:574:          setTimeout(() => {
+src/components/pathplan/ManualControlPanel.tsx:283:            await new Promise(resolve => setTimeout(resolve, 200));
+src/components/pathplan/ManualControlPanel.tsx:298:      setTimeout(() => {
+src/components/missionreport/VehicleStatusCard.tsx:71:    timerRef.current = setTimeout(() => setColor(next), delay);
+src/components/missionreport/RTKInjectionScreen.tsx:37:  const control = useRtkControl({
+src/components/missionreport/MissionMap.tsx:481:      setTimeout(() => {
+src/components/missionreport/MissionMap.tsx:492:      setTimeout(() => {
+src/components/missionreport/MissionMap.tsx:631:        setTimeout(function() {
+src/components/missionreport/MissionMap.tsx:1113:              setTimeout(() => {
+src/components/missionreport/MissionControlCard.tsx:190:    setTimeout(
+src/components/dashboard/RobotSettingsModal.tsx:355:      setTimeout(() => {
+src/components/common/ConnectPasswordModal.tsx:148:      const focusTimer = setTimeout(
+src/components/cad/CADDrawingCanvas.tsx:857:      const timer = setTimeout(() => {
+src/components/manual/ManualDrivePanel.tsx:81:    setTimeout(() => {
+src/components/examples/MapComponentExample.tsx:36:        await new Promise(resolve => setTimeout(resolve, 500));
+src/components/examples/MapComponentExample.tsx:41:        await new Promise(resolve => setTimeout(resolve, 300));
+src/components/examples/MapComponentExample.tsx:48:          await new Promise(resolve => setTimeout(resolve, 200));
+src/components/examples/CompleteScreenExample.tsx:17:const mockLoadWaypoints = () => new Promise(resolve => setTimeout(resolve, 500));
+src/components/examples/CompleteScreenExample.tsx:18:const mockConnectTelemetry = () => new Promise(resolve => setTimeout(resolve, 300));
+src/components/examples/CompleteScreenExample.tsx:19:const mockInitializeMap = () => new Promise(resolve => setTimeout(resolve, 400));
+src/components/examples/CompleteScreenExample.tsx:20:const mockStartMission = () => new Promise(resolve => setTimeout(resolve, 1000));
+
+
+==============================================================================================================
+PASSWORD SAFETY SEARCH
+==============================================================================================================
+src/types/rtk.ts:153: * `password` is write-only and required. Do not trim it.
+src/screens/LoginScreen.tsx:299:              isSubmitting || !username.trim() || !password
+src/screens/LoginScreen.tsx:306:            disabled={isSubmitting || !username.trim() || !password}
+src/adapters/__tests__/rtkProfileFormAdapter.test.ts:39:  it("requires password on create and never trims it", () => {
+src/components/missionreport/NTRIPProfileEditor.tsx:77:    if (!formData.password.trim()) {
+src/components/common/ConnectPasswordModal.tsx:225:    if (!username.trim() || !password.trim()) {
+src/components/common/ConnectPasswordModal.tsx:230:    onConnect(username.trim(), password);
+src/components/common/ConnectPasswordModal.tsx:426:                  (!username.trim() || !password.trim() || isConnecting) &&
+src/components/common/ConnectPasswordModal.tsx:430:                disabled={!username.trim() || !password.trim() || isConnecting}
+src/components/rtk/RtkProfileEditor.tsx:227:          onChange={(value) => setField("password", value)}
+src/services/__tests__/rtkService.test.ts:191:  it("updateRtkProfile preserves password whitespace and does not trim", async () => {
+
+
+==============================================================================================================
+MISSION RTK SEARCH
+==============================================================================================================
+src/screens/MissionReportScreen.tsx:56:import { getRtkStatus, startRtk } from "../services/rtkService";
+src/screens/MissionReportScreen.tsx:426:  const openRTKInjection = () => setShowRTKInjection(true);
+src/screens/MissionReportScreen.tsx:1409:      const response = await getRtkStatus();
+src/screens/MissionReportScreen.tsx:1434:      const response = await getRtkStatus();
+src/screens/MissionReportScreen.tsx:1437:        activeProfileId: response.status.persisted.active_profile_id,
+src/screens/MissionReportScreen.tsx:1449:        openRTKInjection();
+src/screens/MissionReportScreen.tsx:1453:      const intent = await startRtk();
+src/components/missionreport/RTKInjectionScreen.tsx:177:                activeProfileId={control.view.activeProfileId}
+src/components/missionreport/RTKInjectionScreen.tsx:185:                activeProfileId={control.view.activeProfileId}
+src/components/missionreport/NTRIPProfileList.tsx:25:  activeProfileId?: string | null;
+src/components/missionreport/NTRIPProfileList.tsx:34:  activeProfileId = null,
+src/components/missionreport/NTRIPProfileList.tsx:131:                {activeProfileId === profile.id && (
+src/components/missionreport/NTRIPProfileList.tsx:145:                    isStreamRunning && activeProfileId === profile.id && styles.connectButtonActive,
+src/components/missionreport/NTRIPProfileList.tsx:150:                  {isConnecting && activeProfileId === profile.id ? (
+src/components/missionreport/NTRIPProfileList.tsx:154:                      {isStreamRunning && activeProfileId === profile.id ? 'Connected' : 'Connect'}
+src/components/missionreport/NTRIPProfileEditor.tsx:38:    password: profile?.password || '',
+src/components/missionreport/NTRIPProfileEditor.tsx:77:    if (!formData.password.trim()) {
+src/components/missionreport/NTRIPProfileEditor.tsx:78:      newErrors.password = 'Password is required';
+src/components/missionreport/NTRIPProfileEditor.tsx:220:              style={[styles.input, errors.password && styles.inputError]}
+src/components/missionreport/NTRIPProfileEditor.tsx:221:              placeholder="Your NTRIP password"
+src/components/missionreport/NTRIPProfileEditor.tsx:223:              value={formData.password}
+src/components/missionreport/NTRIPProfileEditor.tsx:224:              onChangeText={(value) => handleInputChange('password', value)}
+src/components/missionreport/NTRIPProfileEditor.tsx:229:            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+
+
+==============================================================================================================
+DIFF CHECK
+==============================================================================================================
+

@@ -23,6 +23,11 @@ interface AccuracyMonitorCardProps {
   crossTrackMm?: number | null;
   crossTrackSide?: string | null;
 
+  actualSpeedMps?: number | null;
+  targetHeadingDeg?: number | null;
+  headingErrorDeg?: number | null;
+  distanceToGoalM?: number | null;
+
   /**
    * Injected automatically by DraggableCard
    * when handleType="custom".
@@ -65,12 +70,37 @@ function formatDirection(value: string | null | undefined): string {
   return value.trim().replace(/_/g, " ").toUpperCase();
 }
 
+function formatSpeed(value: number | null): string {
+  if (value === null) return "--";
+  return `${value.toFixed(2)} m/s`;
+}
+
+function formatHeading(value: number | null): string {
+  if (value === null) return "--";
+  return `${value.toFixed(1)}°`;
+}
+
+function formatHeadingError(value: number | null): string {
+  if (value === null) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}°`;
+}
+
+function formatDistance(value: number | null): string {
+  if (value === null) return "--";
+  return `${value.toFixed(2)} m`;
+}
+
 export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
   isMissionActive = false,
   alongSideMm,
   alongSidePosition,
   crossTrackMm,
   crossTrackSide,
+  actualSpeedMps,
+  targetHeadingDeg,
+  headingErrorDeg,
+  distanceToGoalM,
   dragGesture,
   isDraggingActive = false,
   onClose,
@@ -123,7 +153,17 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 
   const crossTrackLive = isMissionActive && validCrossTrack !== null;
 
-  const hasLiveData = alongSideLive || crossTrackLive;
+  const actualSpeedText = useMemo(() => formatSpeed(isMissionActive && actualSpeedMps !== undefined ? actualSpeedMps : null), [isMissionActive, actualSpeedMps]);
+  const targetHeadingText = useMemo(() => formatHeading(isMissionActive && targetHeadingDeg !== undefined ? targetHeadingDeg : null), [isMissionActive, targetHeadingDeg]);
+  const headingErrorText = useMemo(() => formatHeadingError(isMissionActive && headingErrorDeg !== undefined ? headingErrorDeg : null), [isMissionActive, headingErrorDeg]);
+  const distanceToGoalText = useMemo(() => formatDistance(isMissionActive && distanceToGoalM !== undefined ? distanceToGoalM : null), [isMissionActive, distanceToGoalM]);
+
+  const actualSpeedLive = isMissionActive && actualSpeedMps !== null && actualSpeedMps !== undefined;
+  const targetHeadingLive = isMissionActive && targetHeadingDeg !== null && targetHeadingDeg !== undefined;
+  const headingErrorLive = isMissionActive && headingErrorDeg !== null && headingErrorDeg !== undefined;
+  const distanceToGoalLive = isMissionActive && distanceToGoalM !== null && distanceToGoalM !== undefined;
+
+  const hasLiveData = alongSideLive || crossTrackLive || actualSpeedLive;
 
   const cardContent = (
     <View
@@ -173,17 +213,10 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 
       <View style={styles.metricsRow}>
         <View style={styles.metricHalf}>
-          <Text style={styles.metricLabel}>ALONG SIDE</Text>
-
-          <Text
-            style={[
-              styles.metricValue,
-              alongSideLive && styles.metricValueLive,
-            ]}
-          >
+          <Text style={styles.metricLabel}>ALONG ERROR</Text>
+          <Text style={[styles.metricValue, alongSideLive && styles.metricValueLive]}>
             {alongSideText}
           </Text>
-
           <Text numberOfLines={1} style={styles.metricStatus}>
             {alongSideStatus}
           </Text>
@@ -193,18 +226,59 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 
         <View style={styles.metricHalf}>
           <Text style={styles.metricLabel}>CROSS TRACK</Text>
-
-          <Text
-            style={[
-              styles.metricValue,
-              crossTrackLive && styles.metricValueLive,
-            ]}
-          >
+          <Text style={[styles.metricValue, crossTrackLive && styles.metricValueLive]}>
             {crossTrackText}
           </Text>
-
           <Text numberOfLines={1} style={styles.metricStatus}>
             {crossTrackStatus}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.headerDivider} />
+
+      <View style={styles.metricsRow}>
+        <View style={styles.metricHalf}>
+          <Text style={styles.metricLabel}>ACTUAL SPEED</Text>
+          <Text style={[styles.metricValue, actualSpeedLive && styles.metricValueLive]}>
+            {actualSpeedText}
+          </Text>
+          <Text numberOfLines={1} style={styles.metricStatus}>
+            RPP ODOM
+          </Text>
+        </View>
+        <View style={styles.verticalDivider} />
+        <View style={styles.metricHalf}>
+          <Text style={styles.metricLabel}>TARGET HEADING</Text>
+          <Text style={[styles.metricValue, targetHeadingLive && styles.metricValueLive]}>
+            {targetHeadingText}
+          </Text>
+          <Text numberOfLines={1} style={styles.metricStatus}>
+            FINAL GUIDANCE
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.headerDivider} />
+
+      <View style={styles.metricsRow}>
+        <View style={styles.metricHalf}>
+          <Text style={styles.metricLabel}>HEADING ERROR</Text>
+          <Text style={[styles.metricValue, headingErrorLive && styles.metricValueLive]}>
+            {headingErrorText}
+          </Text>
+          <Text numberOfLines={1} style={styles.metricStatus}>
+            FINAL RPP ERROR
+          </Text>
+        </View>
+        <View style={styles.verticalDivider} />
+        <View style={styles.metricHalf}>
+          <Text style={styles.metricLabel}>DIST TO GOAL</Text>
+          <Text style={[styles.metricValue, distanceToGoalLive && styles.metricValueLive]}>
+            {distanceToGoalText}
+          </Text>
+          <Text numberOfLines={1} style={styles.metricStatus}>
+            ACTIVE RPP GOAL
           </Text>
         </View>
       </View>

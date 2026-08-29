@@ -60,32 +60,33 @@ export const EMPTY_RTK_PROFILE_FORM: RtkProfileEditorForm = {
 
 export function profileToEditorForm(profile: RtkProfile): RtkProfileEditorForm {
   return {
-    name: profile.name,
-    caster_host: profile.caster_host,
-    caster_port: String(profile.caster_port),
-    mountpoint: profile.mountpoint,
-    username: profile.username,
+    name: profile?.name ?? "",
+    caster_host: profile?.caster_host ?? "",
+    caster_port: String(profile?.caster_port ?? 2101),
+    mountpoint: profile?.mountpoint ?? "",
+    username: profile?.username ?? "",
     password: "",
-    tls_mode: profile.tls_mode,
-    enabled: profile.enabled,
-    gga_enabled: profile.gga_enabled,
-    gga_interval_sec: String(profile.gga_interval_sec),
-    gga_max_age_sec: String(profile.gga_max_age_sec),
-    connect_timeout_sec: String(profile.connect_timeout_sec),
-    socket_timeout_sec: String(profile.socket_timeout_sec),
-    healthy_age_sec: String(profile.healthy_age_sec),
-    stale_reconnect_sec: String(profile.stale_reconnect_sec),
-    reconnect_delay_sec: String(profile.reconnect_delay_sec),
-    first_data_timeout_sec: String(profile.first_data_timeout_sec),
-    max_mavros_rtcm_frame_bytes: String(profile.max_mavros_rtcm_frame_bytes),
+    tls_mode: profile?.tls_mode ?? "REQUIRED",
+    enabled: Boolean(profile?.enabled),
+    gga_enabled: Boolean(profile?.gga_enabled),
+    gga_interval_sec: String(profile?.gga_interval_sec ?? RTK_PROFILE_CREATE_DEFAULTS.gga_interval_sec),
+    gga_max_age_sec: String(profile?.gga_max_age_sec ?? RTK_PROFILE_CREATE_DEFAULTS.gga_max_age_sec),
+    connect_timeout_sec: String(profile?.connect_timeout_sec ?? RTK_PROFILE_CREATE_DEFAULTS.connect_timeout_sec),
+    socket_timeout_sec: String(profile?.socket_timeout_sec ?? RTK_PROFILE_CREATE_DEFAULTS.socket_timeout_sec),
+    healthy_age_sec: String(profile?.healthy_age_sec ?? RTK_PROFILE_CREATE_DEFAULTS.healthy_age_sec),
+    stale_reconnect_sec: String(profile?.stale_reconnect_sec ?? RTK_PROFILE_CREATE_DEFAULTS.stale_reconnect_sec),
+    reconnect_delay_sec: String(profile?.reconnect_delay_sec ?? RTK_PROFILE_CREATE_DEFAULTS.reconnect_delay_sec),
+    first_data_timeout_sec: String(profile?.first_data_timeout_sec ?? RTK_PROFILE_CREATE_DEFAULTS.first_data_timeout_sec),
+    max_mavros_rtcm_frame_bytes: String(profile?.max_mavros_rtcm_frame_bytes ?? RTK_PROFILE_CREATE_DEFAULTS.max_mavros_rtcm_frame_bytes),
   };
 }
 
 function parsePort(value: string): number | null {
-  if (!/^\d+$/.test(value)) {
+  const trimmed = String(value ?? "").trim();
+  if (!/^\d+$/.test(trimmed)) {
     return null;
   }
-  const port = Number.parseInt(value, 10);
+  const port = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
     return null;
   }
@@ -93,7 +94,7 @@ function parsePort(value: string): number | null {
 }
 
 function parsePositiveNumber(value: string): number | null {
-  const parsed = Number.parseFloat(value);
+  const parsed = Number.parseFloat(String(value ?? ""));
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return null;
   }
@@ -101,10 +102,11 @@ function parsePositiveNumber(value: string): number | null {
 }
 
 function parsePositiveInt(value: string): number | null {
-  if (!/^\d+$/.test(value)) {
+  const trimmed = String(value ?? "").trim();
+  if (!/^\d+$/.test(trimmed)) {
     return null;
   }
-  const parsed = Number.parseInt(value, 10);
+  const parsed = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
     return null;
   }
@@ -135,22 +137,22 @@ export function validateRtkProfileForm(
 ): RtkProfileFormErrors {
   const errors: RtkProfileFormErrors = {};
 
-  if (!form.name.trim()) {
+  if (!String(form?.name ?? "").trim()) {
     errors.name = "Name is required";
   }
-  if (!form.caster_host.trim()) {
+  if (!String(form?.caster_host ?? "").trim()) {
     errors.caster_host = "Caster host is required";
   }
-  if (parsePort(form.caster_port) == null) {
+  if (parsePort(String(form?.caster_port ?? "")) == null) {
     errors.caster_port = "Port must be 1–65535";
   }
-  if (!form.mountpoint.trim()) {
+  if (!String(form?.mountpoint ?? "").trim()) {
     errors.mountpoint = "Mountpoint is required";
   }
-  if (!form.username.trim()) {
+  if (!String(form?.username ?? "").trim()) {
     errors.username = "Username is required";
   }
-  if (mode === "create" && form.password === "") {
+  if (mode === "create" && (form?.password === undefined || form?.password === null || form?.password === "")) {
     errors.password = "Password is required";
   }
 

@@ -1,0 +1,315 @@
+===== QUICK NTRIP CARD =====
+import React from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
+interface Props {
+  onPress: () => void;
+  onManualPress?: () => void;
+  manualLoading?: boolean;
+  loading?: boolean;
+  connected?: boolean;
+}
+
+export const QuickNtripStartCard: React.FC<Props> = ({
+  onPress,
+  onManualPress,
+  manualLoading = false,
+  loading = false,
+  connected = false,
+}) => {
+  return (
+    <View style={styles.container}>
+      <TouchableOpacity
+        style={[
+          styles.button,
+          connected ? styles.buttonConnected : styles.buttonDisconnected,
+          loading && styles.buttonLoading,
+        ]}
+        onPress={onPress}
+        disabled={connected || loading}
+        activeOpacity={0.82}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color="#ffffff" />
+        ) : (
+          <MaterialCommunityIcons name="access-point-network" size={20} color="#ffffff" />
+        )}
+        <Text style={styles.buttonText}>RTK-GPS</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.button, styles.buttonManual]}
+        onPress={onManualPress}
+        disabled={!onManualPress || manualLoading}
+        activeOpacity={0.82}
+      >
+        {manualLoading ? (
+          <ActivityIndicator size="small" color="#ffffff" />
+        ) : (
+          <MaterialCommunityIcons name="gamepad-variant" size={20} color="#ffffff" />
+        )}
+        <Text style={styles.buttonText}>MANUAL</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    width: '100%',
+    flexDirection: 'column',
+    gap: 16,
+  },
+  button: {
+    width: '100%',
+    minHeight: 72,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  buttonDisconnected: {
+    backgroundColor: '#dc2626',
+  },
+  buttonConnected: {
+    backgroundColor: '#16a34a',
+  },
+  buttonLoading: {
+    opacity: 0.85,
+  },
+  buttonManual: {
+    backgroundColor: '#334155',
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+});
+
+===== RTK TELEMETRY AVAILABLE TO MISSION SCREEN =====
+175-    if (DEBUG_MISSION_LOGS) console.log(...args);
+176-  };
+177-  const mapBackendMissionModeToUiMode = (backendMode: unknown): Mode | null => {
+178-    const normalized = String(backendMode ?? "")
+179-      .trim()
+180-      .toLowerCase();
+181-    if (normalized === "auto") return "AUTO";
+182-    if (normalized === "manual") return "MANUAL";
+183-    if (normalized === "continuous") return "CONTINUOUS";
+184-    if (normalized === "dash") return "DASH";
+185-    return null;
+186-  };
+187:  const { telemetry, roverPosition, onMissionEvent, socket } = useTelemetry();
+188-  const { services, connectionState } = useConnection();
+189-
+190-  // 4WD verified mission hooks
+191-  const verifiedCtx = useVerifiedMissionContext();
+192-  const { upload: uploadVerifiedWaypoints } = useVerifiedMissionUpload();
+193-  const {
+194-    verifiedProgressMap,
+195-
+196-    currentTargetIndex: verifiedTargetIndex,
+197-
+198-    missionTerminal: verifiedTerminal,
+199-
+200-    waitingForContinue: verifiedWaiting,
+201-
+202-    resetProgress: resetVerifiedProgress,
+203-
+204-    clearMissionTerminal: clearVerifiedTerminal,
+205-  } = useVerifiedMissionProgress(
+206-    socket,
+207-    connectionState,
+208-    verifiedCtx.missionId,
+209-    verifiedCtx.totalTargets,
+210-  );
+211-
+212-  const {
+--
+537-       * Never update this value from later
+538-       * live telemetry packets.
+539-       */
+540-      if (
+541-        terminalRppAccuracyFallbackRef
+542-          .current[
+543-          serialNumber
+544-        ]
+545-      ) {
+546-        continue;
+547-      }
+548-
+549:      const telemetryGoalNumber =
+550-        Number(
+551-          telemetry.accuracy
+552-            ?.goal_number,
+553-        );
+554-
+555:      const telemetryActiveIndex =
+556-        Number(
+557-          telemetry.mission
+558-            ?.active_point_index,
+559-        );
+560-
+561:      const telemetryActiveNumber =
+562-        Number(
+563-          telemetry.mission
+564-            ?.active_point_number,
+565-        );
+566-
+567-      /*
+568-       * Only capture telemetry belonging to
+569-       * the terminal point.
+570-       *
+571-       * This prevents P1/P2/P3 from accidentally
+572-       * receiving P4's final telemetry on reconnect.
+573-       */
+574-      const pointIdentityMatches =
+575-        currentPx4PointIndex
+576-          === pointIndex
+577-        || (
+578-          Number.isFinite(
+579-            telemetryGoalNumber,
+580-          )
+581-          && Math.trunc(
+582-            telemetryGoalNumber,
+583-          ) === pointIndex + 1
+584-        )
+585-        || (
+586-          Number.isFinite(
+--
+705-      ?.radial_error_mm,
+706-
+707-    telemetry.accuracy
+708-      ?.goal_number,
+709-
+710-    telemetry.mission
+711-      ?.active_point_index,
+712-
+713-    telemetry.mission
+714-      ?.active_point_number,
+715-  ]);
+716-
+717:  const telemetryMissionActive = useMemo(() => {
+718:    const ms = String(telemetry.mission?.status ?? "").toLowerCase();
+719-    return [
+720-      "running",
+721-      "paused",
+722-      "waiting_for_next",
+723-      "arming",
+724-      "switching_offboard",
+725-      "loading",
+726-      "stopping",
+727-    ].includes(ms);
+728-  }, [telemetry.mission?.status]);
+729-
+730:  const effectiveMissionActive = isMissionActive || telemetryMissionActive;
+731-
+732-  const backendMissionState = String(backendMission?.state ?? "")
+733-    .trim()
+734-    .toUpperCase();
+735-
+736-  /**
+737-   * Live accuracy must depend on the backend mission state,
+738-   * not the locally persisted isMissionActive value.
+739-   */
+740-  const accuracyMissionActive =
+741-    telemetryMissionActive ||
+742-    ["RUNNING", "PAUSED", "ARMING", "SWITCHING_OFFBOARD", "LOADING"].includes(
+743-      backendMissionState,
+744-    );
+745-
+746-  const accuracyDataAvailable =
+747-    connectionState === "connected" &&
+748-    accuracyMissionActive &&
+749-    telemetry.accuracy_available === true &&
+750-    typeof telemetry.front_back_error_mm === "number" &&
+751-    Number.isFinite(telemetry.front_back_error_mm) &&
+752-    typeof telemetry.cross_track_error_mm === "number" &&
+753-    Number.isFinite(telemetry.cross_track_error_mm);
+754-
+755-  const overallAccuracyDataAvailable =
+--
+923-    !isMissionActive &&
+924-    Object.keys(statusMap).length === 0;
+925-
+926-  // Refs to store latest values for mission event handler (prevents stale closures)
+927-  const waypointsRef = useRef(waypoints);
+928-  const statusMapRef = useRef(statusMap);
+929-  const reportStatusMapRef = useRef<Record<number, WpStatus>>({});
+930-  const missionStartTimeRef = useRef(missionStartTime);
+931-  const missionEndTimeRef = useRef(missionEndTime);
+932-  const isMissionActiveRef = useRef(isMissionActive);
+933-  const modeRef = useRef(mode);
+934-  const missionModeRef = useRef(missionMode);
+935:  const telemetryRef = useRef(telemetry);
+936-  const roverPositionRef = useRef(roverPosition);
+937-
+938-  // Keep refs in sync with state
+939-  useEffect(() => {
+940-    waypointsRef.current = waypoints;
+941-  }, [waypoints]);
+942-
+943-  useEffect(() => {
+944-    statusMapRef.current = statusMap;
+945-  }, [statusMap]);
+946-
+947-  useEffect(() => {
+948-    reportStatusMapRef.current = reportStatusMap;
+949-  }, [reportStatusMap]);
+950-
+951-  useEffect(() => {
+952-    missionStartTimeRef.current = missionStartTime;
+953-  }, [missionStartTime]);
+954-
+955-  useEffect(() => {
+956-    missionEndTimeRef.current = missionEndTime;
+957-  }, [missionEndTime]);
+958-
+959-  useEffect(() => {
+960-    isMissionActiveRef.current = isMissionActive;
+--
+1468-  };
+1469-
+1470-  const handleOpenManualDrive = async () => {
+1471-    if (isManualPreparing) return;
+1472-
+1473-    if (JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS && isOfflineMode()) {
+1474-      openManualDrivePanel();
+1475-      return;
+1476-    }
+1477-
+1478-    setIsManualPreparing(true);
+1479-    try {
+1480:      const currentMode = String(telemetry.state?.mode || "").toUpperCase();
+1481-      if (currentMode !== "MANUAL") {
+1482-        console.log(
+1483-          "[ManualDrive] Setting mode to MANUAL from",
+1484-          currentMode || "UNKNOWN",
+1485-        );
+1486-        const modeResponse = await setManualMode();
+1487-        if (!modeResponse.success) {
+1488-          const message =
+1489-            modeResponse.message || "Unable to switch vehicle to MANUAL mode.";
+1490-          showNotification("error", "Manual Mode Failed", message, 5000);
+1491-          Alert.alert("Manual Mode Failed", message);
+1492-          return;
+1493-        }
+1494-      }
+1495-
+1496-      if (!telemetry.state?.armed) {
+1497-        console.log("[ManualDrive] Arming vehicle before opening joystick");
+1498-        const armResponse = await armVehicle();
+1499-        if (!armResponse.success) {
+1500-          const message = armResponse.message || "Unable to arm vehicle.";
+1501-          showNotification("error", "Arm Failed", message, 5000);
+1502-          Alert.alert("Arm Failed", message);
+1503-          return;
+1504-        }
+1505-      }
+--

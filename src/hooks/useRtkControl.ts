@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   toRtkControlView,
+  unwrapRtkStatus,
   type RtkControlViewModel,
 } from "../adapters/rtkControlAdapter";
 import {
@@ -272,10 +273,11 @@ export function useRtkControl(
   }, [connected, visible, loadStatus, refresh]);
 
   useEffect(() => {
-    if (!status) {
+    const unwrapped = unwrapRtkStatus(status);
+    if (!unwrapped) {
       return;
     }
-    const activeId = status.status.persisted.active_profile_id;
+    const activeId = unwrapped.persisted?.active_profile_id ?? null;
     setSelectedProfileId((current) => {
       if (current != null) {
         return current;
@@ -406,9 +408,13 @@ export function useRtkControl(
             if (!previous) {
               return previous;
             }
+            const unwrapped = unwrapRtkStatus(previous);
+            if (!unwrapped) {
+              return previous;
+            }
             return {
               status: {
-                ...previous.status,
+                ...unwrapped,
                 persisted: intent.persisted,
               },
             };
@@ -428,9 +434,13 @@ export function useRtkControl(
             if (!previous) {
               return previous;
             }
+            const unwrapped = unwrapRtkStatus(previous);
+            if (!unwrapped) {
+              return previous;
+            }
             return {
               status: {
-                ...previous.status,
+                ...unwrapped,
                 persisted: intent.persisted,
               },
             };
@@ -450,14 +460,19 @@ export function useRtkControl(
     [connected, mutationBusy, status],
   );
 
+  const unwrappedStatus = unwrapRtkStatus(status);
+  const activeProfileId =
+    unwrappedStatus?.persisted?.active_profile_id ??
+    view.activeProfileId ??
+    null;
+
   const selectedProfile =
     profiles.find((profile) => profile.id === selectedProfileId) ?? null;
 
   const activeProfile =
-    profiles.find(
-      (profile) => profile.id === status?.status.persisted.active_profile_id,
-    ) ??
-    status?.status.active_profile ??
+    profiles.find((profile) => profile.id === activeProfileId) ??
+    unwrappedStatus?.active_profile ??
+    view.activeProfile ??
     null;
 
   return {
@@ -477,7 +492,7 @@ export function useRtkControl(
     canDelete:
       view.canDelete &&
       selectedProfile != null &&
-      selectedProfile.id !== status?.status.persisted.active_profile_id,
+      selectedProfile.id !== activeProfileId,
     disabledReason: view.disabledReason ?? (error ? error.message : null),
     selectProfile: setSelectedProfileId,
     refresh,

@@ -1467,7 +1467,7 @@ export default function MissionReportScreen({
 
       const decision = decideMissionRtkQuickStart({
         connected: connectionState === "connected",
-        activeProfileId: response.status.persisted.active_profile_id,
+        activeProfileId: view.activeProfileId,
       });
 
       if (decision === "offline") {
@@ -4409,16 +4409,28 @@ export default function MissionReportScreen({
           <AccuracyMonitorCard
             isMissionActive={accuracyMissionActive}
             alongSideMm={
-              accuracyDataAvailable ? telemetry.front_back_error_mm : null
+              telemetry.rpp_debug_available ? telemetry.rpp_along_remaining_mm : null
             }
             alongSidePosition={
-              accuracyDataAvailable ? telemetry.front_back_position : null
+              telemetry.rpp_debug_available ? telemetry.rpp_along_position : null
             }
             crossTrackMm={
-              accuracyDataAvailable ? telemetry.cross_track_error_mm : null
+              telemetry.rpp_debug_available ? telemetry.rpp_cross_track_error_mm : null
             }
             crossTrackSide={
-              accuracyDataAvailable ? telemetry.cross_track_side : null
+              telemetry.rpp_debug_available ? telemetry.rpp_cross_track_side : null
+            }
+            actualSpeedMps={
+              telemetry.rpp_debug_available ? telemetry.rpp_actual_speed_mps : null
+            }
+            targetHeadingDeg={
+              telemetry.rpp_debug_available ? telemetry.rpp_guidance_bearing_deg : null
+            }
+            headingErrorDeg={
+              telemetry.rpp_debug_available ? telemetry.rpp_heading_error_deg : null
+            }
+            distanceToGoalM={
+              telemetry.rpp_debug_available ? telemetry.rpp_distance_to_goal_m : null
             }
             onClose={() => setPanelVisible("accuracyMonitor", false)}
           />

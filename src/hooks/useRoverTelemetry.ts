@@ -293,6 +293,21 @@ test_tolerance_mm: null,
 accuracy_status: null,
 accuracy_pass: false,
 within_test_tolerance: false,
+
+rpp_debug_available: false,
+rpp_control_mode: null,
+rpp_goal_number: null,
+rpp_actual_speed_mps: null,
+rpp_command_speed_mps: null,
+rpp_current_yaw_deg: null,
+rpp_path_bearing_deg: null,
+rpp_guidance_bearing_deg: null,
+rpp_heading_error_deg: null,
+rpp_distance_to_goal_m: null,
+rpp_cross_track_error_mm: null,
+rpp_cross_track_side: null,
+rpp_along_remaining_mm: null,
+rpp_along_position: null,
 });
 
 // Helper: POST to PX4 service endpoint through authenticated apiClient.
@@ -1422,6 +1437,49 @@ if (envelope.within_test_tolerance !== undefined) {
       next.control_owner = envelope.control_owner;
     }
 
+    if (envelope.rpp_debug_available !== undefined) {
+      next.rpp_debug_available = envelope.rpp_debug_available;
+    }
+    if (envelope.rpp_control_mode !== undefined) {
+      next.rpp_control_mode = envelope.rpp_control_mode;
+    }
+    if (envelope.rpp_goal_number !== undefined) {
+      next.rpp_goal_number = envelope.rpp_goal_number;
+    }
+    if (envelope.rpp_actual_speed_mps !== undefined) {
+      next.rpp_actual_speed_mps = envelope.rpp_actual_speed_mps;
+    }
+    if (envelope.rpp_command_speed_mps !== undefined) {
+      next.rpp_command_speed_mps = envelope.rpp_command_speed_mps;
+    }
+    if (envelope.rpp_current_yaw_deg !== undefined) {
+      next.rpp_current_yaw_deg = envelope.rpp_current_yaw_deg;
+    }
+    if (envelope.rpp_path_bearing_deg !== undefined) {
+      next.rpp_path_bearing_deg = envelope.rpp_path_bearing_deg;
+    }
+    if (envelope.rpp_guidance_bearing_deg !== undefined) {
+      next.rpp_guidance_bearing_deg = envelope.rpp_guidance_bearing_deg;
+    }
+    if (envelope.rpp_heading_error_deg !== undefined) {
+      next.rpp_heading_error_deg = envelope.rpp_heading_error_deg;
+    }
+    if (envelope.rpp_distance_to_goal_m !== undefined) {
+      next.rpp_distance_to_goal_m = envelope.rpp_distance_to_goal_m;
+    }
+    if (envelope.rpp_cross_track_error_mm !== undefined) {
+      next.rpp_cross_track_error_mm = envelope.rpp_cross_track_error_mm;
+    }
+    if (envelope.rpp_cross_track_side !== undefined) {
+      next.rpp_cross_track_side = envelope.rpp_cross_track_side;
+    }
+    if (envelope.rpp_along_remaining_mm !== undefined) {
+      next.rpp_along_remaining_mm = envelope.rpp_along_remaining_mm;
+    }
+    if (envelope.rpp_along_position !== undefined) {
+      next.rpp_along_position = envelope.rpp_along_position;
+    }
+
     next.lastMessageTs = envelope.timestamp ?? Date.now();
 
     // Shallow equality check to detect actual changes
@@ -1479,6 +1537,34 @@ if (envelope.within_test_tolerance !== undefined) {
     changed ||
     !shallowEqual(prev.accuracy, next.accuracy);
 }
+    if (envelope.rpp_debug_available !== undefined)
+      changed = changed || prev.rpp_debug_available !== next.rpp_debug_available;
+    if (envelope.rpp_control_mode !== undefined)
+      changed = changed || prev.rpp_control_mode !== next.rpp_control_mode;
+    if (envelope.rpp_goal_number !== undefined)
+      changed = changed || prev.rpp_goal_number !== next.rpp_goal_number;
+    if (envelope.rpp_actual_speed_mps !== undefined)
+      changed = changed || prev.rpp_actual_speed_mps !== next.rpp_actual_speed_mps;
+    if (envelope.rpp_command_speed_mps !== undefined)
+      changed = changed || prev.rpp_command_speed_mps !== next.rpp_command_speed_mps;
+    if (envelope.rpp_current_yaw_deg !== undefined)
+      changed = changed || prev.rpp_current_yaw_deg !== next.rpp_current_yaw_deg;
+    if (envelope.rpp_path_bearing_deg !== undefined)
+      changed = changed || prev.rpp_path_bearing_deg !== next.rpp_path_bearing_deg;
+    if (envelope.rpp_guidance_bearing_deg !== undefined)
+      changed = changed || prev.rpp_guidance_bearing_deg !== next.rpp_guidance_bearing_deg;
+    if (envelope.rpp_heading_error_deg !== undefined)
+      changed = changed || prev.rpp_heading_error_deg !== next.rpp_heading_error_deg;
+    if (envelope.rpp_distance_to_goal_m !== undefined)
+      changed = changed || prev.rpp_distance_to_goal_m !== next.rpp_distance_to_goal_m;
+    if (envelope.rpp_cross_track_error_mm !== undefined)
+      changed = changed || prev.rpp_cross_track_error_mm !== next.rpp_cross_track_error_mm;
+    if (envelope.rpp_cross_track_side !== undefined)
+      changed = changed || prev.rpp_cross_track_side !== next.rpp_cross_track_side;
+    if (envelope.rpp_along_remaining_mm !== undefined)
+      changed = changed || prev.rpp_along_remaining_mm !== next.rpp_along_remaining_mm;
+    if (envelope.rpp_along_position !== undefined)
+      changed = changed || prev.rpp_along_position !== next.rpp_along_position;
 
 if (envelope.accuracy_available !== undefined) {
   changed =
@@ -2788,7 +2874,7 @@ attitude: adapted.attitude,
     clearReconnectTimer,
     teardownSocket,
   ]);
-  
+
 
   const pushStatePatch = useCallback((patch: Partial<TelemetryState>) => {
     const baseState = mutableRef.current.telemetry.state;

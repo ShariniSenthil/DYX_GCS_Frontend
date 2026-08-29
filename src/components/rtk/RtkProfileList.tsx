@@ -27,6 +27,8 @@ export const RtkProfileList: React.FC<Props> = ({
   onSelect,
   onCreate,
 }) => {
+  const list = Array.isArray(profiles) ? profiles : [];
+
   return (
     <View style={styles.wrap}>
       <View style={styles.header}>
@@ -46,7 +48,7 @@ export const RtkProfileList: React.FC<Props> = ({
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-        {profiles.length === 0 ? (
+        {list.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No backend RTK profiles</Text>
             <Text style={styles.emptyBody}>
@@ -55,13 +57,13 @@ export const RtkProfileList: React.FC<Props> = ({
             </Text>
           </View>
         ) : (
-          profiles.map((profile) => {
-            const selected = profile.id === selectedProfileId;
-            const active = profile.id === activeProfileId;
+          list.map((profile) => {
+            const selected = profile?.id === selectedProfileId;
+            const active = profile?.id === activeProfileId;
             return (
               <Pressable
-                key={profile.id}
-                onPress={() => onSelect(profile.id)}
+                key={profile?.id ?? Math.random()}
+                onPress={() => profile?.id != null && onSelect(profile.id)}
                 disabled={disabled}
                 style={({ pressed }) => [
                   styles.row,
@@ -70,21 +72,21 @@ export const RtkProfileList: React.FC<Props> = ({
                   disabled && styles.disabled,
                 ]}
               >
-                <Text style={styles.name}>{profile.name}</Text>
+                <Text style={styles.name}>{profile?.name ?? "Unnamed profile"}</Text>
                 <Text style={styles.meta}>
-                  {profile.caster_host}:{profile.caster_port}/{profile.mountpoint}
+                  {profile?.caster_host ?? "—"}:{profile?.caster_port ?? 2101}/{profile?.mountpoint ?? "—"}
                 </Text>
                 <View style={styles.badges}>
                   {active ? <Badge label="Active" tone="accent" /> : null}
                   <Badge
-                    label={profile.enabled ? "Enabled" : "Disabled"}
-                    tone={profile.enabled ? "success" : "muted"}
+                    label={profile?.enabled ? "Enabled" : "Disabled"}
+                    tone={profile?.enabled ? "success" : "muted"}
                   />
                   <Badge
-                    label={`TLS ${profile.tls_mode}`}
-                    tone={profile.tls_mode === "REQUIRED" ? "success" : "warning"}
+                    label={`TLS ${profile?.tls_mode ?? "REQUIRED"}`}
+                    tone={profile?.tls_mode === "REQUIRED" ? "success" : profile?.tls_mode === "DISABLED" ? "warning" : "muted"}
                   />
-                  <Badge label={`rev ${profile.revision}`} tone="muted" />
+                  <Badge label={`rev ${profile?.revision ?? 1}`} tone="muted" />
                 </View>
               </Pressable>
             );

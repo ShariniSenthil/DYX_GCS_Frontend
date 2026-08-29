@@ -44,8 +44,12 @@ export const RTKInjectionScreen: React.FC<Props> = ({
   const [importing, setImporting] = useState(false);
 
   const loadLocal = useCallback(async () => {
-    const locals = await listLocalRtkProfilesForMigration();
-    setLocalProfiles(locals);
+    try {
+      const locals = await listLocalRtkProfilesForMigration();
+      setLocalProfiles(Array.isArray(locals) ? locals : []);
+    } catch {
+      setLocalProfiles([]);
+    }
   }, []);
 
   useEffect(() => {

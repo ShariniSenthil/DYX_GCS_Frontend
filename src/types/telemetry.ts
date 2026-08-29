@@ -157,6 +157,21 @@ within_test_tolerance?: boolean;
   gateway_last_send_age_ms?: number | null;
   transport_healthy?: boolean | null;
   transport_error?: string | null;
+
+  rpp_debug_available?: boolean;
+  rpp_control_mode?: string | null;
+  rpp_goal_number?: number | null;
+  rpp_actual_speed_mps?: number | null;
+  rpp_command_speed_mps?: number | null;
+  rpp_current_yaw_deg?: number | null;
+  rpp_path_bearing_deg?: number | null;
+  rpp_guidance_bearing_deg?: number | null;
+  rpp_heading_error_deg?: number | null;
+  rpp_distance_to_goal_m?: number | null;
+  rpp_cross_track_error_mm?: number | null;
+  rpp_cross_track_side?: string | null;
+  rpp_along_remaining_mm?: number | null;
+  rpp_along_position?: string | null;
 }
 
 export interface TelemetryEnvelope {
@@ -214,6 +229,21 @@ within_test_tolerance?: boolean;
   joystick_last_valid_cmd_age_ms?: number | null;
   joystick_stop_reason?: string | null;
   control_owner?: string | null;
+
+  rpp_debug_available?: boolean;
+  rpp_control_mode?: string | null;
+  rpp_goal_number?: number | null;
+  rpp_actual_speed_mps?: number | null;
+  rpp_command_speed_mps?: number | null;
+  rpp_current_yaw_deg?: number | null;
+  rpp_path_bearing_deg?: number | null;
+  rpp_guidance_bearing_deg?: number | null;
+  rpp_heading_error_deg?: number | null;
+  rpp_distance_to_goal_m?: number | null;
+  rpp_cross_track_error_mm?: number | null;
+  rpp_cross_track_side?: string | null;
+  rpp_along_remaining_mm?: number | null;
+  rpp_along_position?: string | null;
 }
 
 export interface ServiceResponse {
