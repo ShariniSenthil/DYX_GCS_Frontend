@@ -114,8 +114,9 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
 
   const refreshSettingsRtkStatus = useCallback(async () => {
     if (connectionState !== "connected") {
-      setRtkHeadline("Rover Offline");
-      setCanStopRtk(false);
+      const offlineView = toRtkControlView(null, { connected: false });
+      setRtkHeadline(offlineView.headlineLabel);
+      setCanStopRtk(offlineView.canStop);
       setRtkStatusMessage("Rover not connected");
       return;
     }
@@ -154,7 +155,12 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
     }, 3000);
 
     return () => clearInterval(timer);
-  }, [visible, showRTKModal, connectionState, refreshSettingsRtkStatus]);
+  }, [
+    visible,
+    showRTKModal,
+    connectionState,
+    refreshSettingsRtkStatus,
+  ]);
 
   const handleOpenRTKModal = () => {
     setShowRTKModal(true);

@@ -61,7 +61,7 @@ export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
           label="GNSS fix"
           value={
             view.gnssFixName
-              ? `${String(view.gnssFixName).replace(/_/g, " ")} (${view.gnssFixType ?? "—"})`
+              ? `${view.gnssFixName.replace(/_/g, " ")} (${view.gnssFixType ?? "—"})`
               : "—"
           }
         />

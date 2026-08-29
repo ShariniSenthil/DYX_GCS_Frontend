@@ -67,20 +67,15 @@ export function localProfileToMigrationItem(
 export async function listLocalRtkProfilesForMigration(): Promise<
   RtkLocalProfileSummary[]
 > {
-  try {
-    const profiles = await getLocalProfiles();
-    if (!Array.isArray(profiles)) {
-      return [];
-    }
-    return profiles
-      .filter((profile) => profile && profile.id)
-      .map((profile) => ({
-        id: profile.id,
-        name: profile.name || "Unnamed local profile",
-      }));
-  } catch {
-    return [];
-  }
+  const profiles = await getLocalProfiles();
+
+  // Do not place legacy plaintext passwords into React/UI state merely by
+  // opening the RTK control screen. Full rows are re-read only after an
+  // explicit Import action.
+  return profiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+  }));
 }
 
 export async function importLocalRtkProfiles(options: {

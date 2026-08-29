@@ -83,7 +83,7 @@ export const RtkProfileEditor: React.FC<Props> = ({
 
   const title = useMemo(() => {
     if (mode === "create") return "Create profile";
-    if (mode === "edit" && profile) return `Edit ${profile.name ?? "Profile"}`;
+    if (mode === "edit" && profile) return `Edit ${profile.name}`;
     return "Select or create a profile";
   }, [mode, profile]);
 
@@ -434,7 +434,7 @@ export const RtkProfileEditor: React.FC<Props> = ({
 
 const Field: React.FC<{
   label: string;
-  value?: string | null;
+  value: string;
   onChange: (value: string) => void;
   error?: string;
   editable?: boolean;
@@ -454,7 +454,7 @@ const Field: React.FC<{
   <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
     <TextInput
-      value={value ?? ""}
+      value={value}
       onChangeText={onChange}
       editable={editable}
       autoCapitalize={autoCapitalize}
