@@ -74,3 +74,4 @@ test_beacon_listener.py
 # generated native folders
 /ios
 /android
+env
