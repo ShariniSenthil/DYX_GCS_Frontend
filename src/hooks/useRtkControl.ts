@@ -275,7 +275,7 @@ export function useRtkControl(
     if (!status) {
       return;
     }
-    const activeId = status.status.persisted.active_profile_id;
+    const activeId = status.status.persisted?.active_profile_id ?? null;
     setSelectedProfileId((current) => {
       if (current != null) {
         return current;
@@ -455,7 +455,7 @@ export function useRtkControl(
 
   const activeProfile =
     profiles.find(
-      (profile) => profile.id === status?.status.persisted.active_profile_id,
+      (profile) => profile.id === status?.status.persisted?.active_profile_id,
     ) ??
     status?.status.active_profile ??
     null;
@@ -477,7 +477,7 @@ export function useRtkControl(
     canDelete:
       view.canDelete &&
       selectedProfile != null &&
-      selectedProfile.id !== status?.status.persisted.active_profile_id,
+      selectedProfile.id !== status?.status.persisted?.active_profile_id,
     disabledReason: view.disabledReason ?? (error ? error.message : null),
     selectProfile: setSelectedProfileId,
     refresh,
