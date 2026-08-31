@@ -1870,6 +1870,26 @@ accuracy_pass:
 within_test_tolerance:
   adapted.within_test_tolerance,
 
+rpp_debug_available: adapted.rpp_debug_available,
+rpp_control_mode: adapted.rpp_control_mode,
+rpp_goal_number: adapted.rpp_goal_number,
+
+rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
+rpp_command_speed_mps: adapted.rpp_command_speed_mps,
+
+rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
+rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
+rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
+rpp_heading_error_deg: adapted.rpp_heading_error_deg,
+
+rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
+
+rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
+rpp_cross_track_side: adapted.rpp_cross_track_side,
+
+rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
+rpp_along_position: adapted.rpp_along_position,
+
 attitude: adapted.attitude,
         fcu_connected: adapted.fcu_connected,
         gps_fix_name: adapted.gps_fix_name,
@@ -2531,6 +2551,26 @@ accuracy_pass:
 
 within_test_tolerance:
   adapted.within_test_tolerance,
+
+rpp_debug_available: adapted.rpp_debug_available,
+rpp_control_mode: adapted.rpp_control_mode,
+rpp_goal_number: adapted.rpp_goal_number,
+
+rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
+rpp_command_speed_mps: adapted.rpp_command_speed_mps,
+
+rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
+rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
+rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
+rpp_heading_error_deg: adapted.rpp_heading_error_deg,
+
+rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
+
+rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
+rpp_cross_track_side: adapted.rpp_cross_track_side,
+
+rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
+rpp_along_position: adapted.rpp_along_position,
 
 attitude: adapted.attitude,
 

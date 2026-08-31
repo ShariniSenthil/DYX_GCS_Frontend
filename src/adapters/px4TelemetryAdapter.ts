@@ -291,6 +291,72 @@ const accuracyAvailable = safeBool(
     radialErrorMm !== null,
 );
 
+/*
+ * Exact live RPP controller telemetry.
+ *
+ * These values are calculated by RPP and forwarded by the backend.
+ * Preserve their values, signs and units without reconstructing geometry.
+ */
+const rppDebugAvailable = safeBool(
+  flat.rpp_debug_available,
+  false,
+);
+
+const rppControlMode =
+  typeof flat.rpp_control_mode === "string"
+    ? flat.rpp_control_mode
+    : null;
+
+const rppGoalNumber = firstOptionalNum(
+  flat.rpp_goal_number,
+);
+
+const rppActualSpeedMps = firstOptionalNum(
+  flat.rpp_actual_speed_mps,
+);
+
+const rppCommandSpeedMps = firstOptionalNum(
+  flat.rpp_command_speed_mps,
+);
+
+const rppCurrentYawDeg = firstOptionalNum(
+  flat.rpp_current_yaw_deg,
+);
+
+const rppPathBearingDeg = firstOptionalNum(
+  flat.rpp_path_bearing_deg,
+);
+
+const rppGuidanceBearingDeg = firstOptionalNum(
+  flat.rpp_guidance_bearing_deg,
+);
+
+const rppHeadingErrorDeg = firstOptionalNum(
+  flat.rpp_heading_error_deg,
+);
+
+const rppDistanceToGoalM = firstOptionalNum(
+  flat.rpp_distance_to_goal_m,
+);
+
+const rppCrossTrackErrorMm = firstOptionalNum(
+  flat.rpp_cross_track_error_mm,
+);
+
+const rppCrossTrackSide =
+  typeof flat.rpp_cross_track_side === "string"
+    ? flat.rpp_cross_track_side
+    : null;
+
+const rppAlongRemainingMm = firstOptionalNum(
+  flat.rpp_along_remaining_mm,
+);
+
+const rppAlongPosition =
+  typeof flat.rpp_along_position === "string"
+    ? flat.rpp_along_position
+    : null;
+
   return {
     state,
     global,
@@ -357,6 +423,26 @@ accuracy_status: accuracyStatus,
 accuracy_pass: accuracyPass,
 within_test_tolerance:
   withinTestTolerance,
+
+rpp_debug_available: rppDebugAvailable,
+rpp_control_mode: rppControlMode,
+rpp_goal_number: rppGoalNumber,
+
+rpp_actual_speed_mps: rppActualSpeedMps,
+rpp_command_speed_mps: rppCommandSpeedMps,
+
+rpp_current_yaw_deg: rppCurrentYawDeg,
+rpp_path_bearing_deg: rppPathBearingDeg,
+rpp_guidance_bearing_deg: rppGuidanceBearingDeg,
+rpp_heading_error_deg: rppHeadingErrorDeg,
+
+rpp_distance_to_goal_m: rppDistanceToGoalM,
+
+rpp_cross_track_error_mm: rppCrossTrackErrorMm,
+rpp_cross_track_side: rppCrossTrackSide,
+
+rpp_along_remaining_mm: rppAlongRemainingMm,
+rpp_along_position: rppAlongPosition,
     distance_to_next_m: (() => {
       const distanceM = firstOptionalNum(
         flat.dist_to_goal_m,

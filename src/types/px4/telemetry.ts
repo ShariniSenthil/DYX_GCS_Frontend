@@ -126,6 +126,27 @@ export interface Px4TelemetryData {
   rpp_state?: number | null;
   rpp_state_name?: string | null;
 
+  // Exact live RPP controller telemetry from backend /rpp/debug.
+  rpp_debug_available?: boolean;
+  rpp_control_mode?: string | null;
+  rpp_goal_number?: number | null;
+
+  rpp_actual_speed_mps?: number | null;
+  rpp_command_speed_mps?: number | null;
+
+  rpp_current_yaw_deg?: number | null;
+  rpp_path_bearing_deg?: number | null;
+  rpp_guidance_bearing_deg?: number | null;
+  rpp_heading_error_deg?: number | null;
+
+  rpp_distance_to_goal_m?: number | null;
+
+  rpp_cross_track_error_mm?: number | null;
+  rpp_cross_track_side?: string | null;
+
+  rpp_along_remaining_mm?: number | null;
+  rpp_along_position?: string | null;
+
   // Vehicle compatibility fields
   armed?: boolean;
   mode?: string;
