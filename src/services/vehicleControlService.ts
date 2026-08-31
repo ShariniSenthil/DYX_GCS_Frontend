@@ -1,17 +1,16 @@
 /**
  * vehicleControlService — Arm / Disarm / MANUAL mode / E-Stop.
  *
- * Fixes the critical payload mismatches from the audit:
- *   - Arm: was `{ value: true }` → now `{ arm: true }`
- *   - E-stop fallback: was `/servo/emergency_stop` → now `/api/estop`
- *   - setMode restricted to 'MANUAL' only (OFFBOARD only via mission/start)
+ * Command transport contracts:
+ *   - Arm uses `{ arm: true }`.
+ *   - E-stop uses acknowledged `POST /api/estop`.
+ *   - setMode is restricted to MANUAL (OFFBOARD only via mission/start).
  *
  * All calls use apiClient with automatic token injection.
  */
 
 import { apiPost } from './apiClient';
-import { emit as socketEmit, on as socketOn, off as socketOff } from './socketClient';
-import { PX4_VEHICLE, PX4_SOCKET_EVENTS } from '../config/px4Endpoints';
+import { PX4_VEHICLE } from '../config/px4Endpoints';
 import type {
   ArmRequest,
   ArmResponse,
@@ -60,47 +59,24 @@ export async function setManualMode(): Promise<SetModeResponse> {
 type EstopResultCallback = (result: { success: boolean; message?: string }) => void;
 
 /**
- * Trigger emergency stop via socket (primary) with REST fallback.
+ * Trigger emergency stop through the acknowledged REST authority.
  *
- * PX4 sequence:
- *   1. Emit `emergency_stop` socket event
- *   2. Listen for `estop_result` event (not `emergency_stop_ack`)
- *   3. If socket not connected, fall back to POST /api/estop
- *
- * @param onResult Optional callback for estop_result socket event
- * @returns REST response if socket unavailable, otherwise undefined
+ * @param onResult Optional callback invoked from the REST response
+ * @returns The backend acknowledgement
  */
 export async function emergencyStop(
   onResult?: EstopResultCallback,
-): Promise<EstopResponse | undefined> {
-  // Remove any previous listener to avoid duplicates
-  socketOff(PX4_SOCKET_EVENTS.ESTOP_RESULT, 'vehicle-estop-result');
+): Promise<EstopResponse> {
+  const response = await apiPost<EstopResponse>(PX4_VEHICLE.ESTOP);
 
-  // Register estop_result listener if callback provided
   if (onResult) {
-    socketOn(
-      PX4_SOCKET_EVENTS.ESTOP_RESULT,
-      (data: unknown) => {
-        const result = data as { success: boolean; message?: string };
-        onResult(result);
-        socketOff(PX4_SOCKET_EVENTS.ESTOP_RESULT, 'vehicle-estop-result');
-      },
-      'vehicle-estop-result',
-    );
+    onResult({
+      success: response.success,
+      message: response.message,
+    });
   }
 
-  // Try socket path first
-  try {
-    socketEmit(PX4_SOCKET_EVENTS.EMERGENCY_STOP);
-    // Socket emit succeeded — REST fallback not needed
-    return undefined;
-  } catch {
-    // Socket not connected — fall back to REST
-    console.warn('[vehicleControl] Socket e-stop failed, falling back to REST');
-  }
-
-  // REST fallback
-  return apiPost<EstopResponse>(PX4_VEHICLE.ESTOP);
+  return response;
 }
 
 export const vehicleControlService = {

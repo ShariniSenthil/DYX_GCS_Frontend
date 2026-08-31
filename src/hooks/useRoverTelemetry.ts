@@ -3169,15 +3169,8 @@ attitude: adapted.attitude,
           import("../types/params").ParamUploadResponse
         >,
 
-      // 4WD_SERVER — E-stop (socket primary, /api/estop REST fallback)
+      // 4WD_SERVER — acknowledged REST E-stop authority.
       emergencyStop: async () => {
-        if (socketRef.current?.connected) {
-          socketRef.current.emit(SOCKET_EVENTS.EMERGENCY_STOP);
-          return {
-            success: true,
-            message: "Emergency stop sent",
-          } as ServiceResponse;
-        }
         try {
           return await postService(API_ENDPOINTS.ESTOP);
         } catch (err) {

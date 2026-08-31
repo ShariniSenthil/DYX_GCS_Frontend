@@ -574,6 +574,8 @@ export async function startMission():
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.START,
+    undefined,
+    { timeoutMs: 35_000 },
   );
 }
 
@@ -588,6 +590,8 @@ export async function resumeMission():
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.RESUME,
+    undefined,
+    { timeoutMs: 35_000 },
   );
 }
 
@@ -595,6 +599,8 @@ export async function nextMissionPoint():
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.NEXT_POINT,
+    undefined,
+    { timeoutMs: 35_000 },
   );
 }
 
@@ -609,6 +615,8 @@ export async function stopMission():
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.STOP,
+    undefined,
+    { timeoutMs: 25_000 },
   );
 }
 

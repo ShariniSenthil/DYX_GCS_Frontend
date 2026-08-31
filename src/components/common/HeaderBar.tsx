@@ -64,7 +64,7 @@ export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string 
             setIsEmergencyStopping(true);
             try {
               if (ROVER_ENABLED) {
-                // PX4: use vehicleControlService (socket primary, /api/estop fallback)
+                // PX4: use the acknowledged REST E-stop service.
                 await emergencyStop((result) => {
                   if (result.success) {
                     Alert.alert('✅ Emergency Stop', 'All operations stopped');
