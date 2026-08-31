@@ -564,17 +564,17 @@ const toTelemetryEnvelopeFromBridge = (data: any): TelemetryEnvelope | null => {
 
   // New fields from Pixhawk NTUN (CurrentState) - top level telemetry
   // DEBUG: Log distance-to-next from telemetry
-  if (
-    data.wp_dist_cm !== undefined ||
-    data.distance_to_next !== undefined ||
-    data.dist_to_wp !== undefined
-  ) {
-    console.log("[TELEMETRY] 📏 Distance to next WP raw:", {
-      wp_dist_cm: data.wp_dist_cm,
-      distance_to_next: data.distance_to_next,
-      dist_to_wp: data.dist_to_wp,
-    });
-  }
+  // if (
+  //   data.wp_dist_cm !== undefined ||
+  //   data.distance_to_next !== undefined ||
+  //   data.dist_to_wp !== undefined
+  // ) {
+  //   console.log("[TELEMETRY] 📏 Distance to next WP raw:", {
+  //     wp_dist_cm: data.wp_dist_cm,
+  //     distance_to_next: data.distance_to_next,
+  //     dist_to_wp: data.dist_to_wp,
+  //   });
+  // }
   if (typeof data.wp_dist_cm === "number") {
     envelope.wp_dist_cm = data.wp_dist_cm;
     touched = true;
@@ -1522,6 +1522,28 @@ if (envelope.within_test_tolerance !== undefined) {
     }
   }, []);
 
+  const ROBOT_STATUS_POLL_MS = 3000;
+
+  /*
+   * network / rtk_ui_state have no live socket source — they are only ever
+   * produced by pollRobotStatus(). Without this interval they freeze at
+   * their mount-time default forever, regardless of socket connectivity.
+   */
+  useEffect(() => {
+    void pollRobotStatus();
+
+    robotStatusPollRef.current = setInterval(() => {
+      void pollRobotStatus();
+    }, ROBOT_STATUS_POLL_MS);
+
+    return () => {
+      if (robotStatusPollRef.current) {
+        clearInterval(robotStatusPollRef.current);
+        robotStatusPollRef.current = null;
+      }
+    };
+  }, [pollRobotStatus]);
+
   const fetchTelemetrySnapshot = useCallback(async () => {
     if (!mountedRef.current || isOfflineMode()) return;
     try {
@@ -2127,15 +2149,15 @@ attitude: adapted.attitude,
             return;
           }
 
-          console.log("[TELEMETRY] Live packet received", {
-            generation: connectionGeneration,
-            currentGeneration: socketGenerationRef.current,
-            hasBackendTimestamp: getTelemetryGeneratedTime(payload) !== null,
-            keys:
-              payload && typeof payload === "object"
-                ? Object.keys(payload as Record<string, unknown>).slice(0, 20)
-                : [],
-          });
+          // console.log("[TELEMETRY] Live packet received", {
+          //   generation: connectionGeneration,
+          //   currentGeneration: socketGenerationRef.current,
+          //   hasBackendTimestamp: getTelemetryGeneratedTime(payload) !== null,
+          //   keys:
+          //     payload && typeof payload === "object"
+          //       ? Object.keys(payload as Record<string, unknown>).slice(0, 20)
+          //       : [],
+          // });
 
           const raw =
             payload && typeof payload === "object"
@@ -2168,36 +2190,140 @@ attitude: adapted.attitude,
             return;
           }
 
-          const envelope = toTelemetryEnvelopeFromRoverData(payload as any);
-          const adapted: any = envelope;
+          const adapted = toRoverTelemetry(
+            payload as Parameters<typeof toRoverTelemetry>[0]
+          );
 
-          console.log("[TELEMETRY] Adapted values", {
-  lat: adapted.global.lat,
-  lon: adapted.global.lon,
-  battery: adapted.battery.percentage,
-  satellites: adapted.global.satellites_visible,
-  fixType: adapted.rtk.fix_type,
-  mode: adapted.state.mode,
-  fcuConnected: adapted.fcu_connected,
+          // console.log("[TELEMETRY] Adapted values", {
+          //   lat: adapted.global.lat,
+          //   lon: adapted.global.lon,
+          //   battery: adapted.battery.percentage,
+          //   satellites: adapted.global.satellites_visible,
+          //   fixType: adapted.rtk.fix_type,
+          //   mode: adapted.state.mode,
+          //   fcuConnected: adapted.fcu_connected,
+          //   accuracyAvailable: adapted.accuracy_available,
+          //   overallMm: adapted.radial_error_mm,
+          //   alongMm: adapted.front_back_error_mm,
+          //   crossMm: adapted.cross_track_error_mm,
+          //   alongPosition: adapted.front_back_position,
+          //   crossSide: adapted.cross_track_side,
+          // });
+          const envelope: TelemetryEnvelope = {
+            timestamp: generatedAt,
 
-  accuracyAvailable:
-    adapted.accuracy_available,
+            state: adapted.state,
 
-  overallMm:
-    adapted.radial_error_mm,
+            global: adapted.global,
 
-  alongMm:
-    adapted.front_back_error_mm,
+            battery: adapted.battery,
 
-  crossMm:
-    adapted.cross_track_error_mm,
+            rtk: adapted.rtk,
 
-  alongPosition:
-    adapted.front_back_position,
+            mission: adapted.mission,
 
-  crossSide:
-    adapted.cross_track_side,
-});
+            servo: adapted.servo,
+
+            hrms: adapted.hrms,
+
+            vrms: adapted.vrms,
+
+            imu_status: adapted.imu_status,
+
+distance_to_next_m: adapted.distance_to_next_m,
+
+xtrack_cm: adapted.xtrack_cm,
+
+accuracy: adapted.accuracy,
+
+accuracy_available:
+  adapted.accuracy_available,
+
+cross_track_error_mm:
+  adapted.cross_track_error_mm,
+
+cross_track_abs_mm:
+  adapted.cross_track_abs_mm,
+
+cross_track_side:
+  adapted.cross_track_side,
+
+front_back_error_mm:
+  adapted.front_back_error_mm,
+
+front_back_abs_mm:
+  adapted.front_back_abs_mm,
+
+front_back_position:
+  adapted.front_back_position,
+
+radial_error_mm:
+  adapted.radial_error_mm,
+
+closest_radial_error_mm:
+  adapted.closest_radial_error_mm,
+
+accuracy_target_mm:
+  adapted.accuracy_target_mm,
+
+test_tolerance_mm:
+  adapted.test_tolerance_mm,
+
+accuracy_status:
+  adapted.accuracy_status,
+
+accuracy_pass:
+  adapted.accuracy_pass,
+
+within_test_tolerance:
+  adapted.within_test_tolerance,
+
+rpp_debug_available: adapted.rpp_debug_available,
+rpp_control_mode: adapted.rpp_control_mode,
+rpp_goal_number: adapted.rpp_goal_number,
+
+rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
+rpp_command_speed_mps: adapted.rpp_command_speed_mps,
+
+rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
+rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
+rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
+rpp_heading_error_deg: adapted.rpp_heading_error_deg,
+
+rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
+
+rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
+rpp_cross_track_side: adapted.rpp_cross_track_side,
+
+rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
+rpp_along_position: adapted.rpp_along_position,
+
+attitude: adapted.attitude,
+
+            fcu_connected: adapted.fcu_connected,
+
+            gps_fix_name: adapted.gps_fix_name,
+
+            rpp_state_name: adapted.rpp_state_name,
+
+            measured_speed_m_s: adapted.measured_speed_m_s,
+
+            along_track_speed_mps: adapted.along_track_speed_mps,
+
+            cross_track_speed_mps: adapted.cross_track_speed_mps,
+
+            joystick_state: adapted.joystick_state,
+
+            joystick_active: adapted.joystick_active,
+
+            joystick_last_valid_cmd_age_ms:
+              adapted.joystick_last_valid_cmd_age_ms,
+
+            joystick_stop_reason: adapted.joystick_stop_reason,
+
+            control_owner: adapted.control_owner,
+          };
+
           /*
            * First valid packet received after this socket connected.
            */
@@ -2207,7 +2333,7 @@ attitude: adapted.attitude,
             setHasLiveTelemetry(true);
           }
 
-          if (envelope) applyEnvelopeRef.current(envelope);
+          applyEnvelopeRef.current(envelope);
 
           if (isRobotStatusDebugEnabled()) {
             patchRobotStatusDebug({
