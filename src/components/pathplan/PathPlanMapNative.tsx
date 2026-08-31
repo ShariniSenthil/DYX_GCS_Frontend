@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import MapboxGL, { MarkerView, MapView, Camera, ShapeSource, LineLayer } from '@rnmapbox/maps';
 import Svg, { Polygon, Circle } from 'react-native-svg';
@@ -10,7 +10,7 @@ function RoverVehicle({ heading }: { heading: number | null | undefined }) {
   const rotationDeg = heading ?? 0;
   return (
     <View style={{ transform: [{ rotate: `${rotationDeg}deg` }] }}>
-      <Svg width={40} height={40} viewBox="-20 -20 40 40">
+      <Svg width={64} height={64} viewBox="-20 -20 40 40">
         <Circle cx={0} cy={0} r={18.7} fill="rgba(14,165,233,0.12)" />
         <Polygon points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4" fill="#0ea5e9" stroke="#ffffff" strokeWidth={1.8} strokeLinejoin="round" />
         <Polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a" />
@@ -40,6 +40,17 @@ export const PathPlanMapNative: React.FC<any> = ({
     }
     return [80.2707, 13.0827];
   }, [roverPosition, waypoints]);
+
+  const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
+
+  // Pan to follow the rover without touching zoom — a controlled `zoomLevel`
+  // prop on <Camera> re-applies on every position tick and silently fights
+  // any pinch-zoom the user just did, snapping the map back to zoom 18.
+  useEffect(() => {
+    if (roverPosition && roverPosition.lon && roverPosition.lat) {
+      cameraRef.current?.moveTo(center as [number, number], 300);
+    }
+  }, [center, roverPosition]);
 
   const lineGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length < 2) return null;
@@ -74,11 +85,9 @@ export const PathPlanMapNative: React.FC<any> = ({
            }
         }}
       >
-        <Camera 
-          zoomLevel={18}
-          centerCoordinate={center}
-          animationMode="flyTo"
-          animationDuration={300}
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{ centerCoordinate: center, zoomLevel: 18 }}
         />
 
         {lineGeoJSON && (

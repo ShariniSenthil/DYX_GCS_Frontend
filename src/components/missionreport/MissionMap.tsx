@@ -159,7 +159,7 @@ const MissionMapBase: React.FC<Props> = ({
         this._heading = options?.heading || 0;
         this._status = options?.status || 'disarmed';
         this._el = document.createElement('div');
-        this._el.style.cssText = 'width:84px;height:84px;';
+        this._el.style.cssText = 'width:84px;height:84px;display:flex;align-items:center;justify-content:center;';
         this._el.innerHTML = options?.iconSVG || '';
         this._marker = new mapboxgl.Marker({ element: this._el, anchor: 'center' })
           .setLngLat(lngLat);
@@ -440,35 +440,19 @@ const MissionMapBase: React.FC<Props> = ({
 
       // Draw rover marker and heading
       if (roverData.hasPosition) {
-        const currentZoom = map.getZoom();
-        const zoomScale = Math.max(0.3, Math.min(1.2, (currentZoom - 10) / 12));
-        const size = Math.round(84 * zoomScale);
-        const half = Math.round(size / 2);
+        const size = 64;
+        const half = 32;
         const rotation = roverData.heading !== null ? roverData.heading : 0;
 
         const roverIconSVG = \`
-          <svg width="\${size}" height="\${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
-            <g id="wheels">
-              <rect x="15" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-              <rect x="17" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/>
-              <rect x="73" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-              <rect x="75" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/>
-              <rect x="15" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-              <rect x="17" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/>
-              <rect x="73" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-              <rect x="75" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/>
-            </g>
-            <rect id="rover-body" x="30" y="25" width="40" height="50" rx="3" fill="#f4d03f" stroke="#d4af37" stroke-width="2"/>
-            <rect x="32" y="27" width="36" height="15" rx="2" fill="#e8b923"/>
-            <rect x="37" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/>
-            <rect x="53" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/>
-            <rect x="35" y="50" width="30" height="4" rx="1" fill="#7a7a7a"/>
-            <rect x="33" y="60" width="15" height="10" rx="1" fill="#f9e79f" stroke="#d4af37" stroke-width="1"/>
-            <rect x="52" y="60" width="15" height="10" rx="1" fill="#f9e79f" stroke="#d4af37" stroke-width="1"/>
-            <g id="heading-arrow">
-              <line x1="50" y1="25" x2="50" y2="5" stroke="#e74c3c" stroke-width="4" stroke-linecap="round"/>
-              <polygon points="50,0 43,10 57,10" fill="#e74c3c"/>
-            </g>
+          <svg width="\${size}" height="\${size}" viewBox="-20 -20 40 40" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
+            <circle cx="0" cy="0" r="18.7" fill="rgba(14,165,233,0.12)"/>
+            <polygon points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+            <polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a"/>
+            <polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a"/>
+            <polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a"/>
+            <polygon points="-4.5,-2 4.5,-2 3.5,2 -3.5,2" fill="rgba(186,230,253,0.85)"/>
+            <circle cx="0" cy="-7.5" r="2.5" fill="#fbbf24" stroke="#fff" stroke-width="1"/>
           </svg>
         \`;
 
@@ -914,33 +898,19 @@ const MissionMapBase: React.FC<Props> = ({
       (function() {
         try {
           if (!roverMarker && ${Number.isFinite(roverLat)} && ${Number.isFinite(roverLon)}) {
-            const size = 84;
-            const half = 42;
+            const size = 64;
+            const half = 32;
             const rotation = ${heading || 0};
 
             const roverIconSVG = \`
-              <svg width="\${size}" height="\${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
-                <g id="wheels">
-                  <rect x="15" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-                  <rect x="17" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/>
-                  <rect x="73" y="15" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-                  <rect x="75" y="17" width="8" height="16" rx="1" fill="#4a4a4a"/>
-                  <rect x="15" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-                  <rect x="17" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/>
-                  <rect x="73" y="65" width="12" height="20" rx="2" fill="#2d2d2d" stroke="#000" stroke-width="1"/>
-                  <rect x="75" y="67" width="8" height="16" rx="1" fill="#4a4a4a"/>
-                </g>
-                <rect x="30" y="25" width="40" height="50" rx="3" fill="#f4d03f" stroke="#d4af37" stroke-width="2"/>
-                <rect x="32" y="27" width="36" height="15" rx="2" fill="#e8b923"/>
-                <rect x="37" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/>
-                <rect x="53" y="37" width="10" height="6" rx="1" fill="#5a5a5a"/>
-                <rect x="35" y="50" width="30" height="4" rx="1" fill="#7a7a7a"/>
-                <rect x="33" y="60" width="15" height="10" rx="1" fill="#f9e79f" stroke="#d4af37" stroke-width="1"/>
-                <rect x="52" y="60" width="15" height="10" rx="1" fill="#f9e79f" stroke="#d4af37" stroke-width="1"/>
-                <g id="heading-arrow">
-                  <line x1="50" y1="25" x2="50" y2="5" stroke="#e74c3c" stroke-width="4" stroke-linecap="round"/>
-                  <polygon points="50,0 43,10 57,10" fill="#e74c3c"/>
-                </g>
+              <svg width="\${size}" height="\${size}" viewBox="-20 -20 40 40" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
+                <circle cx="0" cy="0" r="18.7" fill="rgba(14,165,233,0.12)"/>
+                <polygon points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+                <polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a"/>
+                <polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a"/>
+                <polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a"/>
+                <polygon points="-4.5,-2 4.5,-2 3.5,2 -3.5,2" fill="rgba(186,230,253,0.85)"/>
+                <circle cx="0" cy="-7.5" r="2.5" fill="#fbbf24" stroke="#fff" stroke-width="1"/>
               </svg>
             \`;
 
