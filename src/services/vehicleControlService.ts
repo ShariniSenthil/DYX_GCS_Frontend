@@ -79,11 +79,37 @@ export async function emergencyStop(
   return response;
 }
 
+/**
+ * Release emergency stop through the acknowledged REST authority.
+ *
+ * Only clears the E-stop latch -- it does NOT start or resume the mission
+ * (mission_enable stays false). The backend resolves the safety generation
+ * server-side, so no body is required here.
+ *
+ * @param onResult Optional callback invoked from the REST response
+ * @returns The backend acknowledgement
+ */
+export async function releaseEmergencyStop(
+  onResult?: EstopResultCallback,
+): Promise<EstopResponse> {
+  const response = await apiPost<EstopResponse>(PX4_VEHICLE.ESTOP_RELEASE);
+
+  if (onResult) {
+    onResult({
+      success: response.success,
+      message: response.message,
+    });
+  }
+
+  return response;
+}
+
 export const vehicleControlService = {
   armVehicle,
   disarmVehicle,
   setManualMode,
   emergencyStop,
+  releaseEmergencyStop,
 };
 
 export default vehicleControlService;

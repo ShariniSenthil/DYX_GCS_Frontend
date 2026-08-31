@@ -5,7 +5,7 @@ import VoiceSettingsModal from './VoiceSettingsModal';
 import { FailsafeModeSelector } from '../pathplan/FailsafeModeSelector';
 import { colors } from '../../theme/colors';
 import { useRover } from '../../context/RoverContext';
-import { emergencyStop } from '../../services/vehicleControlService';
+import { emergencyStop, releaseEmergencyStop } from '../../services/vehicleControlService';
 import { ROVER_ENABLED } from '../../config/featureFlags';
 import { getBackendURL } from '../../config';
 
@@ -14,6 +14,7 @@ export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string 
   const { gpsFailsafeMode, setGpsFailsafeMode, telemetry, services, connectionState, reconnect } = useRover();
   const [showFailsafeModeSelector, setShowFailsafeModeSelector] = useState(false);
   const [isEmergencyStopping, setIsEmergencyStopping] = useState(false);
+  const [isReleasingEstop, setIsReleasingEstop] = useState(false);
   const getModeIcon = (mode: string): string => {
     switch (mode.toLowerCase()) {
       case 'dgps mark':
@@ -93,6 +94,43 @@ export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string 
     );
   };
 
+  const handleReleaseEmergencyStop = async () => {
+    Alert.alert(
+      '🔓 Release E-Stop',
+      'This clears the emergency stop latch. The rover stays disarmed and ' +
+        'the mission stays disabled until you press Start. Continue?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'RELEASE',
+          onPress: async () => {
+            setIsReleasingEstop(true);
+            try {
+              await releaseEmergencyStop((result) => {
+                if (result.success) {
+                  Alert.alert(
+                    '✅ E-Stop Released',
+                    result.message || 'Emergency stop released; mission movement remains disabled.',
+                  );
+                } else {
+                  Alert.alert('⚠️ Release Failed', result.message || 'Unable to release emergency stop');
+                }
+              });
+            } catch (error) {
+              console.error('[ESTOP RELEASE] Error:', error);
+              Alert.alert('❌ Error', 'Failed to release emergency stop');
+            } finally {
+              setIsReleasingEstop(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View style={styles.header}>
       <View style={styles.leftSection}>
@@ -159,6 +197,18 @@ export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string 
         >
           <Text style={styles.voiceIcon}>🔊</Text>
           <Text style={styles.voiceText}>Voice</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={handleReleaseEmergencyStop}
+          style={[styles.releaseButton, isReleasingEstop && styles.buttonDisabled]}
+          disabled={isReleasingEstop}
+          accessibilityLabel="Release emergency stop"
+          accessibilityRole="button"
+        >
+          <Text style={styles.releaseIcon}>🔓</Text>
+          <Text style={styles.releaseText}>
+            {isReleasingEstop ? 'Releasing...' : 'RELEASE'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={handleEmergencyStop}
@@ -304,6 +354,29 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  releaseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16A34A',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#166534',
+    marginRight: 4,
+    minWidth: 90,
+  },
+  releaseIcon: {
+    fontSize: 16,
+    marginRight: 6,
+    color: '#ffffff'
+  },
+  releaseText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   gearButton: {
     alignItems: 'center',
