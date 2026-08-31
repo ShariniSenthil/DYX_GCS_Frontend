@@ -15,6 +15,7 @@ import type {
   TelemetryMission,
   ServoStatus,
   NetworkData,
+  TelemetryEnvelope,
 } from "../types/telemetry";
 import { normalizePx4Mode } from "./px4ModeAdapter";
 
@@ -71,6 +72,88 @@ const safeBool = (value: unknown, fallback = false): boolean => {
 
 function mapGpsFix(fix: unknown): number {
   return Math.max(0, Math.min(6, safeNum(fix, 0)));
+}
+
+
+export function toTelemetryEnvelopeFromRoverData(
+  flat: any,
+  now: number = Date.now(),
+): TelemetryEnvelope {
+  const envelope: TelemetryEnvelope = { timestamp: now };
+
+  const optNum = (val: any) => {
+    if (val === null || val === undefined || val === "") return undefined;
+    const n = Number(val);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const optBool = (val: any) => {
+    if (val === null || val === undefined) return undefined;
+    if (val === 1 || val === "1" || val === "true") return true;
+    if (val === 0 || val === "0" || val === "false") return false;
+    return Boolean(val);
+  };
+  const optStr = (val: any) => {
+    if (val === null || val === undefined) return undefined;
+    return String(val);
+  };
+  
+  const cleanObj = (obj: any) => {
+    const cleaned: any = {};
+    let hasKeys = false;
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) {
+        cleaned[k] = v;
+        hasKeys = true;
+      }
+    }
+    return hasKeys ? cleaned : undefined;
+  };
+
+  const position = flat.position || {};
+  const vehicle = flat.vehicle || {};
+  const gps = flat.gps || {};
+  const battery = flat.battery || {};
+  const mission = flat.mission || {};
+  
+  envelope.state = cleanObj({
+    armed: optBool(flat.armed ?? vehicle.armed),
+    mode: flat.mode ?? vehicle.mode ? String(flat.mode ?? vehicle.mode) : undefined,
+    system_status: optBool(flat.connected ?? vehicle.connected) ? "ACTIVE" : (optBool(flat.connected ?? vehicle.connected) === false ? "STANDBY" : undefined),
+    heartbeat_ts: now,
+  });
+
+  envelope.global = cleanObj({
+    lat: optNum(flat.lat ?? position.latitude),
+    lon: optNum(flat.lon ?? position.longitude),
+    alt_rel: optNum(flat.alt ?? position.altitude_m),
+    vel: optNum(flat.speed_m_s ?? flat.speed_mps ?? vehicle.ground_speed_mps),
+    satellites_visible: optNum(flat.gps_sat ?? gps.satellites_visible),
+  });
+
+  envelope.battery = cleanObj({
+    voltage: optNum(flat.battery_v ?? battery.voltage_v),
+    current: optNum(battery.current_a),
+    percentage: optNum(flat.battery_pct ?? battery.remaining_percent),
+  });
+
+  const fixType = optNum(flat.gps_fix ?? gps.fix_type);
+  envelope.rtk = cleanObj({
+    fix_type: fixType,
+    base_linked: fixType !== undefined ? fixType >= 5 : undefined,
+  });
+
+  envelope.servo = cleanObj({
+    active: optBool(flat.spraying ?? flat.marking_active ?? mission.marking_active),
+    spraying: optBool(flat.spraying ?? flat.marking_active ?? mission.marking_active),
+  });
+
+  envelope.distance_to_next_m = optNum(flat.dist_to_goal_m ?? flat.dist_to_goal);
+  envelope.xtrack_cm = optNum(flat.xtrack_m) !== undefined ? optNum(flat.xtrack_m)! * 100 : undefined;
+
+  envelope.fcu_connected = optBool(flat.connected ?? vehicle.connected);
+  envelope.mission_state = optStr(mission.state ?? flat.mission_state);
+
+  return envelope;
 }
 
 export function toRoverTelemetry(

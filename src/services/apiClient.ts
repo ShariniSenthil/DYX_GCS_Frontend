@@ -260,8 +260,13 @@ async function request<T>(
       throw error;
     }
 
+    // React Native often collapses DNS, refused connections and clear-text
+    // policy failures into the unhelpful "Network request failed" message.
+    // Keep the original cause while adding the endpoint so operators can
+    // immediately verify Wi-Fi, rover IP and port.
+    const cause = error instanceof Error ? error.message : String(error);
     throw new NetworkError(
-      error,
+      new Error(`Unable to reach backend at ${backendURL}. Verify the rover is powered on, both devices are on the same Wi‑Fi, and port 5001 is open. (${cause || "network request failed"})`),
     );
   } finally {
     clearTimeout(

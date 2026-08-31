@@ -312,13 +312,17 @@ export default function RoverDiscoveryScreen({
     }
     setTestingManualUrl(true);
     try {
-      const urlObj = new URL(manualUrl);
+      // Accept both `192.168.3.101:5001` and a complete URL.
+      const normalizedManualUrl = /^https?:\/\//i.test(manualUrl.trim())
+        ? manualUrl.trim().replace(/\/+$/, "")
+        : `http://${manualUrl.trim().replace(/\/+$/, "")}`;
+      const urlObj = new URL(normalizedManualUrl);
       const ip = urlObj.hostname;
       const port = urlObj.port ? parseInt(urlObj.port) : 5001;
       let reachable = false;
-      for (const probePath of ["/api/health", "/api/ping"]) {
+      for (const probePath of ["/api/health", "/api/healthz", "/api/ping"]) {
         try {
-          const r = await axios.get(`${manualUrl}${probePath}`, {
+          const r = await axios.get(`${normalizedManualUrl}${probePath}`, {
             timeout: 5000,
             validateStatus: () => true,
           });
@@ -337,7 +341,7 @@ export default function RoverDiscoveryScreen({
           name: `Custom Rover (${ip})`,
           ip,
           port,
-          url: manualUrl,
+          url: normalizedManualUrl,
           responseTime: 0,
         };
         setShowManualInput(false);
@@ -345,8 +349,8 @@ export default function RoverDiscoveryScreen({
           openPasswordModal(device, "#f59e0b");
           return;
         }
-        setBackendURL(manualUrl);
-        await saveBackendURL(manualUrl, ip, port);
+        setBackendURL(normalizedManualUrl);
+        await saveBackendURL(normalizedManualUrl, ip, port);
         onRoverSelected(device);
       } else {
         Alert.alert(

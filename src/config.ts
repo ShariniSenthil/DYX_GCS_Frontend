@@ -40,7 +40,13 @@ let _offlineMode = false;
  * Remove trailing slashes so endpoint construction remains consistent.
  */
 function normalizeBackendURL(url: string): string {
-  return url.trim().replace(/\/+$/, "");
+  let value = String(url ?? "").trim();
+  // Operators commonly enter `192.168.x.x:5001` in the manual connector.
+  // URL/fetch require an explicit scheme, so make that input safe here.
+  if (value && !/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+    value = `http://${value}`;
+  }
+  return value.replace(/\/+$/, "");
 }
 
 /**

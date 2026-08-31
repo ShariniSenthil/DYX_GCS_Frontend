@@ -216,7 +216,13 @@ function AppContent(): React.ReactElement {
           return;
         }
 
-        setBackendConfigured(Boolean(savedBackendURL));
+        // `Continue Offline` stores a localhost placeholder so the app can
+        // render without a rover. It must never be treated as a real rover
+        // on the next cold start, otherwise users are sent straight to the
+        // login screen for an unreachable localhost backend.
+        const configuredURL = savedBackendURL?.trim() ?? "";
+        const isPlaceholderBackend = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\\d+)?\/?$/i.test(configuredURL);
+        setBackendConfigured(Boolean(configuredURL) && !isPlaceholderBackend);
       } catch (error) {
         console.warn("[App] Could not restore saved backend:", error);
 

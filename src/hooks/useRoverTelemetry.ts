@@ -35,6 +35,7 @@ import { AUTH_ENABLED, isPx4DxpEnabled } from "../config/featureFlags";
 import {
   isPx4Payload,
   toRoverTelemetry,
+  toTelemetryEnvelopeFromRoverData,
   mergeMissionStatus,
 } from "../adapters/px4TelemetryAdapter";
 import { toNetworkData } from "../adapters/px4NetworkAdapter";
@@ -358,292 +359,7 @@ const mapRtkStatusToFixType = (status?: string | null): number => {
 };
 
 // Convert rover data to telemetry envelope
-const toTelemetryEnvelopeFromRoverData = (
-  data: any
-): TelemetryEnvelope | null => {
-  if (!data || typeof data !== "object") {
-    // console.log('[ROVER_DATA] ❌ Invalid data received:', data);
-    return null;
-  }
 
-  // console.log('[ROVER_DATA] 🔍 Raw data received:', JSON.stringify(data, null, 2));
-
-  const envelope: Partial<TelemetryEnvelope> = {
-    timestamp: Date.now(),
-  };
-  let touched = false;
-
-  // State
-  if (data.mode || data.status || data.last_heartbeat != null) {
-    const status = typeof data.status === "string" ? data.status : "UNKNOWN";
-    // Translate MAVROS fallback "CMODEn" → named ArduRover mode string
-    envelope.state = {
-      armed: String(status).toLowerCase() === "armed",
-      mode: normalizeRoverMode(data.mode),
-      // Don't set system_status from rover_data status field - it should come from pixhawk_state
-      // system_status represents MAVLink system status (STANDBY, ACTIVE, etc.), not armed state
-      heartbeat_ts:
-        typeof data.last_heartbeat === "number"
-          ? Math.floor(data.last_heartbeat * 1000)
-          : Date.now(),
-    };
-    touched = true;
-  }
-
-  // Global position
-  if (data.position && typeof data.position === "object") {
-    let { lat, lng } = data.position as {
-      lat?: number | string;
-      lng?: number | string;
-    };
-    const latNum = typeof lat === "string" ? parseFloat(lat) : lat;
-    const lngNum = typeof lng === "string" ? parseFloat(lng) : lng;
-    const hasValidLat =
-      typeof latNum === "number" && isFinite(latNum) && latNum !== 0;
-    const hasValidLng =
-      typeof lngNum === "number" && isFinite(lngNum) && lngNum !== 0;
-
-    if (hasValidLat && hasValidLng) {
-      let velCandidate: number | undefined;
-      if (typeof data.vel === "number") velCandidate = data.vel;
-      else if (typeof data.velocity === "number") velCandidate = data.velocity;
-      else if (typeof data.speed === "number") velCandidate = data.speed;
-      else if (typeof data.groundspeed === "number")
-        velCandidate = data.groundspeed;
-
-      // Extract satellites from multiple possible field names - only update if data exists
-      let satelliteCount: number | undefined;
-
-      if (typeof data.satellites_visible === "number")
-        satelliteCount = data.satellites_visible;
-      else if (typeof data.satellites === "number")
-        satelliteCount = data.satellites;
-      else if (typeof data.numSatellites === "number")
-        satelliteCount = data.numSatellites;
-      else if (typeof data.gps_satellites === "number")
-        satelliteCount = data.gps_satellites;
-      else if (typeof data.num_satellites === "number")
-        satelliteCount = data.num_satellites;
-      else if (typeof data.sats === "number") satelliteCount = data.sats;
-
-      // Extract altitude from multiple possible field names
-      let altCandidate: number | undefined;
-      if (typeof data.position.alt === "number")
-        altCandidate = data.position.alt;
-      else if (typeof data.position.altitude === "number")
-        altCandidate = data.position.altitude;
-      else if (typeof data.position.alt_rel === "number")
-        altCandidate = data.position.alt_rel;
-      else if (typeof data.position.relative_alt === "number")
-        altCandidate = data.position.relative_alt;
-
-      envelope.global = {
-        lat: latNum,
-        lon: lngNum,
-        alt_rel:
-          typeof altCandidate === "number" && isFinite(altCandidate)
-            ? altCandidate
-            : 0,
-        vel:
-          typeof velCandidate === "number" && isFinite(velCandidate)
-            ? velCandidate
-            : 0,
-        ...(satelliteCount !== undefined && {
-          satellites_visible: satelliteCount,
-        }),
-      };
-      touched = true;
-    }
-  }
-
-  // groundspeed as a top-level flat field (no position object) — backend CurrentState sends
-  // groundspeed directly. Update vel on existing envelope.global so Step3 canProceed gate works.
-  if (typeof data.groundspeed === "number" && isFinite(data.groundspeed)) {
-    if (!envelope.global) {
-      envelope.global = { ...DEFAULT_GLOBAL };
-    }
-    envelope.global.vel = data.groundspeed;
-    touched = true;
-  }
-
-  // Battery
-  // console.log('[ROVER_DATA] 🔋 Battery fields check:', {
-  //   battery: data.battery,
-  //   voltage: data.voltage,
-  //   current: data.current,
-  //   battery_percentage: data.battery_percentage,
-  //   // Backend might send nested battery data
-  //   battery_data: data.battery_data,
-  //   pct: data.pct,  // Backend sends 'pct' for percentage
-  //   volt: data.volt  // Backend sends 'volt' for voltage
-  // });
-
-  // Handle multiple battery data formats
-  let batteryPercentage = 0;
-  let batteryVoltage = 0;
-  let batteryCurrent = 0;
-
-  if (typeof data.battery === "number") batteryPercentage = data.battery;
-  else if (typeof data.pct === "number")
-    batteryPercentage = data.pct; // Backend sends 'pct'
-  else if (typeof data.battery_percentage === "number")
-    batteryPercentage = data.battery_percentage;
-
-  if (typeof data.voltage === "number") batteryVoltage = data.voltage;
-  else if (typeof data.volt === "number") batteryVoltage = data.volt; // Backend might send 'volt'
-
-  if (typeof data.current === "number") batteryCurrent = data.current;
-
-  if (batteryPercentage > 0 || batteryVoltage > 0 || batteryCurrent !== 0) {
-    envelope.battery = {
-      percentage: batteryPercentage,
-      voltage: batteryVoltage,
-      current: batteryCurrent,
-    };
-    // console.log('[ROVER_DATA] ✅ Battery parsed:', envelope.battery);
-    touched = true;
-  } else {
-    // console.log('[ROVER_DATA] ❌ No battery data found');
-  }
-
-  // HRMS / VRMS / IMU
-  if (data.hrms != null) {
-    envelope.hrms =
-      typeof data.hrms === "number" ? data.hrms : parseFloat(data.hrms) || 0;
-    touched = true;
-  }
-  if (data.vrms != null) {
-    envelope.vrms =
-      typeof data.vrms === "number" ? data.vrms : parseFloat(data.vrms) || 0;
-    touched = true;
-  }
-  if (data.imu_status != null || data.imuStatus != null) {
-    const s = data.imu_status ?? data.imuStatus;
-    envelope.imu_status = typeof s === "string" ? s : String(s);
-    touched = true;
-  }
-
-  // RTK
-  // console.log('[ROVER_DATA] 📡 RTK fields check:', {
-  //   rtk_status: data.rtk_status,
-  //   fix_type: data.fix_type,
-  //   rtk_fix_type: data.rtk_fix_type,
-  //   gps_fix_type: data.gps_fix_type
-  // });
-
-  if (data.rtk_status || data.fix_type != null || data.rtk_fix_type != null) {
-    let fixType = 0;
-    if (typeof data.rtk_fix_type === "number") {
-      fixType = data.rtk_fix_type;
-    } else if (typeof data.fix_type === "number") {
-      fixType = data.fix_type;
-    } else if (typeof data.gps_fix_type === "number") {
-      fixType = data.gps_fix_type;
-    } else if (data.rtk_status) {
-      fixType = mapRtkStatusToFixType(data.rtk_status);
-    }
-
-    envelope.rtk = {
-      fix_type: fixType,
-      baseline_age:
-        typeof data.rtk_baseline_age === "number"
-          ? data.rtk_baseline_age
-          : typeof data.baseline_age === "number"
-          ? data.baseline_age
-          : 0,
-      base_linked:
-        typeof data.rtk_base_linked === "boolean"
-          ? data.rtk_base_linked
-          : typeof data.base_linked === "boolean"
-          ? data.base_linked
-          : fixType >= 5,
-    };
-    // console.log('[ROVER_DATA] ✅ RTK parsed:', envelope.rtk);
-    touched = true;
-  } else {
-    // console.log('[ROVER_DATA] ❌ No RTK data found');
-  }
-
-  // Mission
-  const activeIndex =
-    typeof data.activeWaypointIndex === "number" &&
-    data.activeWaypointIndex >= 0
-      ? data.activeWaypointIndex
-      : null;
-  const completedCount = Array.isArray(data.completedWaypointIds)
-    ? data.completedWaypointIds.length
-    : 0;
-  const currentWp = activeIndex != null ? activeIndex + 1 : 0;
-  const inferredTotal = Math.max(
-    currentWp,
-    completedCount,
-    typeof data.current_waypoint_id === "number" ? data.current_waypoint_id : 0
-  );
-
-  if (activeIndex != null || completedCount > 0) {
-    const total = inferredTotal || (currentWp > 0 ? currentWp : completedCount);
-    const progress = total > 0 ? (currentWp / total) * 100 : 0;
-    envelope.mission = {
-      total_wp: total,
-      current_wp: currentWp,
-      // Do NOT set status here — it must come from mission_status events only.
-      // Setting 'ACTIVE'/'IDLE' based on waypoint count was overwriting the real
-      // backend mission state ('running', 'paused', etc.) on every telemetry tick.
-      progress_pct: progress,
-    };
-    touched = true;
-  }
-
-  // Servo output
-  if (data.servo_output && typeof data.servo_output === "object") {
-    const servoOutput = data.servo_output;
-    const servoPwmValues: Partial<ServoStatus> = {
-      servo_id: 0,
-      active: false,
-      last_command_ts: 0,
-    };
-
-    if (Array.isArray(servoOutput.channels)) {
-      servoPwmValues.pwm_values = servoOutput.channels;
-      for (let i = 1; i <= 16; i++) {
-        const key = `servo${i}_pwm` as keyof ServoStatus;
-        if (servoOutput[key] !== undefined) {
-          (servoPwmValues as any)[key] = servoOutput[key];
-        }
-      }
-    }
-
-    envelope.servo = servoPwmValues as ServoStatus;
-    touched = true;
-  }
-
-  // Network
-  if (data.network && typeof data.network === "object") {
-    const network = data.network;
-    envelope.network = {
-      connection_type: network.connection_type || "none",
-      wifi_signal_strength:
-        typeof network.wifi_signal_strength === "number"
-          ? network.wifi_signal_strength
-          : 0,
-      wifi_rssi:
-        typeof network.wifi_rssi === "number" ? network.wifi_rssi : -100,
-      interface: network.interface || "",
-      wifi_connected: Boolean(network.wifi_connected),
-      lora_connected: Boolean(network.lora_connected),
-    };
-    touched = true;
-  }
-
-  // Heading
-  if (typeof data.heading === "number" && isFinite(data.heading)) {
-    const yaw = ((data.heading % 360) + 360) % 360;
-    (envelope as any).attitude = { yaw_deg: yaw };
-    touched = true;
-  }
-
-  return touched ? (envelope as TelemetryEnvelope) : null;
-};
 
 // Convert bridge telemetry to envelope
 const toTelemetryEnvelopeFromBridge = (data: any): TelemetryEnvelope | null => {
@@ -1786,7 +1502,7 @@ if (envelope.within_test_tolerance !== undefined) {
         };
       }
 
-      applyEnvelopeRef.current(envelope);
+      if (envelope) applyEnvelopeRef.current(envelope);
 
       patchRobotStatusDebug({
         lastSource: "rest_poll",
@@ -2016,7 +1732,7 @@ attitude: adapted.attitude,
     // if (TELEMETRY_LOGS_ENABLED && Math.random() < 0.1) telemLog('[TELEMETRY] Receiving bridge data...');
     const envelope = toTelemetryEnvelopeFromBridge(payload);
     if (envelope) {
-      applyEnvelopeRef.current(envelope);
+      if (envelope) applyEnvelopeRef.current(envelope);
     }
   });
 
@@ -2027,7 +1743,7 @@ attitude: adapted.attitude,
     // if (TELEMETRY_LOGS_ENABLED && Math.random() < 0.1) telemLog('[ROVER_DATA] Receiving data...');
     const envelope = toTelemetryEnvelopeFromRoverData(payload);
     if (envelope) {
-      applyEnvelopeRef.current(envelope);
+      if (envelope) applyEnvelopeRef.current(envelope);
     }
   });
 
@@ -2044,7 +1760,7 @@ attitude: adapted.attitude,
             lora_connected: Boolean(payload.is_connected),
           },
         } as any;
-        applyEnvelopeRef.current(envelope);
+        if (envelope) applyEnvelopeRef.current(envelope);
       }
     } catch (err) {
       console.error("[LORA_RTK_STATUS] Error:", err);
@@ -2452,9 +2168,8 @@ attitude: adapted.attitude,
             return;
           }
 
-          const adapted = toRoverTelemetry(
-            payload as Parameters<typeof toRoverTelemetry>[0]
-          );
+          const envelope = toTelemetryEnvelopeFromRoverData(payload as any);
+          const adapted: any = envelope;
 
           console.log("[TELEMETRY] Adapted values", {
   lat: adapted.global.lat,
@@ -2483,121 +2198,6 @@ attitude: adapted.attitude,
   crossSide:
     adapted.cross_track_side,
 });
-          const envelope: TelemetryEnvelope = {
-            timestamp: generatedAt,
-
-            state: adapted.state,
-
-            global: adapted.global,
-
-            battery: adapted.battery,
-
-            rtk: adapted.rtk,
-
-            mission: adapted.mission,
-
-            servo: adapted.servo,
-
-            hrms: adapted.hrms,
-
-            vrms: adapted.vrms,
-
-            imu_status: adapted.imu_status,
-
-distance_to_next_m: adapted.distance_to_next_m,
-
-xtrack_cm: adapted.xtrack_cm,
-
-accuracy: adapted.accuracy,
-
-accuracy_available:
-  adapted.accuracy_available,
-
-cross_track_error_mm:
-  adapted.cross_track_error_mm,
-
-cross_track_abs_mm:
-  adapted.cross_track_abs_mm,
-
-cross_track_side:
-  adapted.cross_track_side,
-
-front_back_error_mm:
-  adapted.front_back_error_mm,
-
-front_back_abs_mm:
-  adapted.front_back_abs_mm,
-
-front_back_position:
-  adapted.front_back_position,
-
-radial_error_mm:
-  adapted.radial_error_mm,
-
-closest_radial_error_mm:
-  adapted.closest_radial_error_mm,
-
-accuracy_target_mm:
-  adapted.accuracy_target_mm,
-
-test_tolerance_mm:
-  adapted.test_tolerance_mm,
-
-accuracy_status:
-  adapted.accuracy_status,
-
-accuracy_pass:
-  adapted.accuracy_pass,
-
-within_test_tolerance:
-  adapted.within_test_tolerance,
-
-rpp_debug_available: adapted.rpp_debug_available,
-rpp_control_mode: adapted.rpp_control_mode,
-rpp_goal_number: adapted.rpp_goal_number,
-
-rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
-rpp_command_speed_mps: adapted.rpp_command_speed_mps,
-
-rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
-rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
-rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
-rpp_heading_error_deg: adapted.rpp_heading_error_deg,
-
-rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
-
-rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
-rpp_cross_track_side: adapted.rpp_cross_track_side,
-
-rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
-rpp_along_position: adapted.rpp_along_position,
-
-attitude: adapted.attitude,
-
-            fcu_connected: adapted.fcu_connected,
-
-            gps_fix_name: adapted.gps_fix_name,
-
-            rpp_state_name: adapted.rpp_state_name,
-
-            measured_speed_m_s: adapted.measured_speed_m_s,
-
-            along_track_speed_mps: adapted.along_track_speed_mps,
-
-            cross_track_speed_mps: adapted.cross_track_speed_mps,
-
-            joystick_state: adapted.joystick_state,
-
-            joystick_active: adapted.joystick_active,
-
-            joystick_last_valid_cmd_age_ms:
-              adapted.joystick_last_valid_cmd_age_ms,
-
-            joystick_stop_reason: adapted.joystick_stop_reason,
-
-            control_owner: adapted.control_owner,
-          };
-
           /*
            * First valid packet received after this socket connected.
            */
@@ -2607,7 +2207,7 @@ attitude: adapted.attitude,
             setHasLiveTelemetry(true);
           }
 
-          applyEnvelopeRef.current(envelope);
+          if (envelope) applyEnvelopeRef.current(envelope);
 
           if (isRobotStatusDebugEnabled()) {
             patchRobotStatusDebug({
@@ -2711,7 +2311,7 @@ attitude: adapted.attitude,
               clearTimeout(missionStatusDebounceRef.current);
             }
             missionStatusDebounceRef.current = setTimeout(() => {
-              applyEnvelopeRef.current(envelope);
+              if (envelope) applyEnvelopeRef.current(envelope);
               missionStatusDebounceRef.current = null;
             }, 100);
           }
@@ -2926,7 +2526,7 @@ attitude: adapted.attitude,
         heartbeat_ts: patch.heartbeat_ts ?? Date.now(),
       },
     };
-    applyEnvelopeRef.current(envelope);
+    if (envelope) applyEnvelopeRef.current(envelope);
   }, []);
 
   const services = useMemo<RoverServices>(

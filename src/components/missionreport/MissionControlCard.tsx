@@ -123,6 +123,15 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   const [isPausing, setIsPausing] = React.useState(false);
   const [isResuming, setIsResuming] = React.useState(false);
 
+  const [lockedState, setLockedState] = React.useState<{ isRunning?: boolean; isPaused?: boolean; expiresAt: number } | null>(null);
+
+  React.useEffect(() => {
+    if (lockedState && Date.now() > lockedState.expiresAt) {
+      setLockedState(null);
+    }
+  }, [telemetry?.mission?.status, lockedState]);
+
+
   // Derive button state directly from telemetry — single source of truth
   // Backend mission_status events set telemetry.mission.status to: running, paused, idle, stopped, completed, error, ready, loading
   const missionStatus = (telemetry?.mission?.status ?? "").toLowerCase().trim();
