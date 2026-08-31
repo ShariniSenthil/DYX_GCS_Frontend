@@ -60,7 +60,11 @@ import {
   toRtkControlView,
   type RtkHeadlineState,
 } from "../adapters/rtkControlAdapter";
-import { armVehicle, setManualMode } from "../services/vehicleControlService";
+import {
+  armVehicle,
+  releaseEmergencyStop,
+  setManualMode,
+} from "../services/vehicleControlService";
 // NOTE: calculateAccuracy and formatAccuracyDisplay commented out - now using backend wp_dist_cm
 // import { calculateAccuracy, formatAccuracyDisplay } from '../utils/accuracyCalculation';
 import { getAccuracyLevel } from "../utils/accuracyCalculation";
@@ -1058,13 +1062,13 @@ export default function MissionReportScreen({
         setIsMissionActive(false);
       }
 
-      console.log("[MissionReportScreen] Backend mission:", {
-        state,
-        loaded: mission.loaded,
-        ready: mission.ready,
-        executionMode,
-        navigationPoints: mission.navigation_point_count,
-      });
+      // console.log("[MissionReportScreen] Backend mission:", {
+      //   state,
+      //   loaded: mission.loaded,
+      //   ready: mission.ready,
+      //   executionMode,
+      //   navigationPoints: mission.navigation_point_count,
+      // });
     } catch (error) {
       /*
        * IMPORTANT:
@@ -2524,6 +2528,21 @@ export default function MissionReportScreen({
         "[MissionReportScreen] Start execution mode confirmed:",
         modeResponse.mission?.execution_mode,
       );
+
+      // A prior mission's auto-completion latches E-stop on the backend
+      // (mission_manager's shared STOP contract), and only an explicit
+      // RELEASE can clear it. There's no separate Release control in the
+      // UI, so clear it transparently here. If this fails because a real,
+      // newer E-stop is active, the START call below still enforces that
+      // safety gate and reports it.
+      try {
+        await releaseEmergencyStop();
+      } catch (releaseError) {
+        console.log(
+          "[MissionReportScreen] Pre-start E-stop release skipped/failed:",
+          releaseError,
+        );
+      }
 
       // Current backend contract:
       // POST /api/mission/start
