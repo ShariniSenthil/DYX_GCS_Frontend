@@ -157,20 +157,6 @@ type WpStatus = {
 const getRtkFailureMessage = (err: unknown, fallback: string) =>
   formatRtkApiError(err, fallback);
 
-type TrajectoryMapReference = {
-  /**
-   * GPS position corresponding to the first generated local trajectory point.
-   */
-  latitude: number;
-  longitude: number;
-
-  /**
-   * First generated local map coordinate.
-   */
-  x: number;
-  y: number;
-};
-
 interface MissionReportScreenProps {
   isVisible?: boolean;
 }
@@ -282,9 +268,6 @@ export default function MissionReportScreen({
   const [trajectoryPoints, setTrajectoryPoints] = useState<LoadedPathPoint[]>(
     [],
   );
-
-  const [trajectoryMapReference, setTrajectoryMapReference] =
-    useState<TrajectoryMapReference | null>(null);
 
   // STATUS DOWNGRADE GUARD: Defines priority order — higher index = more "final"
   // Once a waypoint reaches 'completed' or 'skipped', backend events cannot regress it
@@ -943,7 +926,6 @@ export default function MissionReportScreen({
   const modeRef = useRef(mode);
   const missionModeRef = useRef(missionMode);
   const telemetryRef = useRef(telemetry);
-  const roverPositionRef = useRef(roverPosition);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -981,10 +963,6 @@ export default function MissionReportScreen({
   useEffect(() => {
     telemetryRef.current = telemetry;
   }, [telemetry]);
-
-  useEffect(() => {
-    roverPositionRef.current = roverPosition;
-  }, [roverPosition]);
 
   const showNotification = (
     type: "success" | "error" | "info",
@@ -1116,7 +1094,6 @@ export default function MissionReportScreen({
   const refreshTrajectoryPreview = useCallback(async (): Promise<void> => {
     if (isOfflineMode()) {
       setTrajectoryPoints([]);
-      setTrajectoryMapReference(null);
       return;
     }
 
@@ -1129,71 +1106,53 @@ export default function MissionReportScreen({
 
       if (!response.success) {
         setTrajectoryPoints([]);
-        setTrajectoryMapReference(null);
         return;
       }
 
       /**
-       * The backend trajectory is in the local ENU/map frame:
-       * x = east
-       * y = north
+       * Map display uses only authoritative geographic coordinates produced
+       * by rover_backend from PX4 gp_origin. Local ENU x/y remain backend
+       * diagnostics and are not reprojected by the frontend.
        */
       const validPoints = Array.isArray(response.points)
         ? response.points.filter(
-            (point) =>
-              typeof point.x === "number" &&
-              Number.isFinite(point.x) &&
-              typeof point.y === "number" &&
-              Number.isFinite(point.y),
+            (
+              point,
+            ): point is LoadedPathPoint & {
+              latitude: number;
+              longitude: number;
+            } =>
+              typeof point.latitude === "number" &&
+              Number.isFinite(point.latitude) &&
+              point.latitude >= -90 &&
+              point.latitude <= 90 &&
+              typeof point.longitude === "number" &&
+              Number.isFinite(point.longitude) &&
+              point.longitude >= -180 &&
+              point.longitude <= 180,
           )
         : [];
 
       setTrajectoryPoints(validPoints);
 
       const firstPoint = validPoints[0];
-      const currentRover = roverPositionRef.current;
-
-      const referenceIsValid =
-        firstPoint !== undefined &&
-        typeof firstPoint.x === "number" &&
-        Number.isFinite(firstPoint.x) &&
-        typeof firstPoint.y === "number" &&
-        Number.isFinite(firstPoint.y) &&
-        currentRover !== null &&
-        Number.isFinite(currentRover.lat) &&
-        Number.isFinite(currentRover.lng) &&
-        currentRover.lat >= -90 &&
-        currentRover.lat <= 90 &&
-        currentRover.lng >= -180 &&
-        currentRover.lng <= 180 &&
-        !(currentRover.lat === 0 && currentRover.lng === 0);
-
-      if (referenceIsValid && currentRover) {
-        setTrajectoryMapReference({
-          latitude: currentRover.lat,
-          longitude: currentRover.lng,
-          x: firstPoint.x as number,
-          y: firstPoint.y as number,
-        });
-      } else {
-        setTrajectoryMapReference(null);
-      }
+      const lastPoint = validPoints[validPoints.length - 1];
 
       console.log("[MissionReportScreen] Main-map trajectory loaded:", {
         frameId: response.frame_id,
         displayedPoints: validPoints.length,
         totalPoints: response.navigation_point_count,
         previewTruncated: response.preview_truncated,
-        referenceGps: currentRover
+        firstGps: firstPoint
           ? {
-              latitude: currentRover.lat,
-              longitude: currentRover.lng,
+              latitude: firstPoint.latitude,
+              longitude: firstPoint.longitude,
             }
           : null,
-        referenceLocal: firstPoint
+        lastGps: lastPoint
           ? {
-              x: firstPoint.x,
-              y: firstPoint.y,
+              latitude: lastPoint.latitude,
+              longitude: lastPoint.longitude,
             }
           : null,
       });
@@ -1204,7 +1163,6 @@ export default function MissionReportScreen({
       );
 
       setTrajectoryPoints([]);
-      setTrajectoryMapReference(null);
     }
   }, []);
 
@@ -1358,7 +1316,6 @@ export default function MissionReportScreen({
      */
     if (backendMission?.loaded === true && state === "PREPARING") {
       setTrajectoryPoints([]);
-      setTrajectoryMapReference(null);
       return;
     }
 
@@ -1367,7 +1324,6 @@ export default function MissionReportScreen({
      */
     if (backendMission?.loaded !== true) {
       setTrajectoryPoints([]);
-      setTrajectoryMapReference(null);
       return;
     }
 
@@ -4336,7 +4292,6 @@ export default function MissionReportScreen({
         <MissionMap
           waypoints={displayData.waypoints}
           trajectoryPoints={trajectoryPoints}
-          trajectoryReference={trajectoryMapReference}
           roverLat={mapProps.roverLat}
           roverLon={mapProps.roverLon}
           heading={mapProps.heading}

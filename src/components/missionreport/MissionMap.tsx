@@ -19,21 +19,13 @@ interface Props {
   waypoints?: Waypoint[];
 
   /**
-   * Generated backend trajectory in local ENU coordinates:
-   * x = east
-   * y = north
+   * Generated backend trajectory.
+   *
+   * latitude/longitude are authoritative for map display and are produced
+   * by rover_backend from PX4 gp_origin using the exact inverse PX4
+   * MapProjection. Local x/y may still be present for diagnostics.
    */
   trajectoryPoints?: LoadedPathPoint[];
-
-  /**
-   * GPS/local reference calculated once by MissionReportScreen.
-   */
-  trajectoryReference?: {
-    latitude: number;
-    longitude: number;
-    x: number;
-    y: number;
-  } | null;
 
   heading?: number | null;
   activeWaypointIndex?: number | null;
@@ -60,7 +52,6 @@ const MissionMapBase: React.FC<Props> = ({
   roverLon = 0,
   waypoints = [],
   trajectoryPoints = [],
-  trajectoryReference = null,
   heading = null,
   activeWaypointIndex = null,
   armed = false,
@@ -635,70 +626,34 @@ const MissionMapBase: React.FC<Props> = ({
   const mapSource = useMemo(() => ({ html: mapHTML }), [mapHTML]);
 
   /**
-   * Convert backend local ENU points into GPS coordinates only
-   * for visualization on the Mapbox map.
+   * Draw the generated trajectory from authoritative geographic coordinates
+   * returned by rover_backend.
    *
-   * This does not affect rover navigation.
+   * Do not reconstruct GPS from local ENU in the frontend. The backend uses
+   * PX4 gp_origin and the exact inverse PX4 MapProjection, so the displayed
+   * path and rover navigation share the same projection authority.
    */
   const generatedTrajectoryGeoJson = useMemo(() => {
-    const emptyGeoJson = {
-      type: "FeatureCollection" as const,
-      features: [],
-    };
-
-    if (!trajectoryReference) {
-      return emptyGeoJson;
-    }
-
-    const referenceLatitude = trajectoryReference.latitude;
-
-    const referenceLongitude = trajectoryReference.longitude;
-
-    const referenceX = trajectoryReference.x;
-
-    const referenceY = trajectoryReference.y;
-
-    const metresPerDegreeLatitude = 111_320;
-
-    const metresPerDegreeLongitude = Math.max(
-      1,
-      111_320 * Math.cos((referenceLatitude * Math.PI) / 180),
-    );
-
     const coordinates = trajectoryPoints
       .filter(
         (
           point,
         ): point is LoadedPathPoint & {
-          x: number;
-          y: number;
+          latitude: number;
+          longitude: number;
         } =>
-          typeof point.x === "number" &&
-          Number.isFinite(point.x) &&
-          typeof point.y === "number" &&
-          Number.isFinite(point.y),
+          typeof point.latitude === "number" &&
+          Number.isFinite(point.latitude) &&
+          point.latitude >= -90 &&
+          point.latitude <= 90 &&
+          typeof point.longitude === "number" &&
+          Number.isFinite(point.longitude) &&
+          point.longitude >= -180 &&
+          point.longitude <= 180,
       )
-      .map((point) => {
-        const eastOffsetM = point.x - referenceX;
-
-        const northOffsetM = point.y - referenceY;
-
-        const latitude =
-          referenceLatitude + northOffsetM / metresPerDegreeLatitude;
-
-        const longitude =
-          referenceLongitude + eastOffsetM / metresPerDegreeLongitude;
-
-        return [longitude, latitude];
-      })
-      .filter(
-        (coordinate) =>
-          Number.isFinite(coordinate[0]) &&
-          Number.isFinite(coordinate[1]) &&
-          coordinate[0] >= -180 &&
-          coordinate[0] <= 180 &&
-          coordinate[1] >= -90 &&
-          coordinate[1] <= 90,
+      .map(
+        (point) =>
+          [point.longitude, point.latitude] as [number, number],
       );
 
     const features: any[] = [];
@@ -759,7 +714,7 @@ const MissionMapBase: React.FC<Props> = ({
       type: "FeatureCollection" as const,
       features,
     };
-  }, [trajectoryPoints, trajectoryReference]);
+  }, [trajectoryPoints]);
 
   // Inject waypoints after WebView loads AND when waypoints change
   useEffect(() => {
