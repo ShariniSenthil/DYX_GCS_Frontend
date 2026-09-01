@@ -84,6 +84,12 @@ export interface MissionRuntimeState {
   loaded?: boolean;
   ready?: boolean;
 
+  /**
+   * True once trajectory_generator has committed the fixed surveyed
+   * P1->Pn /nav_path. This is independent of mission-manager READY/START.
+   */
+  trajectory_ready?: boolean;
+
   message?: string;
   error?: string | null;
 

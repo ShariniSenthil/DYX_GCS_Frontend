@@ -1091,28 +1091,22 @@ export default function MissionReportScreen({
     }
   }, []);
 
-  const refreshTrajectoryPreview = useCallback(async (): Promise<void> => {
+  const refreshTrajectoryPreview = useCallback(async (): Promise<boolean> => {
     if (isOfflineMode()) {
-      setTrajectoryPoints([]);
-      return;
+      return false;
     }
 
     try {
-      console.log(
-        "[MissionReportScreen] Fetching generated trajectory for main map...",
-      );
-
       const response = await getLoadedMissionPath();
 
-      if (!response.success) {
-        setTrajectoryPoints([]);
-        return;
+      if (!response?.success) {
+        return false;
       }
 
       /**
        * Map display uses only authoritative geographic coordinates produced
        * by rover_backend from PX4 gp_origin. Local ENU x/y remain backend
-       * diagnostics and are not reprojected by the frontend.
+       * diagnostics and are never reprojected by the frontend.
        */
       const validPoints = Array.isArray(response.points)
         ? response.points.filter(
@@ -1133,36 +1127,53 @@ export default function MissionReportScreen({
           )
         : [];
 
+      /**
+       * Do not erase an existing fixed path because one preview read is early.
+       * The lifecycle effect retries until the already-generated backend path
+       * contains at least two geographic points.
+       */
+      if (
+        Number(response.navigation_point_count ?? 0) < 2 ||
+        validPoints.length < 2
+      ) {
+        console.warn(
+          "[MissionReportScreen] Fixed trajectory preview not ready yet:",
+          {
+            navigationPoints: response.navigation_point_count,
+            projectedPoints: validPoints.length,
+            frameId: response.frame_id,
+          },
+        );
+        return false;
+      }
+
       setTrajectoryPoints(validPoints);
 
       const firstPoint = validPoints[0];
       const lastPoint = validPoints[validPoints.length - 1];
 
-      console.log("[MissionReportScreen] Main-map trajectory loaded:", {
+      console.log("[MissionReportScreen] Fixed P1->Pn trajectory displayed:", {
         frameId: response.frame_id,
         displayedPoints: validPoints.length,
         totalPoints: response.navigation_point_count,
         previewTruncated: response.preview_truncated,
-        firstGps: firstPoint
-          ? {
-              latitude: firstPoint.latitude,
-              longitude: firstPoint.longitude,
-            }
-          : null,
-        lastGps: lastPoint
-          ? {
-              latitude: lastPoint.latitude,
-              longitude: lastPoint.longitude,
-            }
-          : null,
+        firstGps: {
+          latitude: firstPoint.latitude,
+          longitude: firstPoint.longitude,
+        },
+        lastGps: {
+          latitude: lastPoint.latitude,
+          longitude: lastPoint.longitude,
+        },
       });
+
+      return true;
     } catch (error) {
       console.warn(
-        "[MissionReportScreen] Generated trajectory unavailable:",
+        "[MissionReportScreen] Generated trajectory unavailable; will retry:",
         error instanceof Error ? error.message : String(error),
       );
-
-      setTrajectoryPoints([]);
+      return false;
     }
   }, []);
 
@@ -1280,47 +1291,32 @@ export default function MissionReportScreen({
 
   /*
    * ============================================================
-   * GENERATED TRAJECTORY DISPLAY
+   * FIXED GENERATED TRAJECTORY DISPLAY
    * ============================================================
    *
-   * Load the generated trajectory exactly when the prepared
-   * mission becomes READY.
+   * LOAD owns the fixed surveyed P1->Pn trajectory.
    *
-   * Once loaded, keep it displayed while:
+   * trajectory_ready is the DISPLAY gate.
+   * mission-manager READY remains the START gate.
    *
-   * RUNNING
-   * PAUSED
-   * WAITING_FOR_NEXT
-   * COMPLETED
-   *
-   * START must never re-anchor or regenerate this display.
+   * RPP's temporary current C->P1 runtime entry path is intentionally
+   * separate and must never replace or re-anchor this displayed path.
    */
   useEffect(() => {
-    if (!isVisible || connectionState !== "connected") {
+    if (
+      !isVisible ||
+      connectionState !== "connected" ||
+      isOfflineMode()
+    ) {
       return;
     }
-
-    const state = String(backendMission?.state ?? "")
-      .trim()
-      .toUpperCase();
 
     const navigationPointCount = Number(
       backendMission?.navigation_point_count ?? 0,
     );
 
     /*
-     * A new Load Mission has started.
-     *
-     * Remove the previous mission trajectory while the replacement
-     * trajectory is being generated.
-     */
-    if (backendMission?.loaded === true && state === "PREPARING") {
-      setTrajectoryPoints([]);
-      return;
-    }
-
-    /*
-     * No mission file.
+     * No stored mission means there is no fixed trajectory to display.
      */
     if (backendMission?.loaded !== true) {
       setTrajectoryPoints([]);
@@ -1328,39 +1324,68 @@ export default function MissionReportScreen({
     }
 
     /*
-     * Only fetch the trajectory when mission_manager has actually
-     * accepted the complete generated path.
+     * While a new mission is being generated, trajectory_ready is false.
+     * The Jetson lifecycle patch will explicitly reset it at each LOAD.
      */
-    if (
-      state === "READY" &&
-      backendMission?.ready === true &&
-      Number.isFinite(navigationPointCount) &&
-      navigationPointCount > 0
-    ) {
-      void refreshTrajectoryPreview();
+    if (backendMission?.trajectory_ready !== true) {
+      setTrajectoryPoints([]);
+      return;
     }
 
-    /*
-     * IMPORTANT:
-     *
-     * Do NOT clear trajectoryPoints when state becomes:
-     *
-     * RUNNING
-     * PAUSED
-     * WAITING_FOR_NEXT
-     * COMPLETED
-     *
-     * Backend ready=false outside READY is normal.
-     * The trajectory must remain visible.
-     */
+    if (
+      !Number.isFinite(navigationPointCount) ||
+      navigationPointCount < 2
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let requestInFlight = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const loadFixedTrajectory = async (): Promise<void> => {
+      if (cancelled || requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
+      let displayed = false;
+
+      try {
+        displayed = await refreshTrajectoryPreview();
+      } finally {
+        requestInFlight = false;
+      }
+
+      if (cancelled || displayed) {
+        return;
+      }
+
+      /*
+       * Retry only the REST preview read.
+       * This NEVER regenerates or changes P1->Pn geometry.
+       */
+      retryTimer = setTimeout(() => {
+        void loadFixedTrajectory();
+      }, 500);
+    };
+
+    void loadFixedTrajectory();
+
+    return () => {
+      cancelled = true;
+
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+    };
   }, [
     isVisible,
     connectionState,
 
     backendMission?.mission_id,
     backendMission?.loaded,
-    backendMission?.state,
-    backendMission?.ready,
+    backendMission?.trajectory_ready,
     backendMission?.navigation_point_count,
 
     refreshTrajectoryPreview,
