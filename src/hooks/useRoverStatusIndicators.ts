@@ -3,7 +3,7 @@
  *
  * Centralizes state ownership so the icon components only render normalized values
  * and never call APIs or inspect raw backend objects. Reads exclusively from the
- * already-polling telemetry layer (useRover → useRoverTelemetry):
+ * already-polling telemetry layer (useTelemetry / useConnection → useRoverTelemetry):
  *
  *   networkType / wifiConnected / wifiSignalBars  ← GET /api/network (px4NetworkAdapter)
  *   rtkState                                      ← GET /api/rtk/status (px4RtkUiStateAdapter)
@@ -16,7 +16,8 @@
  */
 
 import { useMemo } from 'react';
-import { useRover } from '../context/RoverContext';
+import { useTelemetry } from '../context/TelemetryContext';
+import { useConnection } from '../context/ConnectionContext';
 import type { RtkUiState } from '../adapters/px4RtkUiStateAdapter';
 
 export interface RoverStatusIndicators {
@@ -42,7 +43,8 @@ export interface RoverStatusIndicators {
  * Must be used within <RoverProvider>.
  */
 export function useRoverStatusIndicators(): RoverStatusIndicators {
-  const { telemetry, connectionState } = useRover();
+  const { telemetry } = useTelemetry();
+  const { connectionState } = useConnection();
 
   return useMemo<RoverStatusIndicators>(() => {
     const ct = telemetry.network.connection_type;

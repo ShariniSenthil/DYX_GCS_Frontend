@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRover } from '../../context/RoverContext';
+import { useConnection } from '../../context/ConnectionContext';
 import VoiceSettingsModal from '../common/VoiceSettingsModal';
 
 const TTS_STORAGE_KEY = 'tts_enabled';
@@ -27,7 +27,7 @@ interface TTSToggleButtonProps {
  * - Visual feedback with color changes and icons
  */
 export const TTSToggleButton: React.FC<TTSToggleButtonProps> = ({ onStatusChange }) => {
-  const { services } = useRover();
+  const { services } = useConnection();
   const [enabled, setEnabled] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [showModal, setShowModal] = useState<boolean>(false);

@@ -21,12 +21,15 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LegendList } from "@legendapp/list";
 import { colors } from "../theme/colors";
 import { DxfMapEntity, PathPlanWaypoint } from "../types/pathplan";
-import { useRover } from "../context/RoverContext";
+import { useTelemetry } from "../context/TelemetryContext";
+import { useMission } from "../context/MissionContext";
+import { useConnection } from "../context/ConnectionContext";
 import { PathSequenceSidebar } from "../components/pathplan/PathSequenceSidebar";
 import MissionOpsPanel from "../components/pathplan/MissionOpsPanel";
 import { MissionStatistics } from "../components/pathplan/MissionStatistics";
 import { RobotPositionPanel } from "../components/pathplan/RobotPositionPanel";
 import { PathPlanMap } from "../components/pathplan/PathPlanMap";
+import { useFieldMapOptional } from "../context/FieldMapContext";
 import { DrawingToolsPanel } from "../components/pathplan/DrawingToolsPanel";
 import { LayerControlsPanel } from "../components/pathplan/LayerControlsPanel";
 import { EditWaypointDialog } from "../components/pathplan/EditWaypointDialog";
@@ -34,6 +37,7 @@ import { CircleGeneratorDialog } from "../components/pathplan/CircleGeneratorDia
 import { SurveyGridDialog } from "../components/pathplan/SurveyGridDialog";
 import { TextAnnotationDialog } from "../components/pathplan/TextAnnotationDialog";
 import { CADDrawingCanvas as CADDrawingCanvasNew } from "../components/cad/CADDrawingCanvas";
+import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import type { CADEntity } from "../core/cad";
 import { entitiesToDXF } from "../core/cad";
 import { ManualPathConnectionCanvas } from "../components/pathplan/ManualPathConnectionCanvas";
@@ -261,6 +265,7 @@ const buildMissionCsvFromWaypoints = (
 
 interface PathPlanScreenProps {
   isVisible?: boolean;
+  embedMap?: boolean;
   isDrawingToolsVisible?: boolean;
   setIsDrawingToolsVisible?: (val: boolean) => void;
   isMissionOpsVisible?: boolean;
@@ -273,6 +278,7 @@ interface PathPlanScreenProps {
 
 export default function PathPlanScreen({
   isVisible = true,
+  embedMap = true,
   isDrawingToolsVisible: propIsDrawingToolsVisible,
   setIsDrawingToolsVisible: propSetIsDrawingToolsVisible,
   isMissionOpsVisible: propIsMissionOpsVisible,
@@ -285,21 +291,22 @@ export default function PathPlanScreen({
   const {
     telemetry,
     roverPosition,
-    missionWaypoints,
-    setMissionWaypoints,
     gpsFailsafeMode,
     setGpsFailsafeMode,
     gpsFailsafeStatus,
     onFailsafeAcknowledge,
     onFailsafeResume,
     onFailsafeRestart,
-    services,
-    socket,
+  } = useTelemetry();
+  const {
+    missionWaypoints,
+    setMissionWaypoints,
     showUploadPreview,
     setShowUploadPreview,
     showManualConnectionCanvas,
     setShowManualConnectionCanvas,
-  } = useRover();
+  } = useMission();
+  const { services, socket } = useConnection();
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
 
@@ -593,6 +600,7 @@ export default function PathPlanScreen({
 
   // When precise path mode is active, the map shows preview waypoints instead
   const displayedWaypoints = precisePathPreview ?? waypoints;
+  const fieldMap = useFieldMapOptional();
 
   const handlePrecisePathPreviewChange = React.useCallback(
     (preview: PathPlanWaypoint[]) => {
@@ -992,6 +1000,24 @@ export default function PathPlanScreen({
 
     recordAndApply([...waypoints, newWp]);
   };
+
+  useEffect(() => {
+    if (!fieldMap) return;
+    fieldMap.publishMarking({
+      waypoints: displayedWaypoints.map((wp) => ({
+        lat: wp.lat,
+        lon: wp.lon,
+        id: wp.id,
+        sn: typeof wp.id === "number" ? wp.id : undefined,
+      })),
+    });
+  }, [displayedWaypoints, fieldMap]);
+
+  if (fieldMap) {
+    fieldMap.markingPressRef.current = showPrecisePathDialog
+      ? undefined
+      : handleMapPress;
+  }
 
   const handleWaypointClick = (id: number) => {
     if (!isConnectingPath) return;
@@ -2440,28 +2466,31 @@ export default function PathPlanScreen({
       ...waypoint,
     }));
 
-    Alert.alert(
-      "Mission Extension",
-      "Choose whether the backend should generate extension points for short row transitions.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "DISABLE",
-          onPress: () => {
-            void uploadWaypointsToBackend(waypointSnapshot, "DISABLE");
-          },
-        },
-        {
-          text: "ENABLE",
-          onPress: () => {
-            void uploadWaypointsToBackend(waypointSnapshot, "ENABLE");
-          },
-        },
-      ],
-    );
+    /*
+     * Mission Extension prompt is disabled for now.
+     * Keep this Alert for a later re-enable — do not delete it.
+     *
+     * Alert.alert(
+     *   "Mission Extension",
+     *   "Choose whether the backend should generate extension points for short row transitions.",
+     *   [
+     *     { text: "Cancel", style: "cancel" },
+     *     {
+     *       text: "DISABLE",
+     *       onPress: () => {
+     *         void uploadWaypointsToBackend(waypointSnapshot, "DISABLE");
+     *       },
+     *     },
+     *     {
+     *       text: "ENABLE",
+     *       onPress: () => {
+     *         void uploadWaypointsToBackend(waypointSnapshot, "ENABLE");
+     *       },
+     *     },
+     *   ],
+     * );
+     */
+    void uploadWaypointsToBackend(waypointSnapshot, "DISABLE");
   }
 
   function handleLoadMissionToController(): void {
@@ -3275,13 +3304,20 @@ export default function PathPlanScreen({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, !embedMap && styles.overSharedMap]}
+      pointerEvents={embedMap ? "auto" : "box-none"}
+    >
       <StatusBar backgroundColor={colors.headerBlue} barStyle="light-content" />
 
       {/* Main Content - full height */}
-      <View style={styles.mainContent}>
+      <View
+        style={[styles.mainContent, !embedMap && styles.overSharedMap]}
+        pointerEvents={embedMap ? "auto" : "box-none"}
+      >
         {isMapFullscreen ? (
-          /* Full Screen Map Mode */
+          /* Full Screen Map Mode — shared FieldMapHost already fills the screen */
+          embedMap ? (
           <View style={styles.fullscreenMap}>
             <PathPlanMap
               waypoints={displayedWaypoints}
@@ -3342,9 +3378,11 @@ export default function PathPlanScreen({
               onDismissPanel={() => setActivePanel(null)}
             />
           </View>
+          ) : null
         ) : (
           <>
-            {/* Absolute Map Background */}
+            {/* Absolute Map Background — omitted when TabNavigator hosts the shared MapView */}
+            {embedMap && (
             <View style={styles.absoluteMapContainer}>
               <PathPlanMap
                 waypoints={displayedWaypoints}
@@ -3398,6 +3436,7 @@ export default function PathPlanScreen({
                 onDismissPanel={() => setActivePanel(null)}
               />
             </View>
+            )}
 
             {/* Layer Settings / Widget Controller — standalone, always visible so it can re-enable Drawing Tools */}
             <View style={styles.floatingLayerControlsWrapper}>
@@ -4377,6 +4416,16 @@ export default function PathPlanScreen({
       </Modal>
 
       {/* CAD Drawing Canvas — new world-coordinate SVG engine */}
+      <ErrorBoundary
+        componentName="CAD Drawing Canvas"
+        fallback={
+          <View style={{ position: "absolute", top: 80, left: 24, right: 24, padding: 16, backgroundColor: "#1e293b", borderRadius: 12 }}>
+            <Text style={{ color: "#94a3b8", textAlign: "center" }}>
+              Drawing canvas failed to load. Map and mission controls remain active.
+            </Text>
+          </View>
+        }
+      >
       <CADDrawingCanvasNew
         visible={showCADCanvas}
         onClose={() => setShowCADCanvas(false)}
@@ -4416,6 +4465,7 @@ export default function PathPlanScreen({
           }
         }}
       />
+      </ErrorBoundary>
 
       {/* Corner Extension Dialog */}
       <CornerExtensionDialog
@@ -4599,6 +4649,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.primary,
+  },
+  overSharedMap: {
+    backgroundColor: "transparent",
   },
   floatingLayerControlsWrapper: {
     position: "absolute",

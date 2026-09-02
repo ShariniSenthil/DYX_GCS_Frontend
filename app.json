@@ -55,8 +55,8 @@
       "policy": "appVersion"
     },
     "updates": {
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
+      "enabled": false,
+      "checkAutomatically": "NEVER",
       "fallbackToCacheTimeout": 0
     },
     "plugins": [

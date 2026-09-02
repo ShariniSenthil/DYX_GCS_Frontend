@@ -2,7 +2,8 @@ import React, { useMemo, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
-import { useRover } from '../context/RoverContext';
+import { useTelemetry } from '../context/TelemetryContext';
+import { useConnection } from '../context/ConnectionContext';
 import { RobotSettingsModal } from '../components/dashboard/RobotSettingsModal';
 import { saveParamsToFile, loadParamsFromFile } from '../services/paramFileService';
 
@@ -250,7 +251,8 @@ const BottomParamFileCard = React.memo(({ onSave, onLoad, saving, loading, disab
 // ── MAIN SCREEN COMPONENT ────────────────────────────────────────
 
 export default function DashboardScreen() {
-  const { telemetry, connectionState, roverPosition, services } = useRover();
+  const { telemetry, roverPosition } = useTelemetry();
+  const { connectionState, services } = useConnection();
   const mountedRef = useRef(true);
   const [showRobotSettings, setShowRobotSettings] = useState(false);
   const [paramSaving, setParamSaving] = useState(false);

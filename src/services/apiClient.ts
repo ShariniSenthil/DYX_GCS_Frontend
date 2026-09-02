@@ -138,9 +138,31 @@ function createRequestBody(
   return JSON.stringify(body);
 }
 
+// ── Retry helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Methods that mutate server state must NOT be retried automatically —
+ * a double-send of a "start mission" or "arm" command would be dangerous.
+ * Only safe idempotent reads (GET, DELETE) are retried.
+ */
+const RETRYABLE_METHODS = new Set(["GET", "DELETE"]);
+
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 300;
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof NetworkError) return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── Internal request function ─────────────────────────────────────────────────
 
-async function request<T>(
+async function requestOnce<T>(
   method: string,
   path: string,
   body?: unknown,
@@ -275,7 +297,55 @@ async function request<T>(
   }
 }
 
+/**
+ * Public request function with automatic retry for transient network errors.
+ *
+ * Only idempotent methods (GET, DELETE) are retried to prevent dangerous
+ * duplicate mutations (e.g., double-sending an "arm" or "start mission" command).
+ *
+ * Retry schedule (exponential backoff):
+ *   Attempt 1: immediate
+ *   Attempt 2: 300ms delay
+ *   Attempt 3: 600ms delay
+ *   Attempt 4: 1200ms delay → throws to caller
+ */
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const canRetry = RETRYABLE_METHODS.has(method.toUpperCase());
+
+  let lastError: unknown;
+  const attempts = canRetry ? MAX_RETRIES + 1 : 1;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) {
+      const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      console.warn(
+        `[apiClient] Retrying ${method} ${path} (attempt ${attempt + 1}/${attempts}) after ${delayMs}ms`,
+      );
+      await sleep(delayMs);
+    }
+
+    try {
+      return await requestOnce<T>(method, path, body, options);
+    } catch (error) {
+      lastError = error;
+
+      // Only retry on transient network errors, not on HTTP 4xx/5xx responses
+      if (!isRetryableError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 // ── JSON request functions ────────────────────────────────────────────────────
+
 
 export async function apiGet<T>(
   path: string,
@@ -366,6 +436,28 @@ export async function apiPostMultipart<T>(
   );
 }
 
+/**
+ * Probe an absolute URL (rover discovery). Does not use getBackendURL().
+ * Returns the HTTP status even for 4xx so callers can treat the host as reachable.
+ */
+export async function apiProbe(
+  absoluteUrl: string,
+  options: { timeoutMs?: number } = {},
+): Promise<{ status: number }> {
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(absoluteUrl, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    return { status: response.status };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export const apiClient = {
   apiGet,
   apiPost,
@@ -373,6 +465,7 @@ export const apiClient = {
   apiPatch,
   apiDelete,
   apiPostMultipart,
+  apiProbe,
   configureApiClient,
 };
 

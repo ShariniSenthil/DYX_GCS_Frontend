@@ -28,7 +28,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
-import { useRover } from '../../context/RoverContext';
+import { useConnection } from '../../context/ConnectionContext';
 import {
   CATEGORIES,
   ConfigCategory,
@@ -466,7 +466,7 @@ export const RobotSettingsModal: React.FC<RobotSettingsModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { services, connectionState } = useRover();
+  const { services, connectionState } = useConnection();
   const isConnected = connectionState === 'connected';
   const [activeCategory, setActiveCategory] = useState<ConfigCategory | null>(null);
 

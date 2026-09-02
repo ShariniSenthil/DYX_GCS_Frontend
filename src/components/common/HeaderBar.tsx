@@ -4,14 +4,16 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import VoiceSettingsModal from './VoiceSettingsModal';
 import { FailsafeModeSelector } from '../pathplan/FailsafeModeSelector';
 import { colors } from '../../theme/colors';
-import { useRover } from '../../context/RoverContext';
+import { useTelemetry } from '../../context/TelemetryContext';
+import { useConnection } from '../../context/ConnectionContext';
 import { emergencyStop, releaseEmergencyStop } from '../../services/vehicleControlService';
 import { ROVER_ENABLED } from '../../config/featureFlags';
 import { getBackendURL } from '../../config';
 
 export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string }) {
   const [showVoiceModal, setShowVoiceModal] = useState(false);
-  const { gpsFailsafeMode, setGpsFailsafeMode, telemetry, services, connectionState, reconnect } = useRover();
+  const { gpsFailsafeMode, setGpsFailsafeMode, telemetry } = useTelemetry();
+  const { services, connectionState, reconnect } = useConnection();
   const [showFailsafeModeSelector, setShowFailsafeModeSelector] = useState(false);
   const [isEmergencyStopping, setIsEmergencyStopping] = useState(false);
   const [isReleasingEstop, setIsReleasingEstop] = useState(false);

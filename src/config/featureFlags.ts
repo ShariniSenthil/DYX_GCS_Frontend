@@ -132,6 +132,16 @@ export const RTK_PX4_PATHS_ENABLED: boolean =
       .EXPO_PUBLIC_RTK_PX4_PATHS_ENABLED,
   );
 
+/**
+ * Native MissionMap is the default. Set EXPO_PUBLIC_USE_WEBVIEW_MISSION_MAP=true
+ * to roll back to the CDN WebView implementation.
+ */
+export const USE_NATIVE_MISSION_MAP: boolean =
+  !isTrue(
+    process.env
+      .EXPO_PUBLIC_USE_WEBVIEW_MISSION_MAP,
+  );
+
 // ── Helper functions ──────────────────────────────────────────────────────────
 
 export function isPx4DxpEnabled(): boolean {
@@ -173,6 +183,7 @@ export default {
   JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS,
   MISSION_ABORT_ENABLED,
   RTK_PX4_PATHS_ENABLED,
+  USE_NATIVE_MISSION_MAP,
   isPx4DxpEnabled,
   isAuthEnabled,
   isMissionStagingEnabled,

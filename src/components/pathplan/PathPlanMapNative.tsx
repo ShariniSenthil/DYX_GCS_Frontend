@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { View, StyleSheet } from 'react-native';
-import MapboxGL, { MarkerView, MapView, Camera, ShapeSource, LineLayer } from '@rnmapbox/maps';
+import React, { useMemo, useRef } from 'react';
+import { View, StyleSheet, Text } from 'react-native';
+import { MarkerView, MapView, Camera, ShapeSource, LineLayer, CircleLayer } from '@rnmapbox/maps';
 import Svg, { Polygon, Circle } from 'react-native-svg';
-import { MAPBOX_ACCESS_TOKEN, MAPBOX_STYLE_SATELLITE } from '../../config/mapboxConfig';
-
-MapboxGL.setAccessToken(MAPBOX_ACCESS_TOKEN);
+import {
+  MAPBOX_STYLE_SATELLITE,
+  MAPBOX_FALLBACK_STYLE_JSON,
+} from '../../config/mapboxConfig';
+import { useMapboxSurface } from '../../hooks/useMapboxSurface';
 
 function RoverVehicle({ heading }: { heading: number | null | undefined }) {
   const rotationDeg = heading ?? 0;
@@ -23,14 +25,22 @@ function RoverVehicle({ heading }: { heading: number | null | undefined }) {
   );
 }
 
-// Ensure the props interface matches the usage in the app
 export const PathPlanMapNative: React.FC<any> = ({
   waypoints = [],
   roverPosition = null,
   heading = null,
   onMapPress,
   visualization,
+  isVisible: _isVisible = true,
 }) => {
+  const {
+    usingFallback,
+    canMount,
+    mapKey,
+    onLayout,
+    onMapReady,
+    onMapError,
+  } = useMapboxSurface();
   const center = useMemo(() => {
     if (roverPosition && roverPosition.lon && roverPosition.lat) {
       return [roverPosition.lon, roverPosition.lat];
@@ -43,14 +53,8 @@ export const PathPlanMapNative: React.FC<any> = ({
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
 
-  // Pan to follow the rover without touching zoom — a controlled `zoomLevel`
-  // prop on <Camera> re-applies on every position tick and silently fights
-  // any pinch-zoom the user just did, snapping the map back to zoom 18.
-  useEffect(() => {
-    if (roverPosition && roverPosition.lon && roverPosition.lat) {
-      cameraRef.current?.moveTo(center as [number, number], 300);
-    }
-  }, [center, roverPosition]);
+  // Do not auto-follow the rover. Tab switches and live GPS would otherwise
+  // yank the camera. Operators re-center with map controls when they want it.
 
   const lineGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length < 2) return null;
@@ -69,16 +73,49 @@ export const PathPlanMapNative: React.FC<any> = ({
     };
   }, [waypoints]);
 
+  const waypointGeoJSON = useMemo(() => {
+    if (!waypoints || waypoints.length === 0) return null;
+    return {
+      type: 'FeatureCollection',
+      features: waypoints.map((wp: any, i: number) => ({
+        type: 'Feature',
+        id: i,
+        properties: { id: wp.id || i },
+        geometry: {
+          type: 'Point',
+          coordinates: [wp.lon, wp.lat],
+        },
+      })),
+    };
+  }, [waypoints]);
+
+  if (MapView == null) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.fallbackBannerText}>Map module unavailable</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <MapView 
+    <View style={styles.container} collapsable={false} onLayout={onLayout}>
+      {canMount && (
+      <MapView
+        key={mapKey}
         style={styles.map}
-        styleURL={MAPBOX_STYLE_SATELLITE}
+        {...(usingFallback
+          ? { styleJSON: MAPBOX_FALLBACK_STYLE_JSON }
+          : { styleURL: MAPBOX_STYLE_SATELLITE })}
         compassEnabled={false}
         logoEnabled={false}
         attributionEnabled={false}
+        scaleBarEnabled={false}
+        surfaceView={false}
         pitchEnabled={false}
         rotateEnabled={false}
+        onDidFinishLoadingMap={onMapReady}
+        onMapLoadingError={onMapError}
+        onDidFailLoadingMap={onMapError}
         onPress={(e: any) => {
            if(onMapPress && e.geometry && e.geometry.coordinates) {
                onMapPress({ longitude: e.geometry.coordinates[0], latitude: e.geometry.coordinates[1] });
@@ -96,20 +133,34 @@ export const PathPlanMapNative: React.FC<any> = ({
           </ShapeSource>
         )}
 
-        {/* Waypoints */}
-        {waypoints.map((wp: any, i: number) => (
-          <MarkerView key={wp.id || i} coordinate={[wp.lon, wp.lat]} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.waypointDot} />
-          </MarkerView>
-        ))}
+        {waypointGeoJSON && (
+          <ShapeSource id="waypoint-source" shape={waypointGeoJSON as any}>
+            <CircleLayer
+              id="waypoint-layer"
+              style={{
+                circleRadius: 6,
+                circleColor: '#ef4444',
+                circleStrokeColor: '#ffffff',
+                circleStrokeWidth: 2,
+              }}
+            />
+          </ShapeSource>
+        )}
 
-        {/* Rover Vehicle */}
         {roverPosition && visualization?.roverIcon !== false && (
           <MarkerView coordinate={[roverPosition.lon, roverPosition.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <RoverVehicle heading={heading} />
           </MarkerView>
         )}
       </MapView>
+      )}
+      {usingFallback && (
+        <View style={styles.fallbackBanner} pointerEvents="none">
+          <Text style={styles.fallbackBannerText}>
+            Map tiles unavailable — showing rover & path only
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -117,12 +168,20 @@ export const PathPlanMapNative: React.FC<any> = ({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
   map: { flex: 1 },
-  waypointDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ef4444',
-    borderWidth: 2,
-    borderColor: '#ffffff',
-  }
+  fallbackBanner: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    zIndex: 20,
+  },
+  fallbackBannerText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    textAlign: 'center',
+  },
 });

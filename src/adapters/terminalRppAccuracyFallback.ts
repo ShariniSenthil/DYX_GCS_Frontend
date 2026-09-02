@@ -67,6 +67,10 @@ export function captureTerminalRppAccuracy(
   telemetry: RoverTelemetry,
   pointIndex: number,
   capturedAt = new Date().toISOString(),
+  options?: {
+    ignoreIdentity?: boolean;
+    allowUnavailable?: boolean;
+  },
 ): TerminalRppAccuracySnapshot | null {
   if (
     !Number.isInteger(pointIndex)
@@ -79,7 +83,7 @@ export function captureTerminalRppAccuracy(
     telemetry.accuracy_available === true
     || telemetry.accuracy?.available === true;
 
-  if (!available) {
+  if (!available && !options?.allowUnavailable) {
     return null;
   }
 
@@ -133,6 +137,7 @@ export function captureTerminalRppAccuracy(
   if (
     hasPointIdentity
     && !identityMatches
+    && !options?.ignoreIdentity
   ) {
     return null;
   }

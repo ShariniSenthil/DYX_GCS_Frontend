@@ -43,7 +43,7 @@ import { setBackendURL } from "../config";
 import { useAuth } from "../hooks/useAuth";
 import { AUTH_ENABLED } from "../config/featureFlags";
 import ConnectPasswordModal from "../components/common/ConnectPasswordModal";
-import axios from "axios";
+import { apiProbe } from "../services/apiClient";
 
 interface RoverDiscoveryScreenProps {
   onRoverSelected: (device: JetsonDevice) => void | Promise<void>;
@@ -322,9 +322,8 @@ export default function RoverDiscoveryScreen({
       let reachable = false;
       for (const probePath of ["/api/health", "/api/healthz", "/api/ping"]) {
         try {
-          const r = await axios.get(`${normalizedManualUrl}${probePath}`, {
-            timeout: 5000,
-            validateStatus: () => true,
+          const r = await apiProbe(`${normalizedManualUrl}${probePath}`, {
+            timeoutMs: 5000,
           });
           if (r.status < 500) {
             reachable = true;

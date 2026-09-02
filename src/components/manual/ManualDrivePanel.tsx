@@ -11,7 +11,9 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { useRover } from '../../context/RoverContext';
+import { useTelemetry } from '../../context/TelemetryContext';
+import { useConnection } from '../../context/ConnectionContext';
+import { ErrorBoundary } from '../shared/ErrorBoundary';
 import { useAuth } from '../../context/AuthContext';
 import { isOfflineMode } from '../../config';
 import { JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS } from '../../config/featureFlags';
@@ -62,7 +64,8 @@ function stateLabel(state: FrontendJoystickState): string {
 }
 
 export const ManualDrivePanel: React.FC<ManualDrivePanelProps> = ({ onClose }) => {
-  const { telemetry, connectionState, services, socket } = useRover();
+  const { telemetry } = useTelemetry();
+  const { connectionState, services, socket } = useConnection();
   const { session } = useAuth();
   const [estopping, setEstopping] = useState(false);
   const [previewIntent, setPreviewIntent] = useState({ throttle: 0, steering: 0 });
@@ -270,6 +273,16 @@ export const ManualDrivePanel: React.FC<ManualDrivePanelProps> = ({ onClose }) =
         : stateLabel(joystick.state);
 
   return (
+    <ErrorBoundary
+      componentName="Manual Drive Panel"
+      fallback={
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' }}>
+          <Text style={{ color: '#94a3b8', textAlign: 'center', padding: 16 }}>
+            Joystick failed to load. Mission controls remain active.
+          </Text>
+        </View>
+      }
+    >
     <Modal
       transparent
       visible
@@ -383,6 +396,7 @@ export const ManualDrivePanel: React.FC<ManualDrivePanelProps> = ({ onClose }) =
         </View>
       </GestureHandlerRootView>
     </Modal>
+    </ErrorBoundary>
   );
 };
 

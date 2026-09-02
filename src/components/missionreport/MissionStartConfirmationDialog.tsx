@@ -2,7 +2,8 @@ import React from 'react';
 import { View, StyleSheet, Modal, Text, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
-import { useRover } from '../../context/RoverContext';
+import { useTelemetry } from '../../context/TelemetryContext';
+import { useMission } from '../../context/MissionContext';
 
 interface MissionStartConfirmationDialogProps {
   visible: boolean;
@@ -22,7 +23,8 @@ export const MissionStartConfirmationDialog: React.FC<MissionStartConfirmationDi
   hasExistingData,
   existingMissionInfo,
 }) => {
-  const { missionMode, telemetry } = useRover();
+  const { telemetry } = useTelemetry();
+  const { missionMode } = useMission();
 
   // RTK status logic (from MissionOpsPanel)
   const fixType = telemetry?.rtk?.fix_type ?? 0;
