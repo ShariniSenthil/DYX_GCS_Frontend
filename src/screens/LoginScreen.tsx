@@ -35,10 +35,19 @@ interface LoginScreenProps {
    * re-authentication overlay.
    */
   isReAuth?: boolean;
+
+  /**
+   * Optional escape hatch back to the RoverDiscoveryScreen.
+   *
+   * Only rendered when provided AND the screen is not a re-auth overlay,
+   * so a forced re-authentication can never be bypassed.
+   */
+  onBack?: () => void;
 }
 
 export default function LoginScreen({
   isReAuth = false,
+  onBack,
 }: LoginScreenProps): React.ReactElement {
   const { login, lastError } = useAuth();
 
@@ -153,6 +162,19 @@ export default function LoginScreen({
       style={styles.root}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      {/* Back to rover discovery — hidden for re-auth and when no handler */}
+      {onBack && !isReAuth && (
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={onBack}
+          activeOpacity={0.7}
+          disabled={isSubmitting}
+        >
+          <Ionicons name="chevron-back" size={15} color="#94A3B8" />
+          <Text style={styles.backButtonText}>Back to Rovers</Text>
+        </TouchableOpacity>
+      )}
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -341,6 +363,28 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#0A1628",
+  },
+
+  backButton: {
+    position: "absolute",
+    top: 48,
+    left: 20,
+    zIndex: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#1E3A5F",
+    backgroundColor: "#0F1C2E",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  backButtonText: {
+    color: "#94A3B8",
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   scrollContent: {

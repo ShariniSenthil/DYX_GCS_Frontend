@@ -45,7 +45,11 @@ import { initializeBackendURL, setBackendURL } from "./src/config";
 
 import { PX4_AUTH } from "./src/config/px4Endpoints";
 
-import { getSavedBackendURL, saveBackendURL } from "./src/utils/backendStorage";
+import {
+  clearBackendURL,
+  getSavedBackendURL,
+  saveBackendURL,
+} from "./src/utils/backendStorage";
 
 import type { JetsonDevice } from "./src/utils/jetsonDiscovery";
 
@@ -62,8 +66,15 @@ type SessionValidationState = "checking" | "valid" | "invalid";
 
 function AuthGate({
   children,
+  onBackToDiscovery,
 }: {
   children: React.ReactNode;
+  /**
+   * Optional escape hatch rendered on the LoginScreen that returns the
+   * operator to the RoverDiscoveryScreen. Omitted when the login screen
+   * is used as a forced re-authentication overlay.
+   */
+  onBackToDiscovery?: () => void;
 }): React.ReactElement {
   const { isAuthenticated, isLoading, session, invalidateSession } = useAuth();
   const [sessionValidation, setSessionValidation] =
@@ -176,7 +187,7 @@ function AuthGate({
   }
 
   if (!isAuthenticated || sessionValidation === "invalid") {
-    return <LoginScreen />;
+    return <LoginScreen onBack={onBackToDiscovery} />;
   }
 
   return (
@@ -254,6 +265,28 @@ function AppContent(): React.ReactElement {
     setBackendConfigured(true);
   };
 
+  /**
+   * Called from the LoginScreen "Back to Rovers" button.
+   *
+   * Clears the persisted rover selection and resets the in-memory backend
+   * URL to the same state as a fresh start, so the operator returns to the
+   * RoverDiscoveryScreen. The saved login session is intentionally kept —
+   * only explicit Logout removes it. If the operator then connects to a
+   * different rover, the ConnectPasswordModal login replaces the token.
+   */
+  const handleBackToDiscovery = async (): Promise<void> => {
+    try {
+      await clearBackendURL();
+    } catch (error) {
+      console.warn("[App] Could not clear saved backend URL:", error);
+    } finally {
+      // initializeBackendURL never throws; with nothing saved it restores
+      // the default URL, exactly matching a first-launch state.
+      await initializeBackendURL();
+      setBackendConfigured(false);
+    }
+  };
+
   if (!backendReady) {
     return (
       <View
@@ -283,7 +316,7 @@ function AppContent(): React.ReactElement {
   }
 
   return (
-    <AuthGate>
+    <AuthGate onBackToDiscovery={handleBackToDiscovery}>
       <WaypointProvider>
         <VerifiedMissionProvider>
           <MissionStagingProvider>
