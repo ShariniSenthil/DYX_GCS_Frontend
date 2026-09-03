@@ -26,8 +26,6 @@ import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
 import MissionControlCard from "../components/missionreport/MissionControlCard";
 import { WaypointsTable } from "../components/missionreport/WaypointsTable";
 import { MissionMap } from "../components/missionreport/MissionMap";
-import { useFieldMapOptional } from "../context/FieldMapContext";
-import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { DraggableCard } from "../components/shared/DraggableCard";
 import { MissionTableHeader } from "../components/missionreport/MissionTableHeader";
 import { MissionTableToolbarActions } from "../components/missionreport/MissionTableToolbarActions";
@@ -114,7 +112,6 @@ import {
 
 import {
   captureTerminalRppAccuracy,
-  formatTerminalRppAccuracy,
   isTerminalRppAccuracyStatus,
   selectMissionReportRemark,
   type TerminalRppAccuracySnapshot,
@@ -162,14 +159,11 @@ const getRtkFailureMessage = (err: unknown, fallback: string) =>
 
 interface MissionReportScreenProps {
   isVisible?: boolean;
-  embedMap?: boolean;
 }
 
 export default function MissionReportScreen({
   isVisible = true,
-  embedMap = true,
 }: MissionReportScreenProps) {
-  const fieldMap = useFieldMapOptional();
   const DEBUG_MISSION_LOGS = false;
   const missionLog = (...args: any[]) => {
     if (DEBUG_MISSION_LOGS) console.log(...args);
@@ -598,19 +592,7 @@ export default function MissionReportScreen({
           ) === pointIndex + 1
         );
 
-      const isLastPoint =
-        waypoints.length > 0 && pointIndex === waypoints.length - 1;
-      const missionStatus = String(
-        telemetry.mission?.status ?? "",
-      ).toLowerCase();
-      const missionEnded = [
-        "completed",
-        "stopped",
-        "failed",
-        "aborted",
-      ].includes(missionStatus);
-
-      if (!pointIdentityMatches && !(isLastPoint && missionEnded)) {
+      if (!pointIdentityMatches) {
         continue;
       }
 
@@ -621,8 +603,6 @@ export default function MissionReportScreen({
        * Snapshot reconciliation normally happens
        * immediately, so five seconds gives enough
        * time for the telemetry packet to arrive.
-       * Last-point capture is allowed after that
-       * window because mission-end drops identity.
        */
       const terminalTimeMs =
         Date.parse(
@@ -637,7 +617,6 @@ export default function MissionReportScreen({
           Date.now()
           - terminalTimeMs
         ) > 5000
-        && !(isLastPoint && missionEnded)
       ) {
         continue;
       }
@@ -649,9 +628,6 @@ export default function MissionReportScreen({
           entry.timestamp
             ?? new Date()
               .toISOString(),
-          isLastPoint && missionEnded
-            ? { ignoreIdentity: true, allowUnavailable: true }
-            : undefined,
         );
 
       if (!snapshot) {
@@ -886,15 +862,16 @@ export default function MissionReportScreen({
             reconciledRow.timestamp,
 
           /*
-           * Socket-frozen accuracy wins. HTTP report must not
-           * rewrite a completed point as the rover moves on.
+           * IMPORTANT:
+           * The canonical report remark always has
+           * priority. The frozen RPP telemetry is only
+           * used while report accuracy is unavailable.
            */
-          remark: frozenAccuracy
-            ? formatTerminalRppAccuracy(frozenAccuracy)
-            : selectMissionReportRemark(
-                reconciledRow.remark,
-                undefined,
-              ),
+          remark:
+            selectMissionReportRemark(
+              reconciledRow.remark,
+              frozenAccuracy,
+            ),
         };
 
         continue;
@@ -1262,19 +1239,54 @@ export default function MissionReportScreen({
   }, [isVisible, connectionState, refreshBackendMission]);
 
   /*
-   * Live accuracy and point status come from Socket.IO
-   * (telemetry + point_completed / point_failed).
+   * ============================================================
+   * CANONICAL MISSION REPORT SYNCHRONIZATION
+   * ============================================================
    *
-   * GET /api/mission/report is a one-shot hydrate for
-   * restored sessions — never a 1 Hz poll, which was
-   * overwriting frozen remarks as the rover moved.
+   * Mission Report point status + terminal
+   * RPP accuracy comes only from:
+   *
+   * GET /api/mission/report
    */
   useEffect(() => {
     if (!isVisible || connectionState !== "connected" || isOfflineMode()) {
       return;
     }
 
-    void refreshCanonicalMissionReport();
+    let cancelled = false;
+    let requestInFlight = false;
+
+    const pollReport = async () => {
+      if (cancelled || requestInFlight) {
+        return;
+      }
+
+      requestInFlight = true;
+
+      try {
+        await refreshCanonicalMissionReport();
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    /*
+     * Immediate first request.
+     */
+    void pollReport();
+
+    /*
+     * Mission Report does not need
+     * high-frequency polling.
+     */
+    const timer = setInterval(() => {
+      void pollReport();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [isVisible, connectionState, refreshCanonicalMissionReport]);
 
   /*
@@ -2154,29 +2166,6 @@ export default function MissionReportScreen({
       setMissionEndTime(endTime);
     }
 
-    const lastIndex = Math.max(0, waypointsRef.current.length - 1);
-    const lastSn = pointIndexToSn(lastIndex, waypointsRef.current);
-    if (
-      waypointsRef.current.length > 0 &&
-      lastSn &&
-      !terminalRppAccuracyFallbackRef.current[lastSn]
-    ) {
-      const snapshot = captureTerminalRppAccuracy(
-        telemetryRef.current,
-        lastIndex,
-        event.timestamp ?? new Date().toISOString(),
-        { ignoreIdentity: true, allowUnavailable: true },
-      );
-      if (snapshot) {
-        const next = {
-          ...terminalRppAccuracyFallbackRef.current,
-          [lastSn]: snapshot,
-        };
-        terminalRppAccuracyFallbackRef.current = next;
-        setTerminalRppAccuracyFallbackMap(next);
-      }
-    }
-
     if (outcome === "completed") {
       showNotification(
         "success",
@@ -2266,26 +2255,6 @@ export default function MissionReportScreen({
     missionMode,
     missionStartTime,
     missionEndTime,
-  ]);
-
-  useEffect(() => {
-    if (!fieldMap) return;
-    fieldMap.publishMission({
-      waypoints: displayData.waypoints.map((wp) => ({
-        lat: wp.lat,
-        lon: wp.lon,
-        sn: wp.sn,
-      })),
-      trajectoryPoints,
-      statusMap: displayData.statusMap,
-      activeWaypointIndex: effectiveCurrentIndex,
-    });
-  }, [
-    fieldMap,
-    displayData.waypoints,
-    displayData.statusMap,
-    trajectoryPoints,
-    effectiveCurrentIndex,
   ]);
 
   const missionProgressRef = useMemo(
@@ -4341,41 +4310,24 @@ export default function MissionReportScreen({
   // No need to fetch from backend as PathPlan handles upload and syncs to context
 
   return (
-    <SafeAreaView
-      style={[styles.container, !embedMap && styles.overSharedMap]}
-      edges={["left", "right", "bottom"]}
-      pointerEvents={embedMap ? "auto" : "box-none"}
-    >
+    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
       <StatusBar backgroundColor={colors.headerBlue} barStyle="light-content" />
 
-      {embedMap && (
-      <View style={styles.absoluteMapContainer} collapsable={false}>
-        <ErrorBoundary
-          componentName="Mission Map"
-          fallback={
-            <View style={{ flex: 1, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ color: '#94a3b8', fontSize: 14, textAlign: 'center', padding: 16 }}>
-                ⚠️ Map failed to load.{"\n"}All controls and telemetry remain active.
-              </Text>
-            </View>
-          }
-        >
-          <MissionMap
-            waypoints={displayData.waypoints}
-            trajectoryPoints={trajectoryPoints}
-            roverLat={mapProps.roverLat}
-            roverLon={mapProps.roverLon}
-            heading={mapProps.heading}
-            activeWaypointIndex={effectiveCurrentIndex}
-            statusMap={displayData.statusMap}
-            armed={mapProps.armed}
-            rtkFixType={mapProps.rtkFixType}
-            edgeToEdge
-            isVisible={isVisible}
-          />
-        </ErrorBoundary>
+      <View style={styles.absoluteMapContainer}>
+        <MissionMap
+          waypoints={displayData.waypoints}
+          trajectoryPoints={trajectoryPoints}
+          roverLat={mapProps.roverLat}
+          roverLon={mapProps.roverLon}
+          heading={mapProps.heading}
+          activeWaypointIndex={effectiveCurrentIndex}
+          statusMap={displayData.statusMap}
+          armed={mapProps.armed}
+          rtkFixType={mapProps.rtkFixType}
+          edgeToEdge
+          isVisible={isVisible}
+        />
       </View>
-      )}
 
       {isRobotStatusVisible && (
         <DraggableCard
@@ -4574,29 +4526,17 @@ export default function MissionReportScreen({
           />
           {isBottomTableExpanded && (
             <View style={styles.floatingBottomTableBody}>
-              <ErrorBoundary
-                componentName="Waypoints Table"
-                fallback={
-                  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
-                    <Text style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>
-                      ⚠️ Table failed to render. Mission data is still being tracked.
-                    </Text>
-                  </View>
-                }
-              >
-                <WaypointsTable
-                  embedded
-                  waypoints={displayData.waypoints}
-                  statusMap={displayData.statusMap}
-                  missionMode={displayData.missionMode}
-                  currentIndex={effectiveCurrentIndex}
-                  pinnedCount={PINNED_COUNT}
-                  onReorder={handleReorder}
-                />
-              </ErrorBoundary>
+              <WaypointsTable
+                embedded
+                waypoints={displayData.waypoints}
+                statusMap={displayData.statusMap}
+                missionMode={displayData.missionMode}
+                currentIndex={effectiveCurrentIndex}
+                pinnedCount={PINNED_COUNT}
+                onReorder={handleReorder}
+              />
             </View>
           )}
-
         </DraggableCard>
       )}
 
@@ -4657,10 +4597,6 @@ export default function MissionReportScreen({
             <Text style={styles.undoButtonText}>Undo</Text>
           </TouchableOpacity>
         </View>
-      )}
-
-      {isManualDriveVisible && (
-        <ManualDrivePanel onClose={closeManualDrivePanel} />
       )}
 
       <RTKInjectionScreen
@@ -4736,16 +4672,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     position: "relative",
   },
-  overSharedMap: {
-    backgroundColor: "transparent",
-  },
   absoluteMapContainer: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#1e293b",
   },
   floatingRobotStatusPanel: {
     position: "absolute",

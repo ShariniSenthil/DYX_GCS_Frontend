@@ -16,8 +16,7 @@ import {
   PATH_PLAN_GLASS,
   PATH_PLAN_HEADER,
 } from "../../constants/pathPlanGlass";
-import { useTelemetry } from "../../context/TelemetryContext";
-import { useConnection } from "../../context/ConnectionContext";
+import { useRover } from "../../context/RoverContext";
 import { Waypoint } from "./types";
 import { Toast } from "../shared/Toast";
 import { validateBulkSkip } from "../../utils/bulkSkipValidator";
@@ -107,8 +106,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   isDraggingActive,
   onClose,
 }) => {
-  const { telemetry } = useTelemetry();
-  const { services } = useConnection();
+  const { services, telemetry } = useRover();
   const [isLoadingMission, setIsLoadingMission] = React.useState(false);
 
   const [isStarting, setIsStarting] = React.useState(false);

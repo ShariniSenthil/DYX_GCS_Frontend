@@ -14,12 +14,10 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { useTelemetry } from '../context/TelemetryContext';
-import { useConnection } from '../context/ConnectionContext';
+import { useRover } from '../context/RoverContext';
 
 const TelemetryDisplay: React.FC = () => {
-  const { telemetry, roverPosition } = useTelemetry();
-  const { connectionState } = useConnection();
+  const { telemetry, connectionState, roverPosition } = useRover();
 
   // Memoize status calculations
   const statusInfo = useMemo(

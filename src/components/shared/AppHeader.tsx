@@ -11,7 +11,7 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
 import { SettingsScreen } from "../../screens/SettingsScreen";
-import { useMission } from "../../context/MissionContext";
+import { useRover } from "../../context/RoverContext";
 import { ModeSelectionDialog } from "../pathplan/ModeSelectionDialog";
 import { DashConfigDialog } from "../pathplan/DashConfigDialog";
 import { setMissionMode as setBackendMissionMode } from "../../services/missionModeService";
@@ -76,7 +76,10 @@ const WIDGET_DROPDOWN_TOP = MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE;
 const WIDGET_DROPDOWN_LEFT = MISSION_PROGRESS_LAYOUT.EDGE;
 
 const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
-  const { missionMode, setMissionMode } = useMission();
+  // Only destructure what AppHeader actually uses — not telemetry.
+  // Note: useRover() still triggers re-renders on every telemetry tick because
+  // it subscribes to the full context. Phase 2 (context split) will fix this.
+  const { missionMode, setMissionMode } = useRover();
   const mpOverlay = useMissionProgressOverlayOptional();
   const showMissionProgressWidget =
     activeTab === "Mission Progress" && mpOverlay != null;
@@ -550,4 +553,7 @@ const styles = StyleSheet.create({
   },
 });
 
+// Memoize AppHeader to prevent unnecessary re-renders from parent.
+// Note: This cannot prevent context-driven re-renders from useRover().
+// Phase 2 (context split) is needed to fully isolate AppHeader from 20Hz telemetry.
 export const AppHeader = React.memo(AppHeaderInner);

@@ -153,18 +153,10 @@ function RoverContextBridge({ children }: { children: ReactNode }): React.ReactE
  * New code should prefer useTelemetry(), useMission(), or useConnection().
  * Must be used within <RoverProvider>
  */
-let warnedUseRover = false;
-
 export function useRover(): RoverContextValue {
   const ctx = useContext(RoverContext);
   if (!ctx) {
     throw new Error('useRover must be used within a RoverProvider');
-  }
-  if (__DEV__ && !warnedUseRover) {
-    warnedUseRover = true;
-    console.warn(
-      '[useRover] Legacy compatibility hook: this re-renders at the telemetry rate. Prefer useTelemetry(), useMission(), or useConnection().',
-    );
   }
   return ctx;
 }

@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../theme/colors';
-import { useConnection } from '../../context/ConnectionContext';
-import { useMission } from '../../context/MissionContext';
+import { useRover } from '../../context/RoverContext';
 
 const TTS_LANGUAGE_STORAGE_KEY = 'tts_language';
 
@@ -20,8 +19,7 @@ const languages = [
 ];
 
 export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ visible, onClose, onTTSStatusChange }) => {
-  const { services } = useConnection();
-  const { ttsLanguage, setTTSLanguage } = useMission();
+  const { services, ttsLanguage, setTTSLanguage } = useRover();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
 

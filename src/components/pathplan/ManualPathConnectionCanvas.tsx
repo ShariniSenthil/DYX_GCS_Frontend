@@ -585,12 +585,6 @@ export const ManualPathConnectionCanvas: React.FC<Props> = ({
     };
   }, [canvasOrigin]);
 
-  useEffect(() => {
-    return () => {
-      cancelIdleTimer();
-    };
-  }, [cancelIdleTimer]);
-
   // Center view on rover ONLY on component mount, not on every position update
   useEffect(() => {
     if (!roverPosition || canvasSize.width === 0) return;

@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
-import { useConnection } from '../../context/ConnectionContext';
+import { useRover } from '../../context/RoverContext';
 import { RoverParam, ParamListResponse, ParamGroupsResponse } from '../../types/params';
 
 interface ParamBrowserModalProps {
@@ -39,7 +39,7 @@ export const ParamBrowserModal: React.FC<ParamBrowserModalProps> = ({
   visible,
   onClose,
 }) => {
-  const { services, connectionState } = useConnection();
+  const { services, connectionState } = useRover();
 
   // UI State
   const [loading, setLoading] = useState(false);

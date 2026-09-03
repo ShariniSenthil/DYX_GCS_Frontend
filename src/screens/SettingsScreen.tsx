@@ -11,8 +11,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { colors } from "../theme/colors";
-import { useTelemetry } from "../context/TelemetryContext";
-import { useConnection } from "../context/ConnectionContext";
+import { useRover } from "../context/RoverContext";
 import { FailsafeModeSelector } from "../components/pathplan/FailsafeModeSelector";
 import { ServoConfigModal } from "../components/settings/ServoConfigModal";
 import { ParamBrowserModal } from "../components/settings/ParamBrowserModal";
@@ -59,9 +58,10 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
     gpsFailsafeMode,
     setGpsFailsafeMode,
     telemetry,
+    services,
+    connectionState,
     onMissionEvent,
-  } = useTelemetry();
-  const { services, connectionState } = useConnection();
+  } = useRover();
   const [showFailsafeSelector, setShowFailsafeSelector] = useState(false);
 
   // TTS State

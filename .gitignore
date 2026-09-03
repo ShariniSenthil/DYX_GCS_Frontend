@@ -75,7 +75,3 @@ test_beacon_listener.py
 /ios
 /android
 env
-
-# Local session dumps (screenshots, UI XML, Metro export, tsc logs)
-.tmp*
-.tmp-*/

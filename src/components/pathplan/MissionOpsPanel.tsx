@@ -5,7 +5,7 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { PathPlanWaypoint } from '../../types/pathplan';
 import { DashConfigDialog } from './DashConfigDialog';
-import { useMission } from '../../context/MissionContext';
+import { useRover } from '../../context/RoverContext';
 import { setMissionMode as setBackendMissionMode } from '../../services/missionModeService';
 
 type Props = {
@@ -60,7 +60,7 @@ const MissionOpsPanel = React.memo(({
     isDraggingActive,
     onClose,
 }: Props) => {
-    const { missionMode, setMissionMode } = useMission();
+    const { missionMode, setMissionMode } = useRover();
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [selectedExportFormat, setSelectedExportFormat] = useState<'qgc' | 'csv' | 'dxf'>('qgc');
     const [showFilenameDialog, setShowFilenameDialog] = useState(false);

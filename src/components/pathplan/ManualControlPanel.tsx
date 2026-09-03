@@ -3,8 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { colors } from '../../theme/colors';
-import { useTelemetry } from '../../context/TelemetryContext';
-import { useConnection } from '../../context/ConnectionContext';
+import { useRover } from '../../context/RoverContext';
 
 interface ManualControlPanelProps {
   onExitManualMode?: () => void;
@@ -13,8 +12,7 @@ interface ManualControlPanelProps {
 export const ManualControlPanel: React.FC<ManualControlPanelProps> = ({
   onExitManualMode,
 }) => {
-  const { telemetry } = useTelemetry();
-  const { connectionState, services, socket } = useConnection();
+  const { telemetry, connectionState, services, socket } = useRover();
   const isConnected = connectionState === 'connected';
 
   const [leftThrottle, setLeftThrottle] = useState(0);
