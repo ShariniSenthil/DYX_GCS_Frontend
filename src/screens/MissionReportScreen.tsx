@@ -103,6 +103,7 @@ import {
   type LoadedPathPoint,
   type MissionRuntimeState,
   type CanonicalMissionReport,
+  type RawGnssSurveySnapshot,
 } from "../services/missionApi";
 
 import {
@@ -113,7 +114,6 @@ import {
 import {
   captureTerminalRppAccuracy,
   isTerminalRppAccuracyStatus,
-  selectMissionReportRemark,
   type TerminalRppAccuracySnapshot,
 } from "../adapters/terminalRppAccuracyFallback";
 
@@ -146,6 +146,10 @@ type WpStatus = {
   lon_achieved?: number; // Actual rover lon when reached
   accuracy_level?: string; // 'excellent' | 'good' | 'fair' | 'poor'
   position_error_cm?: number; // Distance error in cm (was position_error_mm)
+
+  // DYX RAW GNSS WAYPOINT DISPLAY
+  // Frozen display-only physical stop snapshot from backend.
+  survey?: RawGnssSurveySnapshot | null;
 };
 
 /**
@@ -842,10 +846,56 @@ export default function MissionReportScreen({
           runtimeRow,
         );
 
-      const frozenAccuracy =
-        terminalRppAccuracyFallbackMap[
-          waypoint.sn
-        ];
+      // DYX RAW GNSS WAYPOINT DISPLAY
+      //
+      // During a mission, /api/mission/status is polled every 500 ms, so use
+      // the backend-frozen stop snapshot immediately. After completion, the
+      // canonical report's accuracy.survey preserves the same measurement.
+      //
+      // No latitude/longitude math is performed in the frontend.
+      const surveyPointId =
+        `P${String(waypoint.sn).padStart(4, "0")}`;
+
+      const liveSurveyMap =
+        backendMission?.waypoint_survey_snapshots;
+
+      const liveSurveyCandidate =
+        liveSurveyMap &&
+        typeof liveSurveyMap === "object"
+          ? liveSurveyMap[surveyPointId]
+          : undefined;
+
+      const reportSurveyCandidate =
+        canonicalMissionReport?.points
+          ?.find(
+            (point) =>
+              Number(point.sequence) ===
+              waypoint.sn,
+          )
+          ?.accuracy
+          ?.survey;
+
+      const surveySnapshot: RawGnssSurveySnapshot | null =
+        liveSurveyCandidate &&
+        typeof liveSurveyCandidate === "object"
+          ? liveSurveyCandidate
+          : reportSurveyCandidate &&
+              typeof reportSurveyCandidate === "object"
+            ? reportSurveyCandidate
+            : null;
+
+      const surveyRemark =
+        surveySnapshot?.available === true
+          ? "RAW GNSS STOP"
+          : surveySnapshot
+            ? `SURVEY UNAVAILABLE: ${
+                String(
+                  surveySnapshot.reason ?? "UNKNOWN",
+                )
+                  .replace(/_/g, " ")
+                  .toUpperCase()
+              }`
+            : "WAITING FOR RAW GNSS STOP";
 
       if (reconciledRow) {
         next[waypoint.sn] = {
@@ -861,17 +911,13 @@ export default function MissionReportScreen({
           timestamp:
             reconciledRow.timestamp,
 
-          /*
-           * IMPORTANT:
-           * The canonical report remark always has
-           * priority. The frozen RPP telemetry is only
-           * used while report accuracy is unavailable.
-           */
+          // Waypoint table is survey-snapshot display only.
+          // RPP along/cross/overall remain in the separate live monitor.
           remark:
-            selectMissionReportRemark(
-              reconciledRow.remark,
-              frozenAccuracy,
-            ),
+            surveyRemark,
+
+          survey:
+            surveySnapshot,
         };
 
         continue;
@@ -887,9 +933,10 @@ export default function MissionReportScreen({
         status: "pending",
 
         remark:
-          "Along — | "
-          + "Cross — | "
-          + "Overall —",
+          surveyRemark,
+
+        survey:
+          surveySnapshot,
       };
     }
 
@@ -897,8 +944,9 @@ export default function MissionReportScreen({
   }, [
     waypoints,
     canonicalReportProjection,
+    canonicalMissionReport,
+    backendMission?.waypoint_survey_snapshots,
     effectiveStatusMap,
-    terminalRppAccuracyFallbackMap,
   ]);
 
   const effectiveWaitingForManual =

@@ -79,6 +79,43 @@ export interface MissionUploadMetadata {
     string;
 }
 
+// DYX RAW GNSS WAYPOINT DISPLAY
+// Backend-computed, DISPLAY-ONLY physical stop measurement.
+// Frontend must never recompute this from latitude/longitude.
+export interface RawGnssSurveySnapshot {
+  measurement_source?: "RAW_GNSS_SURVEY" | string;
+  truth_frame?: string;
+  available: boolean;
+  reason?: string | null;
+
+  point_id?: string | null;
+  point_index?: number | null;
+
+  target_latitude_deg?: number | null;
+  target_longitude_deg?: number | null;
+
+  stopped_latitude_deg?: number | null;
+  stopped_longitude_deg?: number | null;
+
+  north_error_m?: number | null;
+  east_error_m?: number | null;
+
+  along_track_error_mm?: number | null;
+  cross_track_error_mm?: number | null;
+  radial_error_mm?: number | null;
+
+  fix_type?: number | null;
+  satellites?: number | null;
+  horizontal_accuracy_m?: number | null;
+  sample_count?: number;
+  sample_scatter_m?: number | null;
+
+  tolerance_m?: number | null;
+  within_tolerance?: boolean | null;
+
+  [key: string]: unknown;
+}
+
 export interface MissionRuntimeState {
   state?: string;
   loaded?: boolean;
@@ -135,6 +172,26 @@ arrival_settle_required_sec?: number;
 
   current_point_index?: number;
   next_point_index?: number;
+
+  /**
+   * DISPLAY ONLY.
+   * Frozen CSV-vs-RAW-GNSS snapshots keyed by P0001, P0002, ...
+   * They do not control spray or mission state.
+   */
+  waypoint_survey_snapshots?:
+    Record<string, RawGnssSurveySnapshot>;
+
+  last_waypoint_survey_snapshot?: {
+    point_id?: string | null;
+    point_index?: number | null;
+    mission_run_id?: string | null;
+    event?: string | null;
+    survey?: RawGnssSurveySnapshot | null;
+    received_at?: string | null;
+    [key: string]: unknown;
+  } | null;
+
+  waypoint_survey_run_id?: string | null;
 
   progress_pct?: number;
 
@@ -244,6 +301,12 @@ export interface MissionReportAccuracy {
 
   rpp_outcome?:
     RppTerminalOutcome;
+
+  /**
+   * Independent DISPLAY-ONLY physical stop measurement:
+   * uploaded CSV coordinate vs RAW GPS1 RTK stop.
+   */
+  survey?: RawGnssSurveySnapshot | null;
 
   captured_at:
     string | null;

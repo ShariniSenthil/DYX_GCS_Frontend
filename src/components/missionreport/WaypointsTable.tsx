@@ -6,7 +6,10 @@ import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import type { Waypoint } from "./types";
 import { MissionTableToolbarActions } from "./MissionTableToolbarActions";
 import type { WaypointUiStatus } from "../../types/missionWaypointStatus";
+import type { RawGnssSurveySnapshot } from "../../services/missionApi";
 import { getStatusPresentation } from "../../utils/missionStatusPresentation";
+
+// DYX RAW GNSS WAYPOINT DISPLAY
 
 // ── Pure helper functions (extracted for reuse in memoized rows) ──────────────
 
@@ -42,6 +45,35 @@ function getRemarkText(wpStatus: any): string {
     typeof wpStatus?.remark === "string" ? wpStatus.remark.trim() : "";
 
   return remark || "—";
+}
+
+function finiteSurveyNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : null;
+}
+
+function formatSurveyCoordinate(value: unknown): string {
+  const number = finiteSurveyNumber(value);
+  return number === null ? "—" : number.toFixed(7);
+}
+
+function formatSurveyError(
+  survey: RawGnssSurveySnapshot | null | undefined,
+): string {
+  if (!survey) return "—";
+
+  if (survey.available !== true) {
+    return "UNAVAILABLE";
+  }
+
+  const radialMm = finiteSurveyNumber(
+    survey.radial_error_mm,
+  );
+
+  return radialMm === null
+    ? "—"
+    : `${radialMm.toFixed(1)} mm`;
 }
 
 // ── Memoized row component (recycled by LegendList) ───────────────────────────
@@ -131,6 +163,52 @@ const WaypointRow = React.memo(
         >
           {wp.lon.toFixed(7)}
         </Text>
+
+        {/* Frozen master-antenna RAW GNSS stop snapshot. DISPLAY ONLY. */}
+        <View style={styles.colSurveyStop}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.cell,
+              styles.surveyCoordinateText,
+              isCurrentWaypoint && styles.currentWaypointText,
+              isSkipped && styles.skippedText,
+            ]}
+          >
+            {formatSurveyCoordinate(
+              wpStatus?.survey?.stopped_latitude_deg,
+            )}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.cell,
+              styles.surveyCoordinateText,
+              isCurrentWaypoint && styles.currentWaypointText,
+              isSkipped && styles.skippedText,
+            ]}
+          >
+            {formatSurveyCoordinate(
+              wpStatus?.survey?.stopped_longitude_deg,
+            )}
+          </Text>
+        </View>
+
+        <Text
+          style={[
+            styles.cell,
+            styles.colSurveyError,
+            wpStatus?.survey?.available === true &&
+              styles.surveyErrorLive,
+            isCurrentWaypoint && styles.currentWaypointText,
+            isSkipped && styles.skippedText,
+          ]}
+        >
+          {formatSurveyError(
+            wpStatus?.survey,
+          )}
+        </Text>
+
         <View style={[styles.colStatus, isSkipped && styles.skippedStatusCell]}>
           <Text
             style={[
@@ -202,6 +280,9 @@ interface Props {
       lon_achieved?: number;
       accuracy_level?: string;
       position_error_cm?: number;
+
+      // Frozen CSV-vs-RAW-GNSS waypoint-table snapshot.
+      survey?: RawGnssSurveySnapshot | null;
     }
   >;
   missionMode: string | null;
@@ -212,7 +293,7 @@ interface Props {
   embedded?: boolean;
 }
 
-const ROW_HEIGHT = 58;
+const ROW_HEIGHT = 64;
 
 export const WaypointsTable = React.memo<Props>(
   ({
@@ -335,6 +416,24 @@ export const WaypointsTable = React.memo<Props>(
                 ]}
               >
                 LONGITUDE
+              </Text>
+              <Text
+                style={[
+                  styles.headerCell,
+                  styles.colSurveyStop,
+                  embedded && styles.headerCellEmbedded,
+                ]}
+              >
+                RAW GNSS STOP
+              </Text>
+              <Text
+                style={[
+                  styles.headerCell,
+                  styles.colSurveyError,
+                  embedded && styles.headerCellEmbedded,
+                ]}
+              >
+                ERROR
               </Text>
               <Text
                 style={[
@@ -525,11 +624,31 @@ const styles = StyleSheet.create({
   colBlock: { flex: 0.85 },
   colRow: { flex: 0.75 },
   colPile: { flex: 0.75 },
-  colLat: { flex: 1.35 },
-  colLon: { flex: 1.35 },
-  colStatus: { flex: 1.15 },
-  colTime: { flex: 1.2 },
-  colRemark: { flex: 3.0 },
+  colLat: { flex: 1.25 },
+  colLon: { flex: 1.25 },
+
+  // Existing LAT/LON are CSV target. This is the frozen raw-GNSS stop.
+  colSurveyStop: {
+    flex: 1.45,
+    justifyContent: "center",
+  },
+  surveyCoordinateText: {
+    fontSize: 10,
+    lineHeight: 14,
+  },
+
+  colSurveyError: {
+    flex: 0.9,
+    textAlign: "center",
+  },
+  surveyErrorLive: {
+    color: PATH_PLAN_GLASS.cyan,
+    fontWeight: "700",
+  },
+
+  colStatus: { flex: 1.05 },
+  colTime: { flex: 1.05 },
+  colRemark: { flex: 2.1 },
   remarkCell: {
     flexDirection: "column",
     justifyContent: "center",
