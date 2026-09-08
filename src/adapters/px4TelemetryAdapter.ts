@@ -283,11 +283,11 @@ export function toRoverTelemetry(
 
   const hrms = firstOptionalNum(
     flat.hrms,
-    gps?.horizontal_accuracy_m,
+    gps?.raw_hrms_m,
   );
   const vrms = firstOptionalNum(
     flat.vrms,
-    gps?.vertical_accuracy_m,
+    gps?.raw_vrms_m,
   );
 
   const crossTrackErrorMm = firstOptionalNum(

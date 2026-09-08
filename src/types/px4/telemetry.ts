@@ -31,6 +31,17 @@ export interface Px4GpsTelemetry {
   hdop?: number | null;
   vdop?: number | null;
   rtk_fixed?: boolean;
+  raw_hrms_source?: string | null;
+  raw_hrms_m?: number | null;
+  raw_hrms_mm?: number | null;
+  raw_vrms_m?: number | null;
+  raw_vrms_mm?: number | null;
+  raw_covariance_type?: number | null;
+  px4_hrms_source?: string | null;
+  px4_hrms_m?: number | null;
+  px4_hrms_mm?: number | null;
+  px4_vrms_m?: number | null;
+  px4_vrms_mm?: number | null;
 }
 
 export interface Px4BatteryTelemetry {
