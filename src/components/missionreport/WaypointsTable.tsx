@@ -10,6 +10,7 @@ import type { RawGnssSurveySnapshot } from "../../services/missionApi";
 import { getStatusPresentation } from "../../utils/missionStatusPresentation";
 
 // DYX RAW GNSS WAYPOINT DISPLAY
+// DYX KEEP RPP ADD RAW LIVE
 
 // ── Pure helper functions (extracted for reuse in memoized rows) ──────────────
 
@@ -53,12 +54,7 @@ function finiteSurveyNumber(value: unknown): number | null {
     : null;
 }
 
-function formatSurveyCoordinate(value: unknown): string {
-  const number = finiteSurveyNumber(value);
-  return number === null ? "—" : number.toFixed(7);
-}
-
-function formatSurveyError(
+function formatRawGnssOverall(
   survey: RawGnssSurveySnapshot | null | undefined,
 ): string {
   if (!survey) return "—";
@@ -164,47 +160,18 @@ const WaypointRow = React.memo(
           {wp.lon.toFixed(7)}
         </Text>
 
-        {/* Frozen master-antenna RAW GNSS stop snapshot. DISPLAY ONLY. */}
-        <View style={styles.colSurveyStop}>
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.cell,
-              styles.surveyCoordinateText,
-              isCurrentWaypoint && styles.currentWaypointText,
-              isSkipped && styles.skippedText,
-            ]}
-          >
-            {formatSurveyCoordinate(
-              wpStatus?.survey?.stopped_latitude_deg,
-            )}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.cell,
-              styles.surveyCoordinateText,
-              isCurrentWaypoint && styles.currentWaypointText,
-              isSkipped && styles.skippedText,
-            ]}
-          >
-            {formatSurveyCoordinate(
-              wpStatus?.survey?.stopped_longitude_deg,
-            )}
-          </Text>
-        </View>
-
+        {/* DISPLAY ONLY: CSV target vs frozen RAW GNSS stop overall error. */}
         <Text
           style={[
             styles.cell,
-            styles.colSurveyError,
+            styles.colRawGnss,
             wpStatus?.survey?.available === true &&
-              styles.surveyErrorLive,
+              styles.rawGnssValue,
             isCurrentWaypoint && styles.currentWaypointText,
             isSkipped && styles.skippedText,
           ]}
         >
-          {formatSurveyError(
+          {formatRawGnssOverall(
             wpStatus?.survey,
           )}
         </Text>
@@ -293,7 +260,7 @@ interface Props {
   embedded?: boolean;
 }
 
-const ROW_HEIGHT = 64;
+const ROW_HEIGHT = 58;
 
 export const WaypointsTable = React.memo<Props>(
   ({
@@ -420,20 +387,11 @@ export const WaypointsTable = React.memo<Props>(
               <Text
                 style={[
                   styles.headerCell,
-                  styles.colSurveyStop,
+                  styles.colRawGnss,
                   embedded && styles.headerCellEmbedded,
                 ]}
               >
-                RAW GNSS STOP
-              </Text>
-              <Text
-                style={[
-                  styles.headerCell,
-                  styles.colSurveyError,
-                  embedded && styles.headerCellEmbedded,
-                ]}
-              >
-                ERROR
+                RAW GNSS
               </Text>
               <Text
                 style={[
@@ -624,31 +582,23 @@ const styles = StyleSheet.create({
   colBlock: { flex: 0.85 },
   colRow: { flex: 0.75 },
   colPile: { flex: 0.75 },
-  colLat: { flex: 1.25 },
-  colLon: { flex: 1.25 },
+  colLat: { flex: 1.35 },
+  colLon: { flex: 1.35 },
 
-  // Existing LAT/LON are CSV target. This is the frozen raw-GNSS stop.
-  colSurveyStop: {
-    flex: 1.45,
-    justifyContent: "center",
-  },
-  surveyCoordinateText: {
-    fontSize: 10,
-    lineHeight: 14,
-  },
-
-  colSurveyError: {
-    flex: 0.9,
+  // One compact independent measurement column only.
+  colRawGnss: {
+    flex: 0.95,
     textAlign: "center",
   },
-  surveyErrorLive: {
+  rawGnssValue: {
     color: PATH_PLAN_GLASS.cyan,
     fontWeight: "700",
   },
 
-  colStatus: { flex: 1.05 },
-  colTime: { flex: 1.05 },
-  colRemark: { flex: 2.1 },
+  // Restore the previous RPP table proportions.
+  colStatus: { flex: 1.15 },
+  colTime: { flex: 1.2 },
+  colRemark: { flex: 3.0 },
   remarkCell: {
     flexDirection: "column",
     justifyContent: "center",

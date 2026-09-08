@@ -114,6 +114,7 @@ import {
 import {
   captureTerminalRppAccuracy,
   isTerminalRppAccuracyStatus,
+  selectMissionReportRemark,
   type TerminalRppAccuracySnapshot,
 } from "../adapters/terminalRppAccuracyFallback";
 
@@ -846,15 +847,24 @@ export default function MissionReportScreen({
           runtimeRow,
         );
 
-      // DYX RAW GNSS WAYPOINT DISPLAY
+      // DYX KEEP RPP ADD RAW LIVE
       //
-      // During a mission, /api/mission/status is polled every 500 ms, so use
-      // the backend-frozen stop snapshot immediately. After completion, the
-      // canonical report's accuracy.survey preserves the same measurement.
+      // Keep the original table contract:
+      //   REMARK = RPP Along | Cross | Overall
+      // Add only one independent column:
+      //   RAW GNSS = CSV-vs-raw-GNSS radial/overall error
       //
-      // No latitude/longitude math is performed in the frontend.
-      const surveyPointId =
+      // No frontend accuracy calculation is performed.
+      const pointId =
         `P${String(waypoint.sn).padStart(4, "0")}`;
+
+      const canonicalPoint =
+        canonicalMissionReport?.points
+          ?.find(
+            (point) =>
+              Number(point.sequence) ===
+              waypoint.sn,
+          );
 
       const liveSurveyMap =
         backendMission?.waypoint_survey_snapshots;
@@ -862,16 +872,11 @@ export default function MissionReportScreen({
       const liveSurveyCandidate =
         liveSurveyMap &&
         typeof liveSurveyMap === "object"
-          ? liveSurveyMap[surveyPointId]
+          ? liveSurveyMap[pointId]
           : undefined;
 
       const reportSurveyCandidate =
-        canonicalMissionReport?.points
-          ?.find(
-            (point) =>
-              Number(point.sequence) ===
-              waypoint.sn,
-          )
+        canonicalPoint
           ?.accuracy
           ?.survey;
 
@@ -884,38 +889,174 @@ export default function MissionReportScreen({
             ? reportSurveyCandidate
             : null;
 
-      const surveyRemark =
-        surveySnapshot?.available === true
-          ? "RAW GNSS STOP"
-          : surveySnapshot
-            ? `SURVEY UNAVAILABLE: ${
-                String(
-                  surveySnapshot.reason ?? "UNKNOWN",
-                )
-                  .replace(/_/g, " ")
-                  .toUpperCase()
-              }`
-            : "WAITING FOR RAW GNSS STOP";
+      /*
+       * Fast final-point RPP fallback.
+       *
+       * rover_backend puts the exact terminal point result into
+       * mission.point_results immediately when the point event arrives.
+       * Use that stored RPP result while /api/mission/report catches up.
+       * This is copy/format only; no accuracy is reconstructed.
+       */
+      const runtimePointResults =
+        backendMission?.point_results;
 
-      if (reconciledRow) {
+      const runtimePointResult =
+        runtimePointResults &&
+        typeof runtimePointResults === "object"
+          ? (
+              runtimePointResults as Record<string, unknown>
+            )[pointId]
+          : undefined;
+
+      const runtimePointAccuracy =
+        runtimePointResult &&
+        typeof runtimePointResult === "object"
+          ? (
+              runtimePointResult as {
+                accuracy?: unknown;
+                received_at?: unknown;
+              }
+            ).accuracy
+          : undefined;
+
+      const runtimeAccuracy =
+        runtimePointAccuracy &&
+        typeof runtimePointAccuracy === "object"
+          ? runtimePointAccuracy as Record<string, unknown>
+          : null;
+
+      // DYX FINAL POINT RUNTIME STATUS
+      //
+      // Use backend mission.point_results to promote the final table row
+      // immediately while /api/mission/report is still catching up.
+      // Only true final outcomes are mapped here.
+      const runtimePointOutcome =
+        runtimePointResult &&
+        typeof runtimePointResult === "object"
+          ? String(
+              (
+                runtimePointResult as {
+                  point_outcome?: unknown;
+                }
+              ).point_outcome ?? "",
+            )
+              .trim()
+              .toUpperCase()
+          : "";
+
+      const runtimeTerminalStatus:
+        "completed" | "failed" | "skipped" | null =
+        runtimePointOutcome === "COMPLETED"
+          ? "completed"
+          : runtimePointOutcome === "FAILED"
+            ? "failed"
+            : runtimePointOutcome === "SKIPPED"
+              ? "skipped"
+              : null;
+
+      const runtimeReceivedAt =
+        runtimePointResult &&
+        typeof runtimePointResult === "object" &&
+        typeof (
+          runtimePointResult as {
+            received_at?: unknown;
+          }
+        ).received_at === "string"
+          ? (
+              runtimePointResult as {
+                received_at: string;
+              }
+            ).received_at
+          : undefined;
+
+      const runtimeTerminalRow =
+        runtimeTerminalStatus !== null
+          ? {
+              reached:
+                runtimeTerminalStatus === "completed" ||
+                runtimeTerminalStatus === "failed",
+
+              marked:
+                runtimeTerminalStatus === "completed",
+
+              status:
+                runtimeTerminalStatus,
+
+              timestamp:
+                runtimeReceivedAt,
+            }
+          : undefined;
+
+      const displayRow =
+        runtimeTerminalRow
+          ? reconcileMissionReportRow(
+              reconciledRow ?? undefined,
+              runtimeTerminalRow,
+            )
+          : reconciledRow;
+
+      const runtimeAlong =
+        typeof runtimeAccuracy?.along_track_error_mm === "number" &&
+        Number.isFinite(runtimeAccuracy.along_track_error_mm)
+          ? runtimeAccuracy.along_track_error_mm
+          : null;
+
+      const runtimeCross =
+        typeof runtimeAccuracy?.cross_track_error_mm === "number" &&
+        Number.isFinite(runtimeAccuracy.cross_track_error_mm)
+          ? runtimeAccuracy.cross_track_error_mm
+          : null;
+
+      const runtimeOverall =
+        typeof runtimeAccuracy?.overall_accuracy_mm === "number" &&
+        Number.isFinite(runtimeAccuracy.overall_accuracy_mm)
+          ? runtimeAccuracy.overall_accuracy_mm
+          : null;
+
+      const runtimeRppFallback:
+        TerminalRppAccuracySnapshot | undefined =
+        runtimeAccuracy?.measurement_source ===
+          "RPP_TERMINAL_RESULT" &&
+        runtimeAccuracy.available === true &&
+        runtimeAlong !== null &&
+        runtimeCross !== null &&
+        runtimeOverall !== null
+          ? {
+              pointIndex: waypoint.sn - 1,
+              alongTrackErrorMm: runtimeAlong,
+              crossTrackErrorMm: runtimeCross,
+              overallAccuracyMm: runtimeOverall,
+              capturedAt: new Date().toISOString(),
+            }
+          : undefined;
+
+      const rppFallback =
+        terminalRppAccuracyFallbackMap[waypoint.sn]
+        ?? runtimeRppFallback;
+
+      if (displayRow) {
         next[waypoint.sn] = {
           reached:
-            reconciledRow.reached,
+            displayRow.reached,
 
           marked:
-            reconciledRow.marked,
+            displayRow.marked,
 
           status:
-            reconciledRow.status,
+            displayRow.status,
 
           timestamp:
-            reconciledRow.timestamp,
+            displayRow.timestamp,
 
-          // Waypoint table is survey-snapshot display only.
-          // RPP along/cross/overall remain in the separate live monitor.
+          // Restore original RPP table output exactly:
+          // Along ... | Cross ... | Overall ...
           remark:
-            surveyRemark,
+            selectMissionReportRemark(
+              displayRow.remark,
+              rppFallback,
+            ),
 
+          // Independent RAW GNSS value for the new column only.
           survey:
             surveySnapshot,
         };
@@ -924,7 +1065,8 @@ export default function MissionReportScreen({
       }
 
       /*
-       * No canonical row and no terminal runtime fallback yet.
+       * No canonical row yet. A terminal RPP fallback may already exist,
+       * especially for the final point while the report is checkpointing.
        */
       next[waypoint.sn] = {
         reached: false,
@@ -933,7 +1075,10 @@ export default function MissionReportScreen({
         status: "pending",
 
         remark:
-          surveyRemark,
+          selectMissionReportRemark(
+            null,
+            rppFallback,
+          ),
 
         survey:
           surveySnapshot,
@@ -946,7 +1091,9 @@ export default function MissionReportScreen({
     canonicalReportProjection,
     canonicalMissionReport,
     backendMission?.waypoint_survey_snapshots,
+    backendMission?.point_results,
     effectiveStatusMap,
+    terminalRppAccuracyFallbackMap,
   ]);
 
   const effectiveWaitingForManual =
@@ -1273,12 +1420,12 @@ export default function MissionReportScreen({
     /*
      * Continue synchronizing.
      *
-     * 500 ms is fast enough for operator controls without creating
-     * an unnecessary high request rate.
+     * Fast operator display refresh.
+     * Backend already owns the data; this only shortens UI observation latency.
      */
     const timer = setInterval(() => {
       void pollMission();
-    }, 500);
+    }, 250);
 
     return () => {
       cancelled = true;
@@ -1324,12 +1471,12 @@ export default function MissionReportScreen({
     void pollReport();
 
     /*
-     * Mission Report does not need
-     * high-frequency polling.
+     * Keep terminal RPP/report rows close to live runtime state.
+     * The in-flight guard prevents overlapping requests.
      */
     const timer = setInterval(() => {
       void pollReport();
-    }, 1000);
+    }, 500);
 
     return () => {
       cancelled = true;
