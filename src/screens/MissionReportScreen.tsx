@@ -866,29 +866,6 @@ export default function MissionReportScreen({
               waypoint.sn,
           );
 
-      const liveSurveyMap =
-        backendMission?.waypoint_survey_snapshots;
-
-      const liveSurveyCandidate =
-        liveSurveyMap &&
-        typeof liveSurveyMap === "object"
-          ? liveSurveyMap[pointId]
-          : undefined;
-
-      const reportSurveyCandidate =
-        canonicalPoint
-          ?.accuracy
-          ?.survey;
-
-      const surveySnapshot: RawGnssSurveySnapshot | null =
-        liveSurveyCandidate &&
-        typeof liveSurveyCandidate === "object"
-          ? liveSurveyCandidate
-          : reportSurveyCandidate &&
-              typeof reportSurveyCandidate === "object"
-            ? reportSurveyCandidate
-            : null;
-
       /*
        * Fast final-point RPP fallback.
        *
@@ -924,6 +901,30 @@ export default function MissionReportScreen({
         typeof runtimePointAccuracy === "object"
           ? runtimePointAccuracy as Record<string, unknown>
           : null;
+
+      // DYX RAW GNSS SAME RPP POINT
+      //
+      // RPP and RAW GNSS now come from the SAME point_results[Pxxxx]
+      // accuracy object. This prevents RAW GNSS from using a separately
+      // indexed live snapshot while RPP is already tied to the exact point.
+      //
+      // No frontend geometry is calculated here.
+      const runtimeSurveyCandidate =
+        runtimeAccuracy?.survey;
+
+      const reportSurveyCandidate =
+        canonicalPoint
+          ?.accuracy
+          ?.survey;
+
+      const surveySnapshot: RawGnssSurveySnapshot | null =
+        runtimeSurveyCandidate &&
+        typeof runtimeSurveyCandidate === "object"
+          ? runtimeSurveyCandidate as RawGnssSurveySnapshot
+          : reportSurveyCandidate &&
+              typeof reportSurveyCandidate === "object"
+            ? reportSurveyCandidate
+            : null;
 
       // DYX FINAL POINT RUNTIME STATUS
       //
@@ -1090,7 +1091,6 @@ export default function MissionReportScreen({
     waypoints,
     canonicalReportProjection,
     canonicalMissionReport,
-    backendMission?.waypoint_survey_snapshots,
     backendMission?.point_results,
     effectiveStatusMap,
     terminalRppAccuracyFallbackMap,
