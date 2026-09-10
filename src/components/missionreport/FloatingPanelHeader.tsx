@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
 }
 
 export const FloatingPanelHeader: React.FC<Props> = ({ title, onClose, dragGesture }) => (
-  <GestureDetector gesture={dragGesture}>
+  <OptionalGestureDetector gesture={dragGesture}>
     <View style={styles.header}>
       <View style={styles.left}>
         <MaterialCommunityIcons name="dots-grid" size={16} color="#475569" />
@@ -23,7 +23,7 @@ export const FloatingPanelHeader: React.FC<Props> = ({ title, onClose, dragGestu
         </TouchableOpacity>
       )}
     </View>
-  </GestureDetector>
+  </OptionalGestureDetector>
 );
 
 const styles = StyleSheet.create({

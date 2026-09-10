@@ -46,7 +46,7 @@ export const RtkProfileList: React.FC<Props> = ({
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-        {profiles.length === 0 ? (
+        {!Array.isArray(profiles) || profiles.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No backend RTK profiles</Text>
             <Text style={styles.emptyBody}>

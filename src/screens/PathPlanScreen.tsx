@@ -9,7 +9,6 @@ import React, {
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Alert,
   Modal,
@@ -19,8 +18,13 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LegendList } from "@legendapp/list";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 import { DxfMapEntity, PathPlanWaypoint } from "../types/pathplan";
+import { asFiniteNumber, formatCoord } from "../utils/formatCoord";
+import { useTelemetry } from "../context/TelemetryContext";
+import { useMission } from "../context/MissionContext";
+import { useConnection } from "../context/ConnectionContext";
 import { useRover } from "../context/RoverContext";
 import { PathSequenceSidebar } from "../components/pathplan/PathSequenceSidebar";
 import MissionOpsPanel from "../components/pathplan/MissionOpsPanel";
@@ -117,7 +121,7 @@ const PreviewRow = memo(({ item }: { item: PathPlanWaypoint }) => (
         fontSize: 10,
       }}
     >
-      {item.lat.toFixed(6)}
+      {formatCoord(item.lat, 6)}
     </Text>
     <Text
       style={{
@@ -127,19 +131,107 @@ const PreviewRow = memo(({ item }: { item: PathPlanWaypoint }) => (
         fontSize: 10,
       }}
     >
-      {item.lon.toFixed(6)}
+      {formatCoord(item.lon, 6)}
     </Text>
     <Text style={{ flex: 0.8, color: colors.text, fontSize: 10 }}>
-      {item.alt?.toFixed(1) || "0.0"}
+      {formatCoord(item.alt, 1)}
     </Text>
     <Text style={{ flex: 0.8, color: colors.text, fontSize: 10 }}>
-      {(item.distance || 0).toFixed(0)}
+      {formatCoord(item.distance || 0, 0)}
     </Text>
     <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 9 }}>
       {item.block || "—"}/{item.row || "—"}
     </Text>
   </View>
 ));
+
+const BottomWaypointRow = memo(
+  ({
+    wp,
+    index,
+    onEdit,
+    onDelete,
+  }: {
+    wp: PathPlanWaypoint;
+    index: number;
+    onEdit: (wp: PathPlanWaypoint) => void;
+    onDelete: (id: number) => void;
+  }) => {
+    let badgeColor = "#EF4444";
+    if (index === 0) badgeColor = "#10B981";
+    else if (index === 1 || index === 2) badgeColor = "#F59E0B";
+
+    const distanceText =
+      index === 0 ? "—" : formatCoord(wp.distance || 0, 2);
+
+    return (
+      <View style={styles.bottomTableRow}>
+        <View style={{ width: 50 }}>
+          <View style={[styles.seqBadge, { backgroundColor: badgeColor }]}>
+            <Text style={styles.seqBadgeText}>{index + 1}</Text>
+          </View>
+        </View>
+        <View
+          style={{
+            width: 100,
+            flexDirection: "row",
+            alignItems: "center",
+          }}
+        >
+          <View style={styles.typeIndicatorDot} />
+          <Text style={styles.typeLabel}>Point</Text>
+        </View>
+        <Text
+          style={[
+            styles.rowCellText,
+            { flex: 1.5, fontFamily: "monospace", fontSize: 11 },
+          ]}
+        >
+          {formatCoord(wp.lat, 8)}
+        </Text>
+        <Text
+          style={[
+            styles.rowCellText,
+            { flex: 1.5, fontFamily: "monospace", fontSize: 11 },
+          ]}
+        >
+          {formatCoord(wp.lon, 8)}
+        </Text>
+        <Text style={[styles.rowCellText, { width: 120, fontSize: 11 }]}>
+          {formatCoord(wp.alt || 50.0, 2)}
+        </Text>
+        <Text style={[styles.rowCellText, { width: 120, fontSize: 11 }]}>
+          {distanceText}
+        </Text>
+        <View
+          style={{
+            width: 100,
+            flexDirection: "row",
+            justifyContent: "center",
+            gap: 16,
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => onEdit(wp)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="pencil" size={16} color="#3B82F6" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onDelete(wp.id)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons
+              name="trash-can"
+              size={16}
+              color="#EF4444"
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  },
+);
 
 // ─── Waypoints table header — also doubles as the DraggableCard drag handle ──
 const BottomTableHeader = memo(
@@ -159,8 +251,8 @@ const BottomTableHeader = memo(
     onClose?: () => void;
     dragGesture?: any;
     isDraggingActive?: boolean;
-  }) => (
-    <GestureDetector gesture={dragGesture}>
+  }) => {
+    const header = (
       <View style={styles.bottomTableHeaderWrapper}>
         <TouchableOpacity
           style={styles.bottomTableHeader}
@@ -183,7 +275,7 @@ const BottomTableHeader = memo(
           <View style={styles.bottomHeaderRight}>
             <Text style={styles.bottomHeaderDistanceLabel}>TOTAL DISTANCE</Text>
             <Text style={styles.bottomHeaderDistanceValue}>
-              {totalDistance.toFixed(2)} m
+              {formatCoord(totalDistance, 2)} m
             </Text>
             <MaterialCommunityIcons
               name={isExpanded ? "chevron-down" : "chevron-up"}
@@ -207,8 +299,14 @@ const BottomTableHeader = memo(
           </View>
         </TouchableOpacity>
       </View>
-    </GestureDetector>
-  ),
+    );
+
+    if (!dragGesture) {
+      return header;
+    }
+
+    return <GestureDetector gesture={dragGesture}>{header}</GestureDetector>;
+  },
 );
 
 // Toggle debug logging for this screen
@@ -273,6 +371,7 @@ interface PathPlanScreenProps {
 
 export default function PathPlanScreen({
   isVisible = true,
+  embedMap = false,
   isDrawingToolsVisible: propIsDrawingToolsVisible,
   setIsDrawingToolsVisible: propSetIsDrawingToolsVisible,
   isMissionOpsVisible: propIsMissionOpsVisible,
@@ -434,9 +533,9 @@ export default function PathPlanScreen({
     () =>
       (missionWaypoints as any[]).map((wp, idx) => ({
         id: wp.sn ?? wp.id ?? idx + 1,
-        lat: wp.lat,
-        lon: wp.lng ?? wp.lon,
-        alt: wp.alt ?? 0,
+        lat: asFiniteNumber(wp.lat) ?? Number.NaN,
+        lon: asFiniteNumber(wp.lng ?? wp.lon) ?? Number.NaN,
+        alt: asFiniteNumber(wp.alt) ?? 0,
         row: wp.row ?? "",
         block: wp.block ?? "",
         pile: wp.pile ?? String(idx + 1),
@@ -3135,139 +3234,33 @@ export default function PathPlanScreen({
               </Text>
             </View>
 
-            {/* Rows List */}
-            <ScrollView
-              style={styles.bottomTableRowsScroll}
-              contentContainerStyle={{ paddingBottom: 8 }}
-            >
-              {waypoints.length === 0 ? (
-                <View style={styles.emptyTableState}>
-                  <Text style={styles.emptyTableText}>
-                    No points plotted. Use drawing tools on the map to add
-                    points.
-                  </Text>
-                </View>
-              ) : (
-                waypoints.map((wp, index) => {
-                  let badgeColor = "#EF4444"; // Red
-                  if (index === 0)
-                    badgeColor = "#10B981"; // Green
-                  else if (index === 1 || index === 2) badgeColor = "#F59E0B"; // Orange
-
-                  const distanceText =
-                    index === 0
-                      ? "—"
-                      : wp.distance
-                        ? wp.distance.toFixed(2)
-                        : "0.00";
-
-                  return (
-                    <View
-                      key={`wp-row-${wp.id}-${index}`}
-                      style={styles.bottomTableRow}
-                    >
-                      {/* SEQ badge */}
-                      <View style={{ width: 50 }}>
-                        <View
-                          style={[
-                            styles.seqBadge,
-                            { backgroundColor: badgeColor },
-                          ]}
-                        >
-                          <Text style={styles.seqBadgeText}>{index + 1}</Text>
-                        </View>
-                      </View>
-
-                      {/* TYPE */}
-                      <View
-                        style={{
-                          width: 100,
-                          flexDirection: "row",
-                          alignItems: "center",
-                        }}
-                      >
-                        <View style={styles.typeIndicatorDot} />
-                        <Text style={styles.typeLabel}>Point</Text>
-                      </View>
-
-                      {/* LATITUDE */}
-                      <Text
-                        style={[
-                          styles.rowCellText,
-                          { flex: 1.5, fontFamily: "monospace", fontSize: 11 },
-                        ]}
-                      >
-                        {wp.lat.toFixed(8)}
-                      </Text>
-
-                      {/* LONGITUDE */}
-                      <Text
-                        style={[
-                          styles.rowCellText,
-                          { flex: 1.5, fontFamily: "monospace", fontSize: 11 },
-                        ]}
-                      >
-                        {wp.lon.toFixed(8)}
-                      </Text>
-
-                      {/* ALTITUDE */}
-                      <Text
-                        style={[
-                          styles.rowCellText,
-                          { width: 120, fontSize: 11 },
-                        ]}
-                      >
-                        {(wp.alt || 50.0).toFixed(2)}
-                      </Text>
-
-                      {/* DISTANCE */}
-                      <Text
-                        style={[
-                          styles.rowCellText,
-                          { width: 120, fontSize: 11 },
-                        ]}
-                      >
-                        {distanceText}
-                      </Text>
-
-                      {/* ACTIONS */}
-                      <View
-                        style={{
-                          width: 100,
-                          flexDirection: "row",
-                          justifyContent: "center",
-                          gap: 16,
-                        }}
-                      >
-                        <TouchableOpacity
-                          onPress={() => {
-                            setEditingWaypoint(wp);
-                            setShowEditDialog(true);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialCommunityIcons
-                            name="pencil"
-                            size={16}
-                            color="#3B82F6"
-                          />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => handleDeleteWaypoint(wp.id)}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialCommunityIcons
-                            name="trash-can"
-                            size={16}
-                            color="#EF4444"
-                          />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </ScrollView>
+            {waypoints.length === 0 ? (
+              <View style={styles.emptyTableState}>
+                <Text style={styles.emptyTableText}>
+                  No points plotted. Use drawing tools on the map to add
+                  points.
+                </Text>
+              </View>
+            ) : (
+              <LegendList
+                data={waypoints}
+                renderItem={({ item, index }) => (
+                  <BottomWaypointRow
+                    wp={item}
+                    index={index}
+                    onEdit={(next) => {
+                      setEditingWaypoint(next);
+                      setShowEditDialog(true);
+                    }}
+                    onDelete={handleDeleteWaypoint}
+                  />
+                )}
+                keyExtractor={(item, index) => `wp-row-${item.id}-${index}`}
+                recycleItems
+                estimatedItemSize={48}
+                style={styles.bottomTableRowsScroll}
+              />
+            )}
           </View>
         )}
       </DraggableCard>

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import type { Socket } from 'socket.io-client';
 
-import { emit as socketEmit, on as socketOn, off as socketOff } from '../services/socketClient';
+
 import { PX4_SOCKET_EVENTS } from '../config/px4Endpoints';
 import { JOYSTICK_V2_ENABLED } from '../config/featureFlags';
 import type {
@@ -341,7 +341,7 @@ export function useVirtualJoystick(
 
       if (result.emitted) {
         sequenceRef.current = result.sequence;
-        socketEmit(PX4_SOCKET_EVENTS.JOYSTICK_COMMAND, result.payload);
+        sock.emit(PX4_SOCKET_EVENTS.JOYSTICK_COMMAND, result.payload);
         if (result.payload.deadman && stateRef.current === 'HELD') {
           setFrontendState('ACTIVE');
         } else if (!result.payload.deadman && stateRef.current === 'ACTIVE') {
@@ -411,7 +411,7 @@ export function useVirtualJoystick(
     const sock = socketRef.current;
     if (!sock?.connected) return false;
 
-    socketEmit(PX4_SOCKET_EVENTS.JOYSTICK_RELEASE, {
+    sock.emit(PX4_SOCKET_EVENTS.JOYSTICK_RELEASE, {
       auth: authTokenRef.current,
       session_id: sessionIdRef.current,
       lease_id: lease,
@@ -662,7 +662,7 @@ export function useVirtualJoystick(
       onErrorMessage?.('Joystick error', timeoutError.message);
     }, ACQUIRE_TIMEOUT_MS);
 
-    socketEmit(PX4_SOCKET_EVENTS.JOYSTICK_ACQUIRE, {
+    sock.emit(PX4_SOCKET_EVENTS.JOYSTICK_ACQUIRE, {
       auth: authTokenRef.current,
       session_id: sessionIdRef.current,
       client_monotonic_ms: clientMonotonicMs(),
@@ -816,16 +816,16 @@ export function useVirtualJoystick(
     const onSocketErrorEvent = (payload: unknown) => onSocketError(payload);
 
     const events = PX4_SOCKET_EVENTS;
-    socketOn(events.JOYSTICK_ACQUIRED, onAcquiredEvent, 'useVJoy-acquired');
-    socketOn(events.JOYSTICK_ERROR, onErrorEvent, 'useVJoy-error');
-    socketOn(events.JOYSTICK_RELEASED, onReleasedEvent, 'useVJoy-released');
+    socket.on(events.JOYSTICK_ACQUIRED, onAcquiredEvent);
+    socket.on(events.JOYSTICK_ERROR, onErrorEvent);
+    socket.on(events.JOYSTICK_RELEASED, onReleasedEvent);
     socket.on('disconnect', onDisconnect);
     socket.on('connect_error', onSocketErrorEvent);
 
     return () => {
-      socketOff(events.JOYSTICK_ACQUIRED, 'useVJoy-acquired');
-      socketOff(events.JOYSTICK_ERROR, 'useVJoy-error');
-      socketOff(events.JOYSTICK_RELEASED, 'useVJoy-released');
+      socket.off(events.JOYSTICK_ACQUIRED, onAcquiredEvent);
+      socket.off(events.JOYSTICK_ERROR, onErrorEvent);
+      socket.off(events.JOYSTICK_RELEASED, onReleasedEvent);
       socket.off('disconnect', onDisconnect);
       socket.off('connect_error', onSocketErrorEvent);
     };
@@ -847,7 +847,7 @@ export function useVirtualJoystick(
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
+      if (nextAppState === 'background') {
         handleBackground();
       } else if (nextAppState === 'active') {
         handleForeground();

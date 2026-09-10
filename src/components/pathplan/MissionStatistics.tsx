@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
@@ -74,7 +74,7 @@ export const MissionStatistics: React.FC<Props> = ({ waypoints, roverPosition, d
     return (
         <View style={styles.container}>
             {/* Header — also the drag handle for the floating card */}
-            <GestureDetector gesture={dragGesture}>
+            <OptionalGestureDetector gesture={dragGesture}>
                 <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
                     <View style={styles.headerLeft}>
                         <View style={styles.headerIconWrap}>
@@ -96,7 +96,7 @@ export const MissionStatistics: React.FC<Props> = ({ waypoints, roverPosition, d
                         )}
                     </View>
                 </View>
-            </GestureDetector>
+            </OptionalGestureDetector>
 
             {/* Mission Ready Circular Progress Gauge */}
             <View style={styles.gaugeCard}>

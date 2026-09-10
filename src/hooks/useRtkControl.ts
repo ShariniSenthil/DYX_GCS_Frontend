@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   toRtkControlView,
+  unwrapRtkStatus,
   type RtkControlViewModel,
 } from "../adapters/rtkControlAdapter";
 import {
@@ -203,11 +204,17 @@ export function useRtkControl(
       if (!applyIfCurrent(generation) || requestId !== latestProfilesRequestRef.current) {
         return;
       }
-      setProfiles(result.profiles);
+      const nextProfiles = Array.isArray(result?.profiles)
+        ? result.profiles.filter(
+            (profile): profile is RtkProfile =>
+              !!profile && typeof profile.id === "number",
+          )
+        : [];
+      setProfiles(nextProfiles);
       setSelectedProfileId((current) => {
         if (
           current != null &&
-          result.profiles.some((profile) => profile.id === current)
+          nextProfiles.some((profile) => profile.id === current)
         ) {
           return current;
         }
@@ -272,10 +279,11 @@ export function useRtkControl(
   }, [connected, visible, loadStatus, refresh]);
 
   useEffect(() => {
-    if (!status) {
+    const snapshot = unwrapRtkStatus(status);
+    if (!snapshot) {
       return;
     }
-    const activeId = status.status.persisted?.active_profile_id ?? null;
+    const activeId = snapshot.persisted?.active_profile_id ?? null;
     setSelectedProfileId((current) => {
       if (current != null) {
         return current;
@@ -401,14 +409,15 @@ export function useRtkControl(
     () =>
       runMutation(async () => {
         const intent = await startRtk();
-        if (visibleRef.current) {
+        if (visibleRef.current && intent?.persisted) {
           setStatus((previous) => {
-            if (!previous) {
+            const prev = unwrapRtkStatus(previous);
+            if (!prev) {
               return previous;
             }
             return {
               status: {
-                ...previous.status,
+                ...prev,
                 persisted: intent.persisted,
               },
             };
@@ -423,14 +432,15 @@ export function useRtkControl(
     () =>
       runMutation(async () => {
         const intent = await stopRtk();
-        if (visibleRef.current) {
+        if (visibleRef.current && intent?.persisted) {
           setStatus((previous) => {
-            if (!previous) {
+            const prev = unwrapRtkStatus(previous);
+            if (!prev) {
               return previous;
             }
             return {
               status: {
-                ...previous.status,
+                ...prev,
                 persisted: intent.persisted,
               },
             };
@@ -450,14 +460,16 @@ export function useRtkControl(
     [connected, mutationBusy, status],
   );
 
+  const statusSnapshot = unwrapRtkStatus(status);
+
   const selectedProfile =
     profiles.find((profile) => profile.id === selectedProfileId) ?? null;
 
   const activeProfile =
     profiles.find(
-      (profile) => profile.id === status?.status.persisted?.active_profile_id,
+      (profile) => profile.id === statusSnapshot?.persisted?.active_profile_id,
     ) ??
-    status?.status.active_profile ??
+    statusSnapshot?.active_profile ??
     null;
 
   return {
@@ -477,7 +489,7 @@ export function useRtkControl(
     canDelete:
       view.canDelete &&
       selectedProfile != null &&
-      selectedProfile.id !== status?.status.persisted?.active_profile_id,
+      selectedProfile.id !== statusSnapshot?.persisted?.active_profile_id,
     disabledReason: view.disabledReason ?? (error ? error.message : null),
     selectProfile: setSelectedProfileId,
     refresh,

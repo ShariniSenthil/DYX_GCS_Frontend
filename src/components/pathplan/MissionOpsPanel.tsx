@@ -310,10 +310,7 @@ const MissionOpsPanel = React.memo(({
         setShowDashConfigDialog(false);
     };
 
-    return (
-        <View style={styles.container}>
-            {/* Header — also the drag handle for the floating card */}
-            <GestureDetector gesture={dragGesture}>
+    const header = (
                 <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
                     <View style={styles.headerLeft}>
                         <View style={styles.headerIconWrap}>
@@ -335,7 +332,15 @@ const MissionOpsPanel = React.memo(({
                         )}
                     </View>
                 </View>
-            </GestureDetector>
+    );
+
+    return (
+        <View style={styles.container}>
+            {dragGesture ? (
+                <GestureDetector gesture={dragGesture}>{header}</GestureDetector>
+            ) : (
+                header
+            )}
 
             {/* Action Buttons */}
             <View style={styles.buttonsRow}>

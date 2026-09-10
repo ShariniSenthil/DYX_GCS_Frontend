@@ -19,9 +19,9 @@ export const useImmersiveMode = () => {
 
         // Android: Hide navigation bar in leanback mode
         if (Platform.OS === 'android') {
+          // Edge-to-edge (expo-system-ui) does not support setBehaviorAsync /
+          // setBackgroundColorAsync. Calling them only produces warnings.
           await NavigationBar.setVisibilityAsync('hidden');
-          await NavigationBar.setBehaviorAsync('overlay-swipe');
-          await NavigationBar.setBackgroundColorAsync('#000000');
         }
 
         console.log('[ImmersiveMode] Enabled - Status bar and navigation bar hidden');
@@ -32,8 +32,6 @@ export const useImmersiveMode = () => {
         // Android: Show navigation bar
         if (Platform.OS === 'android') {
           await NavigationBar.setVisibilityAsync('visible');
-          await NavigationBar.setBehaviorAsync('overlay-swipe');
-          await NavigationBar.setBackgroundColorAsync('#0A1628'); // Match app theme
         }
 
         console.log('[ImmersiveMode] Disabled - Status bar and navigation bar visible');

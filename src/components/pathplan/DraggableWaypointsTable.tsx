@@ -4,6 +4,7 @@ import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { PathPlanWaypoint } from '../../types/pathplan';
+import { formatCoord } from '../../utils/formatCoord';
 
 // LegendList for high-performance virtualized rendering (1000+ items)
 import { LegendList, LegendListRenderItemProps } from '@legendapp/list';
@@ -64,10 +65,10 @@ const WaypointRow = memo(({
             <Text style={[styles.cell, styles.colBlock]}>{item.block || '-'}</Text>
             <Text style={[styles.cell, styles.colRow]}>{item.row || '-'}</Text>
             <Text style={[styles.cell, styles.colPile]}>{item.pile || '-'}</Text>
-            <Text style={[styles.cell, styles.colLat]}>{item.lat?.toFixed(7) ?? '0.0000000'}</Text>
-            <Text style={[styles.cell, styles.colLon]}>{item.lon?.toFixed(7) ?? '0.0000000'}</Text>
-            <Text style={[styles.cell, styles.colAlt]}>{item.alt?.toFixed(2) || '0.00'}</Text>
-            <Text style={[styles.cell, styles.colDist]}>{item.distance?.toFixed(2) || '0.00'}</Text>
+            <Text style={[styles.cell, styles.colLat]}>{formatCoord(item.lat, 7)}</Text>
+            <Text style={[styles.cell, styles.colLon]}>{formatCoord(item.lon, 7)}</Text>
+            <Text style={[styles.cell, styles.colAlt]}>{formatCoord(item.alt, 2)}</Text>
+            <Text style={[styles.cell, styles.colDist]}>{formatCoord(item.distance, 2)}</Text>
 
             {/* Mark Checkbox - O(1) toggle, no re-render cascade */}
             {!isMarkHidden && (
@@ -188,10 +189,10 @@ const WebRow: React.FC<{
             <Text style={[styles.cell, styles.colBlock]}>{item.block || '-'}</Text>
             <Text style={[styles.cell, styles.colRow]}>{item.row || '-'}</Text>
             <Text style={[styles.cell, styles.colPile]}>{item.pile || '-'}</Text>
-            <Text style={[styles.cell, styles.colLat]}>{item.lat?.toFixed(7) ?? '0.0000000'}</Text>
-            <Text style={[styles.cell, styles.colLon]}>{item.lon?.toFixed(7) ?? '0.0000000'}</Text>
-            <Text style={[styles.cell, styles.colAlt]}>{item.alt?.toFixed(2) || '0.00'}</Text>
-            <Text style={[styles.cell, styles.colDist]}>{item.distance?.toFixed(2) || '0.00'}</Text>
+            <Text style={[styles.cell, styles.colLat]}>{formatCoord(item.lat, 7)}</Text>
+            <Text style={[styles.cell, styles.colLon]}>{formatCoord(item.lon, 7)}</Text>
+            <Text style={[styles.cell, styles.colAlt]}>{formatCoord(item.alt, 2)}</Text>
+            <Text style={[styles.cell, styles.colDist]}>{formatCoord(item.distance, 2)}</Text>
             {!isMarkHidden && (
                 <div style={{ flex: 0.6, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <input

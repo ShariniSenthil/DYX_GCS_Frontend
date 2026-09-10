@@ -205,23 +205,31 @@ class GlobalCrashHandlerService {
         const response = await originalFetch(input, init);
         return response;
       } catch (error: any) {
-        this.logCrash({
-          timestamp: new Date().toISOString(),
-          type: 'network_error',
-          error: error?.message || 'Network request failed',
-          stack: error?.stack,
-          fatal: false,
-          context: { url: input, method: init?.method },
-        });
+        const message = error?.message || 'Network request failed';
+        const aborted =
+          error?.name === 'AbortError' ||
+          /abort/i.test(message);
 
-        if (!isOfflineMode()) {
-          console.error('[CrashHandler] 🌐 Network Error:', {
-            url: input,
-            error: error?.message,
+        // Timeouts and cancelled polls are normal on rover Wi-Fi. Do not
+        // treat them as crashes (that filled the UI with 120x Abort toasts).
+        if (!aborted) {
+          this.logCrash({
+            timestamp: new Date().toISOString(),
+            type: 'network_error',
+            error: message,
+            stack: error?.stack,
+            fatal: false,
+            context: { url: input, method: init?.method },
           });
+
+          if (!isOfflineMode()) {
+            console.error('[CrashHandler] 🌐 Network Error:', {
+              url: input,
+              error: message,
+            });
+          }
         }
 
-        // Re-throw so calling code can handle it
         throw error;
       }
     };

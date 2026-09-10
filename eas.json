@@ -18,11 +18,19 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ROVER_ENABLED": "true",
+        "EXPO_PUBLIC_AUTH_ENABLED": "true"
       }
     },
     "production": {
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ROVER_ENABLED": "true",
+        "EXPO_PUBLIC_AUTH_ENABLED": "true"
       }
     }
   },

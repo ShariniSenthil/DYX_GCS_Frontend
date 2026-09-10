@@ -14,7 +14,11 @@ const STORAGE_KEY = '@ntrip_profiles';
 export const getAllProfiles = async (): Promise<NTRIPProfile[]> => {
   try {
     const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
-    return jsonValue != null ? JSON.parse(jsonValue) : [];
+    if (jsonValue == null) {
+      return [];
+    }
+    const parsed = JSON.parse(jsonValue);
+    return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.error('[NTRIP Storage] Error loading profiles:', error);
     return [];

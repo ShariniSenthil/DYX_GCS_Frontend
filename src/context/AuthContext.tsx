@@ -165,14 +165,13 @@ export function AuthProvider({
     configureApiClient(
       () => session?.token ?? null,
 
-      () => {
+      (rejectedToken) => {
         /*
          * The API client calls this callback only after receiving HTTP 401.
          * A timeout, network error or Jetson shutdown does not come here.
          */
-        void invalidateSession(
-          "The rover rejected the saved login. Please log in again.",
-        );
+        if (rejectedToken && rejectedToken !== session?.token) return;
+        void invalidateSession("The rover rejected the saved login. Please log in again.");
       },
     );
   }, [session?.token, invalidateSession]);
@@ -248,13 +247,8 @@ export function AuthProvider({
          * token rejection must not return the operator to the Login screen.
          */
         console.warn(
-          "[AuthContext] auth_revoked received. Saved login retained:",
+          "[AuthContext] auth_revoked received on unused socketClient (live handler is useRoverTelemetry):",
           revokedEvent.reason,
-        );
-
-        void invalidateSession(
-          revokedEvent.reason ||
-            "The backend rejected the current login. Please log in again.",
         );
       },
 
@@ -262,7 +256,7 @@ export function AuthProvider({
     );
 
     return unsubscribe;
-  }, [invalidateSession]);
+  }, []);
 
   // ── Login ─────────────────────────────────────────────────────────────────
 

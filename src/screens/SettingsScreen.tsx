@@ -732,6 +732,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
       if (response.success) {
         // Optimistically update UI - will be confirmed by socket event
         setObstacleDetectionEnabled(enabled);
+        setIsLoadingObstacle(false);
         console.log(
           "✅ Command sent successfully. Waiting for backend confirmation...",
         );
@@ -752,7 +753,6 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
       setIsLoadingObstacle(false);
       Alert.alert("Error", "Failed to update obstacle detection");
     }
-    // Note: loading state will be cleared by the socket event listener
   };
 
   const handleLedToggle = async (enabled: boolean) => {
@@ -773,8 +773,10 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
       console.log("📥 Initial Response:", response);
 
       if (response.success) {
-        // Optimistically update UI - will be confirmed by socket event
+        // Treat the REST acknowledgement as the command result. Socket
+        // confirmations are optional and must not leave the control blocked.
         setLedEnabled(enabled);
+        setIsLoadingLed(false);
         // Persist to AsyncStorage immediately
         AsyncStorage.setItem("led_enabled", String(enabled))
           .then(() =>
@@ -801,24 +803,8 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
       console.error("Error:", error);
       console.error("═══════════════════════════════════════");
       setIsLoadingLed(false);
-      // Fallback: if backend call fails, update local state and persist
-      setLedEnabled(enabled);
-      AsyncStorage.setItem("led_enabled", String(enabled))
-        .then(() => {
-          console.log(
-            "[Settings] LED state saved to storage (fallback):",
-            enabled,
-          );
-          setSuccessMessage(
-            `LED controller ${enabled ? "enabled" : "disabled"}`,
-          );
-          setTimeout(() => setSuccessMessage(""), 3000);
-        })
-        .catch((err) =>
-          console.error("[Settings] Failed to save LED state:", err),
-        );
+      Alert.alert("Error", "Failed to update LED controller");
     }
-    // Note: loading state will be cleared by the socket event listener if backend responds
   };
 
   const getLanguageLabel = (lang: string) => {
@@ -1374,6 +1360,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
 
         <RTKInjectionScreen
           visible={showRTKModal}
+          asModal={false}
           onClose={() => {
             setShowRTKModal(false);
             void refreshSettingsRtkStatus();

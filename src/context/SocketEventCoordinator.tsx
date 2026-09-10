@@ -28,6 +28,7 @@
 import React, { useEffect, useCallback } from 'react';
 import { useTelemetry } from './TelemetryContext';
 import { useMission } from './MissionContext';
+import { useTelemetry } from './TelemetryContext';
 import { ROVER_ENABLED } from '../config/featureFlags';
 import type { GpsSafetyAbortEvent } from '../types/px4/mission';
 
@@ -40,6 +41,7 @@ import type { GpsSafetyAbortEvent } from '../types/px4/mission';
 export function SocketEventCoordinator({ children }: { children: React.ReactNode }): React.ReactElement {
   const { socket, connectionState } = useTelemetry();
   const { setMissionMode } = useMission();
+  const { reportGpsSafetyAbort } = useTelemetry();
 
   // ── Legacy: Forward mission mode updates → MissionContext ─────────────────
   useEffect(() => {
@@ -63,9 +65,14 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
 
     // GPS safety abort (replaces legacy failsafe socket events)
     const handleGpsSafetyAbort = (event: unknown) => {
-      const e = event as GpsSafetyAbortEvent;
-      console.warn('[SocketEventCoordinator] gps_safety_abort:', e.reason, 'manual_resume_required:', e.manual_resume_required);
-      // TODO: Forward to a GPS safety context in a future phase
+      if (!isValidGpsSafetyAbort(event)) {
+        console.warn('[SocketEventCoordinator] gps_safety_abort: unexpected payload shape', event);
+        return;
+      }
+      console.warn('[SocketEventCoordinator] gps_safety_abort:', event.reason, 'manual_resume_required:', event.manual_resume_required);
+      reportGpsSafetyAbort(
+        event.reason || 'GPS safety abort — resume from the rover is required',
+      );
     };
 
     // Mission completed events (continuous/dash)
@@ -93,7 +100,7 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       socket?.off('mission_completion_degraded', handleMissionCompletionDegraded);
       socket?.off('safety_abort', handleSafetyAbort);
     };
-  }, [socket, connectionState]);
+  }, [socket, connectionState, reportGpsSafetyAbort]);
 
   // This component only coordinates side-effects — just pass through children
   return React.createElement(React.Fragment, null, children);

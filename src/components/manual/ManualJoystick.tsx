@@ -82,6 +82,7 @@ export function ManualJoystick({
         .onFinalize(() => {
           knobX.value = withSpring(0, SPRING_CONFIG);
           knobY.value = withSpring(0, SPRING_CONFIG);
+          runOnJS(resetKnob)();
         }),
     [disabled, emitValues, knobX, knobY, radius, resetKnob],
   );

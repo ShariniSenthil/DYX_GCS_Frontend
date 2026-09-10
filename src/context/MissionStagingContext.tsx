@@ -79,6 +79,8 @@ export function MissionStagingProvider({
   const [expectedGeneration, setExpectedGeneration] = useState<number | null>(null);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const isMissionActive = missionState === 'running';
@@ -88,8 +90,13 @@ export function MissionStagingProvider({
 
   const refreshStatus = useCallback(async () => {
     if (!MISSION_STAGING_ENABLED) return;
+    const generation = requestGenerationRef.current;
     try {
       const status = await getMissionStatus();
+      if (!mountedRef.current || generation !== requestGenerationRef.current) return;
+      if (!status || typeof status !== "object" || typeof (status as { state?: unknown }).state !== "string") {
+        return;
+      }
       setMissionStateInternal(status.state);
       setMissionStatusDetail(status);
     } catch {
@@ -99,8 +106,13 @@ export function MissionStagingProvider({
 
   const refreshLoadedPath = useCallback(async () => {
     if (!MISSION_STAGING_ENABLED) return;
+    const generation = requestGenerationRef.current;
     try {
       const loaded = await getLoadedPath();
+      if (!mountedRef.current || generation !== requestGenerationRef.current) return;
+      if (!loaded || typeof loaded !== "object") {
+        return;
+      }
       setLoadedPathState(loaded);
       if (loaded.path_name) {
         setPathNameState(loaded.path_name);
@@ -115,8 +127,10 @@ export function MissionStagingProvider({
 
   const refreshExpectedGeneration = useCallback(async () => {
     if (!MISSION_STAGING_ENABLED) return;
+    const generation = requestGenerationRef.current;
     try {
       const pointStatus = await getPointStatus();
+      if (!mountedRef.current || generation !== requestGenerationRef.current) return;
       setExpectedGeneration(pointStatus.expected_generation);
     } catch {
       // Point status only available in point mode — ignore 404/409
@@ -125,6 +139,7 @@ export function MissionStagingProvider({
 
   // ── Initial load + background poll ───────────────────────────────────────────
   useEffect(() => {
+    mountedRef.current = true;
     if (!MISSION_STAGING_ENABLED) return;
 
     void refreshStatus();
@@ -133,6 +148,8 @@ export function MissionStagingProvider({
     pollTimerRef.current = setInterval(refreshStatus, STATUS_POLL_INTERVAL_MS);
 
     return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, [refreshStatus, refreshLoadedPath]);
@@ -159,6 +176,7 @@ export function MissionStagingProvider({
   }, []);
 
   const clearStaging = useCallback(() => {
+    requestGenerationRef.current += 1;
     setPathNameState(null);
     setMissionIdState(null);
     setStagedSummaryState(null);

@@ -168,6 +168,7 @@ interface MissionReportScreenProps {
 
 export default function MissionReportScreen({
   isVisible = true,
+  embedMap = false,
 }: MissionReportScreenProps) {
   const DEBUG_MISSION_LOGS = false;
   const missionLog = (...args: any[]) => {
@@ -1671,7 +1672,7 @@ export default function MissionReportScreen({
 
       const intent = await startRtk();
 
-      if (intent.persisted.desired_state === "RUNNING") {
+      if (intent?.persisted?.desired_state === "RUNNING") {
         setQuickRtkState("start_requested");
       }
 
@@ -3315,9 +3316,8 @@ export default function MissionReportScreen({
           if (Object.keys(migratedPanels).length > 0) {
             setPanelVisibility((prev) => ({ ...prev, ...migratedPanels }));
           }
-          if (data.uiState.isBottomTableExpanded !== undefined) {
-            setIsBottomTableExpanded(data.uiState.isBottomTableExpanded);
-          }
+          // Always start collapsed. Restoring expanded mounts LegendList
+          // before waypoint coords are normalized and crashes on launch.
         }
       } catch (error) {
         console.error(

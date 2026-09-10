@@ -57,6 +57,7 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
 
   // Track if waypoints have been loaded from storage yet
   const waypointsLoadedRef = useRef(false);
+  const userMutatedWaypointsRef = useRef(false);
 
   // Load persisted data on mount — including waypoints
   useEffect(() => {
@@ -64,7 +65,11 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
       try {
         // Load waypoints (was saved but never loaded back)
         const savedWaypoints = await PersistentStorage.loadWaypoints();
-        if (savedWaypoints && savedWaypoints.length > 0) {
+        if (
+          !userMutatedWaypointsRef.current &&
+          savedWaypoints &&
+          savedWaypoints.length > 0
+        ) {
           setMissionWaypointsState(savedWaypoints);
           console.log(`[WaypointContext] Loaded ${savedWaypoints.length} waypoints from storage`);
         }
@@ -109,16 +114,18 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
       return;
     }
 
+    userMutatedWaypointsRef.current = true;
     setMissionWaypointsState(waypoints);
     // Debounced save — coalesces rapid updates (drag, bulk add) into one write
     PersistentStorage.saveWaypoints(waypoints);
   }, []);
 
-  const clearMissionWaypoints = useCallback(() => {
+  const clearMissionWaypoints = useCallback(async () => {
     setMissionWaypointsState([]);
-    // Flush any pending save first, then clear
-    PersistentStorage.flushWaypointSave();
-    PersistentStorage.clearMissionData().catch(error => {
+    // Await the pending write before clearing, otherwise the write can finish
+    // after clearMissionData and resurrect deleted waypoints.
+    await PersistentStorage.flushWaypointSave();
+    await PersistentStorage.clearMissionData().catch(error => {
       console.error('[WaypointContext] Failed to clear persisted data:', error);
     });
   }, []);

@@ -3,5 +3,13 @@
   "compilerOptions": {
     "strict": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": [
+    "reference_three_wheel",
+    "node_modules",
+    ".expo",
+    "android/build",
+    "dist",
+    "build"
+  ]
 }

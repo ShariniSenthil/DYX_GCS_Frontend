@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -83,6 +83,12 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
   const mpOverlay = useMissionProgressOverlayOptional();
   const showMissionProgressWidget =
     activeTab === "Mission Progress" && mpOverlay != null;
+
+  useEffect(() => {
+    if (activeTab !== "Mission Progress") {
+      mpOverlay?.setIsWidgetMenuOpen(false);
+    }
+  }, [activeTab, mpOverlay]);
 
   const [showSettings, setShowSettings] = useState(false);
   const [showModeDialog, setShowModeDialog] = useState(false);
@@ -203,9 +209,11 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
         )}
       </View>
 
-      {showMissionProgressWidget && (
+      {mpOverlay != null && (
         <Modal
-          visible={mpOverlay.isWidgetMenuOpen}
+          visible={
+            activeTab === "Mission Progress" && mpOverlay.isWidgetMenuOpen
+          }
           transparent
           animationType="none"
           statusBarTranslucent

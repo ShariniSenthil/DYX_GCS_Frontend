@@ -276,15 +276,15 @@ export default function DashboardScreen() {
   };
 
   const vehicleStatus = useMemo(() => {
-    const isArmed = telemetry.state.armed;
+    const isArmed = Boolean(telemetry.state?.armed);
     return {
       isConnected: connectionState === 'connected',
       armStatus: isArmed ? 'ARMED' : 'DISARMED',
-      sysStatus: telemetry.state.system_status || (isArmed ? 'ARMED' : 'DISARMED'),
-      fixTypeLabel: getFixTypeLabel(telemetry.rtk.fix_type),
-      mode: telemetry.state.mode || 'UNKNOWN',
+      sysStatus: telemetry.state?.system_status || (isArmed ? 'ARMED' : 'DISARMED'),
+      fixTypeLabel: getFixTypeLabel(telemetry.rtk?.fix_type ?? 0),
+      mode: telemetry.state?.mode || 'UNKNOWN',
     };
-  }, [telemetry.state.armed, telemetry.state.mode, telemetry.state.system_status, telemetry.rtk.fix_type, connectionState]);
+  }, [telemetry.state?.armed, telemetry.state?.mode, telemetry.state?.system_status, telemetry.rtk?.fix_type, connectionState]);
 
   const isConnected = connectionState === 'connected';
 
@@ -301,8 +301,8 @@ export default function DashboardScreen() {
         <TopCard title="ARM" value={vehicleStatus.armStatus} />
         <TopCard title="MODE" value={vehicleStatus.mode} />
         <TopCard title="GPS / RTK" value={vehicleStatus.fixTypeLabel} color={fixColor} danger={telemetry.rtk.fix_type < 2} flex={1.2} />
-        <TopCard title="NETWORK" value={telemetry.network.connection_type.toUpperCase()} flex={0.8} />
-        <TopCard title="BATTERY" value={`${Math.round(telemetry.battery.percentage)}%`} flex={0.7} />
+        <TopCard title="NETWORK" value={(telemetry.network?.connection_type || "none").toUpperCase()} flex={0.8} />
+        <TopCard title="BATTERY" value={`${Math.round(telemetry.battery?.percentage ?? 0)}%`} flex={0.7} />
         <TopCard title="SIGNAL" value={telemetry.network.wifi_connected ? `${telemetry.network.wifi_rssi}` : '—'} flex={0.6} />
       </View>
 
@@ -311,7 +311,7 @@ export default function DashboardScreen() {
         
         {/* Left Column (25%) */}
         <View style={styles.flex1}>
-          <GroundSpeedCard speed={telemetry.global.vel} />
+          <GroundSpeedCard speed={telemetry.global?.vel ?? 0} />
           <View style={styles.vGapSpace} />
           <HeadingCard heading={telemetry.attitude?.yaw_deg || 0} />
           <View style={styles.vGapSpace} />

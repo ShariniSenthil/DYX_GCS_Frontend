@@ -10,7 +10,7 @@
  *   'none'       — no handle rendered; card is not draggable
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -30,6 +30,37 @@ interface DraggableCardProps {
   onLayout?: (event: any) => void;
 }
 
+function isHostComponentType(type: unknown): boolean {
+  if (type === View || type === Text) {
+    return true;
+  }
+  return typeof type === 'string';
+}
+
+/**
+ * Inject dragGesture into composite children (function, class, memo, forwardRef).
+ * Never inject into host Views — Fabric treats dragGesture as a native prop
+ * and crashes. React.memo components are objects, not functions.
+ */
+function acceptsDragGestureProps(child: React.ReactElement): boolean {
+  const type = child.type as unknown;
+  if (isHostComponentType(type) || typeof type === 'symbol') {
+    return false;
+  }
+  if (typeof type === 'function') {
+    return true;
+  }
+  if (type && typeof type === 'object') {
+    const inner = (type as { type?: unknown; render?: unknown }).type
+      ?? (type as { render?: unknown }).render;
+    if (inner == null) {
+      return true;
+    }
+    return !isHostComponentType(inner);
+  }
+  return false;
+}
+
 export const DraggableCard: React.FC<DraggableCardProps> = ({
   children,
   style,
@@ -39,6 +70,20 @@ export const DraggableCard: React.FC<DraggableCardProps> = ({
   onLayout,
 }) => {
   const [isDraggingActive, setIsDraggingActive] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const setDraggingSafe = (active: boolean) => {
+    if (mountedRef.current) {
+      setIsDraggingActive(active);
+    }
+  };
 
   // Accumulated position after each drag — persists between gestures
   const offsetX = useSharedValue(0);
@@ -66,7 +111,7 @@ export const DraggableCard: React.FC<DraggableCardProps> = ({
       translateX.value = offsetX.value;
       translateY.value = offsetY.value;
       dragScale.value = withSpring(1.03, { damping: 16, stiffness: 260 });
-      runOnJS(setIsDraggingActive)(true);
+      runOnJS(setDraggingSafe)(true);
     })
     .onUpdate((e) => {
       translateX.value = offsetX.value + e.translationX;
@@ -77,12 +122,12 @@ export const DraggableCard: React.FC<DraggableCardProps> = ({
       offsetX.value = translateX.value;
       offsetY.value = translateY.value;
       dragScale.value = withSpring(1, { damping: 16, stiffness: 260 });
-      runOnJS(setIsDraggingActive)(false);
+      runOnJS(setDraggingSafe)(false);
     })
     .onFinalize(() => {
       // Safety: always reset scale even if gesture is cancelled
       dragScale.value = withSpring(1, { damping: 16, stiffness: 260 });
-      runOnJS(setIsDraggingActive)(false);
+      runOnJS(setDraggingSafe)(false);
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -129,10 +174,13 @@ export const DraggableCard: React.FC<DraggableCardProps> = ({
 
   // ── Custom mode: inject gesture + state into child ────────────────────────
 
+  // Inject the pan gesture only into composite header components.
+  // Cloning a host View (the expanded table body) sets `dragGesture` as a
+  // native prop and crashes Fabric: "Error while updating property dragGesture".
   const childrenWithGesture =
     handleType === 'custom'
       ? React.Children.map(children, (child) =>
-          React.isValidElement(child)
+          React.isValidElement(child) && acceptsDragGestureProps(child)
             ? React.cloneElement(child as any, {
                 dragGesture: panGesture,
                 isDraggingActive,

@@ -140,10 +140,9 @@ class BeaconListener {
     }
 
     const roverId = String(parsed.rover_id || parsed.id || "").trim();
-    const ipCandidate = String(
-      parsed.ip || parsed.host || rinfo.address || "",
-    ).trim();
-    const ip = isUsableIpv4(ipCandidate) ? ipCandidate : "";
+    // Do not trust an advertised address from an unauthenticated UDP beacon.
+    // A beacon is only a discovery hint; connect back to the sender address.
+    const ip = isUsableIpv4(rinfo.address) ? rinfo.address : "";
 
     const parsedPort = Number(parsed.port);
     const port =

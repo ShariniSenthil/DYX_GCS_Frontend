@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
@@ -25,7 +25,7 @@ const VEHICLE_CARD_LAYOUT: { height?: number | string; minHeight?: number; width
 
 const getRtkColor = (telemetry: any): string => {
   if (!telemetry) return colors.danger;
-  const fixType = telemetry.rtk.fix_type;
+  const fixType = telemetry.rtk?.fix_type ?? 0;
   if (fixType >= 5) return colors.success;
   if (fixType >= 3) return colors.warning;
   return colors.danger;
@@ -33,7 +33,7 @@ const getRtkColor = (telemetry: any): string => {
 
 const getBatteryColor = (telemetry: any): string => {
   if (!telemetry) return colors.danger;
-  const pct = telemetry.battery.percentage;
+  const pct = telemetry.battery?.percentage ?? 0;
   if (pct > 50) return colors.success;
   if (pct > 20) return colors.warning;
   return colors.danger;
@@ -48,7 +48,7 @@ const getAccuracyColor = (value: number): string => {
 
 const getSatelliteColor = (telemetry: any): string => {
   if (!telemetry) return colors.danger;
-  const satCount = telemetry.global.satellites_visible;
+  const satCount = telemetry.global?.satellites_visible ?? 0;
   if (satCount >= 14) return colors.success;
   if (satCount >= 6) return colors.warning;
   if (satCount >= 2) return colors.accent;
@@ -111,7 +111,7 @@ export const VehicleStatusCard: React.FC<Props> = ({
 
   return (
     <View style={styles.container}>
-      <GestureDetector gesture={dragGesture}>
+      <OptionalGestureDetector gesture={dragGesture}>
         <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
           <View style={styles.headerLeft}>
             <View style={styles.headerIconWrap}>
@@ -128,7 +128,7 @@ export const VehicleStatusCard: React.FC<Props> = ({
             )}
           </View>
         </View>
-      </GestureDetector>
+      </OptionalGestureDetector>
 
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {rows.map((row, idx) => (

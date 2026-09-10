@@ -8,6 +8,7 @@ import { MissionTableToolbarActions } from "./MissionTableToolbarActions";
 import type { WaypointUiStatus } from "../../types/missionWaypointStatus";
 import type { RawGnssSurveySnapshot } from "../../services/missionApi";
 import { getStatusPresentation } from "../../utils/missionStatusPresentation";
+import { formatCoord } from "../../utils/formatCoord";
 
 // DYX RAW GNSS WAYPOINT DISPLAY
 // DYX KEEP RPP ADD RAW LIVE
@@ -147,7 +148,7 @@ const WaypointRow = React.memo(
             isSkipped && styles.skippedText,
           ]}
         >
-          {wp.lat.toFixed(7)}
+          {formatCoord(wp.lat, 7)}
         </Text>
         <Text
           style={[
@@ -157,7 +158,7 @@ const WaypointRow = React.memo(
             isSkipped && styles.skippedText,
           ]}
         >
-          {wp.lon.toFixed(7)}
+          {formatCoord(wp.lon ?? (wp as { lng?: unknown }).lng, 7)}
         </Text>
 
         {/* DISPLAY ONLY: CSV target vs frozen RAW GNSS stop overall error. */}
@@ -276,13 +277,7 @@ export const WaypointsTable = React.memo<Props>(
     const currentWaypointNumber =
       currentIndex != null ? currentIndex + 1 : null;
 
-    // Force LegendList to re-render rows when status or active waypoint changes.
-    // Without extraData, recycled containers keep stale status values because
-    // renderItem closure changes alone don't trigger row re-computation.
-    const listExtraData = React.useMemo(
-      () => ({ statusMap, currentWaypointNumber }),
-      [statusMap, currentWaypointNumber],
-    );
+    const safeWaypoints = Array.isArray(waypoints) ? waypoints : [];
 
     const renderItem = useCallback(
       (props: LegendListRenderItemProps<Waypoint>) => (
@@ -300,7 +295,11 @@ export const WaypointsTable = React.memo<Props>(
       [statusMap, currentWaypointNumber, embedded],
     );
 
-    const keyExtractor = useCallback((item: Waypoint) => `wp-${item.sn}`, []);
+    const keyExtractor = useCallback(
+      (item: Waypoint, index: number) =>
+        `wp-${item.sn ?? "x"}-${index}-${item.lat}-${item.lon}`,
+      [],
+    );
 
     return (
       <View style={[styles.container, embedded && styles.containerEmbedded]}>
@@ -424,18 +423,16 @@ export const WaypointsTable = React.memo<Props>(
 
             {/* Virtualized table body — only visible rows are mounted */}
             <LegendList
-              data={waypoints}
+              data={safeWaypoints}
               renderItem={renderItem}
               keyExtractor={keyExtractor}
               recycleItems={true}
               estimatedItemSize={ROW_HEIGHT}
-              getFixedItemSize={() => ROW_HEIGHT}
               style={[
                 styles.scrollableTableBody,
                 embedded && styles.scrollableTableBodyEmbedded,
               ]}
               showsVerticalScrollIndicator
-              extraData={listExtraData}
             />
           </View>
         </View>

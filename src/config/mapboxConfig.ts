@@ -1,6 +1,9 @@
-// Mapbox GL JS configuration
-// Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN in your .env file — get a token from https://account.mapbox.com
-export const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN || '';
+// Public Mapbox token (pk.) is safe in the client. Prefer the env var so
+// EAS/local .env can rotate it.
+const BAKED_MAPBOX_PUBLIC_TOKEN = "";
+
+export const MAPBOX_ACCESS_TOKEN =
+  process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN || BAKED_MAPBOX_PUBLIC_TOKEN;
 
 export const MAPBOX_VERSION = '2.15.0';
 

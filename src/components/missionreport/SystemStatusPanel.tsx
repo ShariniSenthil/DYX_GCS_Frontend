@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
 import { useRoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
 import type { RoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
@@ -94,7 +94,7 @@ export const SystemStatusPanel: React.FC<Props> = ({
 
   return (
     <View style={styles.container}>
-      <GestureDetector gesture={dragGesture}>
+      <OptionalGestureDetector gesture={dragGesture}>
         <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
           <View style={styles.headerLeft}>
             <View style={styles.headerIconWrap}>
@@ -110,7 +110,7 @@ export const SystemStatusPanel: React.FC<Props> = ({
             )}
           </View>
         </View>
-      </GestureDetector>
+      </OptionalGestureDetector>
 
       <View style={styles.statusPad}>
         <View style={styles.iconRow}>

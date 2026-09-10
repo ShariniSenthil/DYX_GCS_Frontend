@@ -81,6 +81,7 @@ class PersistentStorageService {
   private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private waypointDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingWaypoints: Waypoint[] | null = null;
+  private waypointWritePromise: Promise<void> = Promise.resolve();
   private static WAYPOINT_DEBOUNCE_MS = 800;
 
   // In-memory cache for frequently-read mission data
@@ -123,19 +124,25 @@ class PersistentStorageService {
    * Force immediate write of any pending waypoints.
    * Call on screen unmount / tab switch / app backgrounding to prevent data loss.
    */
-  flushWaypointSave(): void {
+  async flushWaypointSave(): Promise<void> {
     if (this.waypointDebounceTimer) {
       clearTimeout(this.waypointDebounceTimer);
       this.waypointDebounceTimer = null;
     }
 
-    if (this.pendingWaypoints === null) return;
+    if (this.pendingWaypoints === null) {
+      await this.waypointWritePromise;
+      return;
+    }
 
     const waypoints = this.pendingWaypoints;
     this.pendingWaypoints = null;
 
     // Fire-and-forget — don't block the caller
-    this.writeWaypointsToDisk(waypoints);
+    this.waypointWritePromise = this.waypointWritePromise
+      .catch(() => undefined)
+      .then(() => this.writeWaypointsToDisk(waypoints));
+    await this.waypointWritePromise;
   }
 
   private async writeWaypointsToDisk(waypoints: Waypoint[]): Promise<void> {
@@ -159,7 +166,27 @@ class PersistentStorageService {
         console.log('[Storage] No saved waypoints found');
         return null;
       }
-      const waypoints = JSON.parse(data) as Waypoint[];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        console.warn('[Storage] Saved waypoints were not an array');
+        return null;
+      }
+      const waypoints = parsed
+        .map((raw: any, index: number) => {
+          const lat = Number(raw?.lat ?? raw?.latitude);
+          const lon = Number(raw?.lon ?? raw?.lng ?? raw?.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            return null;
+          }
+          return {
+            ...raw,
+            sn: typeof raw?.sn === 'number' && Number.isFinite(raw.sn) ? raw.sn : index + 1,
+            lat,
+            lon,
+            lng: lon,
+          } as Waypoint;
+        })
+        .filter((wp: Waypoint | null): wp is Waypoint => wp != null);
       console.log(`[Storage] 📂 Loaded ${waypoints.length} waypoints from persistent storage`);
       return waypoints;
     } catch (error) {

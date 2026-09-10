@@ -75,3 +75,8 @@ test_beacon_listener.py
 /ios
 /android
 env
+
+# Local session dumps (screenshots, UI XML, Metro export, tsc logs)
+.tmp*
+.tmp-*/
+UI/WhatsApp Image 2026-09-09 at 3.02.47 PM.jpeg

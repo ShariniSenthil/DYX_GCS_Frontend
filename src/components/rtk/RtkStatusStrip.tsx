@@ -23,10 +23,23 @@ function toneColor(tone: RtkControlViewModel["tone"]): string {
 }
 
 function formatAge(age: number | null): string {
-  if (age == null) {
+  if (age == null || !Number.isFinite(age)) {
     return "—";
   }
   return `${age.toFixed(1)} s`;
+}
+
+function asText(value: unknown): string {
+  if (value == null) {
+    return "—";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "—";
 }
 
 export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
@@ -36,14 +49,14 @@ export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
     <View style={styles.wrap}>
       <View style={[styles.headline, { borderColor: color }]}>
         <View style={[styles.dot, { backgroundColor: color }]} />
-        <Text style={[styles.headlineText, { color }]}>{view.headlineLabel}</Text>
+        <Text style={[styles.headlineText, { color }]}>{asText(view.headlineLabel)}</Text>
         <Text style={styles.desired}>
-          Desired {view.desiredState ?? "—"} · Manager {view.managerState ?? "—"}
+          Desired {asText(view.desiredState)} · Manager {asText(view.managerState)}
         </Text>
       </View>
 
       <View style={styles.grid}>
-        <Metric label="Corrections" value={view.correctionState ?? "—"} />
+        <Metric label="Corrections" value={asText(view.correctionState)} />
         <Metric label="Correction age" value={formatAge(view.correctionAgeSec)} />
         <Metric
           label="Published frames"
@@ -60,7 +73,7 @@ export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
         <Metric
           label="GNSS fix"
           value={
-            view.gnssFixName
+            typeof view.gnssFixName === "string"
               ? `${view.gnssFixName.replace(/_/g, " ")} (${view.gnssFixType ?? "—"})`
               : "—"
           }
@@ -70,7 +83,7 @@ export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
           value={view.rtkFixed ? "RTK Fixed" : view.rtkFloat ? "RTK Float" : "No RTK"}
         />
         {view.ggaEnabled ? (
-          <Metric label="GGA" value={view.ggaState ?? "—"} />
+          <Metric label="GGA" value={asText(view.ggaState)} />
         ) : null}
       </View>
     </View>

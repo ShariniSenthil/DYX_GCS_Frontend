@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 interface Props {
@@ -23,7 +23,7 @@ export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dr
     return (
         <View style={styles.container}>
             {/* Header — also the drag handle for the floating card */}
-            <GestureDetector gesture={dragGesture}>
+            <OptionalGestureDetector gesture={dragGesture}>
                 <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
                     <View style={styles.headerLeft}>
                         <MaterialCommunityIcons name="robot" size={13} color="#F59E0B" />
@@ -36,7 +36,7 @@ export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dr
                         </TouchableOpacity>
                     )}
                 </View>
-            </GestureDetector>
+            </OptionalGestureDetector>
 
             {/* Two rows — Lat/Lon, Alt/Heading */}
             <View style={styles.statsContainer}>

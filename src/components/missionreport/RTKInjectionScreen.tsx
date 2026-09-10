@@ -27,12 +27,18 @@ interface Props {
   /** Retained so MissionReportScreen / Settings do not need a prop change. */
   services?: RoverServices;
   isConnected: boolean;
+  /**
+   * When false, render as a full-screen overlay instead of a nested RN Modal.
+   * Settings is already a Modal; stacking another crashes Android.
+   */
+  asModal?: boolean;
 }
 
 export const RTKInjectionScreen: React.FC<Props> = ({
   visible,
   onClose,
   isConnected,
+  asModal = true,
 }) => {
   const control = useRtkControl({
     visible,
@@ -44,8 +50,13 @@ export const RTKInjectionScreen: React.FC<Props> = ({
   const [importing, setImporting] = useState(false);
 
   const loadLocal = useCallback(async () => {
-    const locals = await listLocalRtkProfilesForMigration();
-    setLocalProfiles(locals);
+    try {
+      const locals = await listLocalRtkProfilesForMigration();
+      setLocalProfiles(Array.isArray(locals) ? locals : []);
+    } catch (error) {
+      console.warn("[RTKInjectionScreen] Failed to load local profiles:", error);
+      setLocalProfiles([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -118,15 +129,8 @@ export const RTKInjectionScreen: React.FC<Props> = ({
 
   const controlsBusy = control.mutationBusy || importing;
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
-      supportedOrientations={["landscape", "landscape-left", "landscape-right"]}
-    >
-      <View style={styles.overlay}>
+  const body = (
+      <View style={[styles.overlay, !asModal && styles.embeddedOverlay]}>
         <View style={styles.container}>
           <View style={styles.header}>
             <Pressable onPress={onClose} hitSlop={10} style={styles.close}>
@@ -229,6 +233,24 @@ export const RTKInjectionScreen: React.FC<Props> = ({
           ) : null}
         </View>
       </View>
+  );
+
+  if (!asModal) {
+    if (!visible) {
+      return null;
+    }
+    return body;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+      supportedOrientations={["landscape", "landscape-left", "landscape-right"]}
+    >
+      {body}
     </Modal>
   );
 };
@@ -240,6 +262,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
+  },
+  embeddedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
   },
   container: {
     width: "96%",

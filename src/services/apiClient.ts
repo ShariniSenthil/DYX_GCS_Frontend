@@ -25,7 +25,7 @@ type GetTokenFn =
   () => string | null;
 
 type OnUnauthorizedFn =
-  () => void;
+  (rejectedToken?: string | null) => void;
 
 let getToken: GetTokenFn =
   () => null;
@@ -158,6 +158,10 @@ async function request<T>(
   const url =
     `${backendURL}${normalizedPath}`;
 
+  // Capture the token used by this request. A delayed 401 must not invalidate
+  // a newer login that replaced this token while the request was in flight.
+  const requestToken = options.skipAuth ? null : getToken();
+
   const controller =
     new AbortController();
 
@@ -217,7 +221,7 @@ async function request<T>(
          * Temporary Wi-Fi or Jetson availability problems must not log out
          * the operator automatically.
          */
-        onUnauthorized();
+        onUnauthorized(requestToken);
       }
 
       throw apiError;

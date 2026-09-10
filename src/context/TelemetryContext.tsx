@@ -143,6 +143,7 @@ export interface TelemetryContextValue {
   onFailsafeAcknowledge: () => void;
   onFailsafeResume: () => void;
   onFailsafeRestart: () => void;
+  reportGpsSafetyAbort: (reason: string) => void;
 }
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
@@ -204,6 +205,17 @@ export function TelemetryProvider({
     });
   }, []);
 
+  const reportGpsSafetyAbort = useCallback((reason: string) => {
+    setGpsFailsafeStatus({
+      mode: gpsFailsafeMode,
+      triggered: true,
+      reason,
+      servo_suppressed: true,
+      requires_ack: true,
+      action: "abort",
+    });
+  }, [gpsFailsafeMode]);
+
   const contextValue = useMemo<TelemetryContextValue>(
     () => ({
       telemetry: visibleTelemetry,
@@ -219,6 +231,7 @@ export function TelemetryProvider({
       onFailsafeAcknowledge,
       onFailsafeResume,
       onFailsafeRestart,
+      reportGpsSafetyAbort,
     }),
     [
       visibleTelemetry,
@@ -234,6 +247,7 @@ export function TelemetryProvider({
       onFailsafeAcknowledge,
       onFailsafeResume,
       onFailsafeRestart,
+      reportGpsSafetyAbort,
     ],
   );
 

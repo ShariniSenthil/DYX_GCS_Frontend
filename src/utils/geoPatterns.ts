@@ -101,9 +101,10 @@ export function generateCircleWaypoints(
 
   const waypoints: { lat: number; lng: number; alt: number }[] = [];
   const direction = clockwise ? 1 : -1;
+  const pointCount = Math.min(Math.max(3, Math.floor(numPoints) || 3), 2000);
 
-  for (let i = 0; i < numPoints; i++) {
-    const angleStep = (360 / numPoints) * direction;
+  for (let i = 0; i < pointCount; i++) {
+    const angleStep = (360 / pointCount) * direction;
     const angleDeg = startAngleDeg + i * angleStep;
     const angleRad = (angleDeg * Math.PI) / 180;
 
@@ -191,11 +192,19 @@ export function generateSurveyGrid(
   const waypoints: { lat: number; lng: number; alt: number }[] = [];
   const angleRad = (angleDegree * Math.PI) / 180;
 
-  // Calculate effective spacing with overlap
-  const effectiveSpacing = laneSpacingM * (1 - overlapPercent / 100);
+  // Calculate effective spacing with overlap. Overlap of 100% would make
+  // spacing 0 and numLanes Infinity, freezing the JS thread.
+  const clampedOverlap = Math.min(95, Math.max(0, overlapPercent));
+  const effectiveSpacing = Math.max(
+    0.05,
+    laneSpacingM * (1 - clampedOverlap / 100),
+  );
 
   // Calculate number of lanes
-  const numLanes = Math.max(2, Math.ceil(widthM / effectiveSpacing));
+  const numLanes = Math.min(
+    2000,
+    Math.max(2, Math.ceil(widthM / effectiveSpacing)),
+  );
 
   // Calculate half dimensions
   const halfWidth = widthM / 2;

@@ -24,8 +24,8 @@ export const MissionTableHeader: React.FC<Props> = ({
   toolbarActions,
   dragGesture,
   isDraggingActive,
-}) => (
-  <GestureDetector gesture={dragGesture}>
+}) => {
+  const header = (
     <View style={[styles.wrapper, isDraggingActive && styles.wrapperDragging]}>
       <TouchableOpacity style={styles.header} activeOpacity={0.8} onPress={onToggleExpand}>
         <View style={styles.left}>
@@ -49,8 +49,14 @@ export const MissionTableHeader: React.FC<Props> = ({
         </View>
       </TouchableOpacity>
     </View>
-  </GestureDetector>
-);
+  );
+
+  if (!dragGesture) {
+    return header;
+  }
+
+  return <GestureDetector gesture={dragGesture}>{header}</GestureDetector>;
+};
 
 const styles = StyleSheet.create({
   wrapper: {

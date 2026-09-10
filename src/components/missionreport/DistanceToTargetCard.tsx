@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { GestureDetector } from "react-native-gesture-handler";
+import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 
@@ -97,7 +97,7 @@ export const DistanceToTargetCard: React.FC<Props> = ({
       : formatStatus(accuracyStatus);
 
   return (
-    <GestureDetector gesture={dragGesture}>
+    <OptionalGestureDetector gesture={dragGesture}>
       <View
         style={[styles.container, isDraggingActive && styles.containerDragging]}
       >
@@ -127,7 +127,7 @@ export const DistanceToTargetCard: React.FC<Props> = ({
           </View>
         </View>
       </View>
-    </GestureDetector>
+    </OptionalGestureDetector>
   );
 };
 

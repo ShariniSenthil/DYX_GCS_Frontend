@@ -1458,9 +1458,11 @@ if (envelope.within_test_tolerance !== undefined) {
   const robotStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
+  const robotStatusPollInFlightRef = useRef(false);
 
   const pollRobotStatus = useCallback(async () => {
-    if (!mountedRef.current || isOfflineMode()) return;
+    if (!mountedRef.current || isOfflineMode() || robotStatusPollInFlightRef.current) return;
+    robotStatusPollInFlightRef.current = true;
 
     try {
       const prevNetwork =
@@ -1519,6 +1521,8 @@ if (envelope.within_test_tolerance !== undefined) {
         err: err instanceof Error ? err.message : String(err),
         sock: socketRef.current?.connected ?? false,
       });
+    } finally {
+      robotStatusPollInFlightRef.current = false;
     }
   }, []);
 
@@ -2132,22 +2136,11 @@ attitude: adapted.attitude,
            */
           const generatedAt = backendGeneratedAt ?? Date.now();
 
-          const CLOCK_TOLERANCE_MS = 500;
-
           /*
-           * Reject telemetry generated before this connection.
+           * Connection generation already drops packets from a previous
+           * socket. Do not compare rover generated_at to tablet wall clock —
+           * a tablet that is 500ms behind would discard every live packet.
            */
-          if (
-            backendGeneratedAt !== null &&
-            backendGeneratedAt < connectedAt - CLOCK_TOLERANCE_MS
-          ) {
-            telemetryDiagLog("Telemetry rejected: packet predates connection", {
-              backendGeneratedAt,
-              connectedAt,
-            });
-
-            return;
-          }
 
           // console.log("[TELEMETRY] Live packet received", {
           //   generation: connectionGeneration,
@@ -2404,6 +2397,9 @@ attitude: adapted.attitude,
 
         // 4WD_SERVER — flat mission_status socket contract
         socket.on(SOCKET_EVENTS.MISSION_STATUS, (data: any) => {
+          if (!data || typeof data !== "object") {
+            return;
+          }
           if (isRobotStatusDebugEnabled()) {
             const mdbg = getRobotStatusDebug();
             patchRobotStatusDebug({

@@ -36,6 +36,7 @@ import beaconListener, {
 import {
   HEALTH_INTERVAL_MS,
   applyHealthResult,
+  fetchRoverHealth,
   refreshAllHealth,
   restoreKnownRovers,
 } from "../services/roverPresence";
@@ -337,8 +338,8 @@ export default function RoverDiscoveryScreen({
       const response = { status: reachable ? 200 : 503 };
       if (reachable) {
         const device: JetsonDevice = {
-          id: "custom-" + ip,
-          name: `Custom Rover (${ip})`,
+          id: health.rover_id,
+          name: health.rover_name || `Custom Rover (${ip})`,
           ip,
           port,
           url: normalizedManualUrl,
@@ -355,7 +356,7 @@ export default function RoverDiscoveryScreen({
       } else {
         Alert.alert(
           "Connection Failed",
-          `Server responded with status ${response.status}`,
+          "The URL did not return a valid rover backend health response.",
         );
       }
     } catch (error: any) {

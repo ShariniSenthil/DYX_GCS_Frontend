@@ -67,7 +67,6 @@ export const ManualDrivePanel: React.FC<ManualDrivePanelProps> = ({ onClose }) =
   const [estopping, setEstopping] = useState(false);
   const [previewIntent, setPreviewIntent] = useState({ throttle: 0, steering: 0 });
   const acquireAttemptedRef = useRef(false);
-  const autoArmAttemptedRef = useRef(false);
   const lastJoystickAlertRef = useRef<string | null>(null);
 
   const authToken = session?.token ?? '';
@@ -109,21 +108,17 @@ export const ManualDrivePanel: React.FC<ManualDrivePanelProps> = ({ onClose }) =
     controlOwner: telemetry.control_owner ?? undefined,
   });
 
-  // Fallback auto-arm (Three_Wheel pattern) when panel opens without prior arm
-  useEffect(() => {
-    if (offlinePreview) return;
-    if (missionRunning || !isConnected || isArmed) return;
-    if (autoArmAttemptedRef.current) return;
-
-    autoArmAttemptedRef.current = true;
-    void services.armVehicle();
-  }, [offlinePreview, missionRunning, isConnected, isArmed, services]);
+  // Arming is an explicit operator action. Opening this panel must never
+  // actuate the rover.
 
   // Auto-acquire when vehicle is ready (Three_Wheel pattern)
   useEffect(() => {
     if (offlinePreview) return;
     if (!isConnected || !isArmed) return;
     if (hasLease || joystick.state === 'ACQUIRING' || joystick.state === 'RELEASING') return;
+    if (joystick.state === 'AVAILABLE') {
+      acquireAttemptedRef.current = false;
+    }
     if (acquireAttemptedRef.current) return;
     if (!canAcquire) return;
 

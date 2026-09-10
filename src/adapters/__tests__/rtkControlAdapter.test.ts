@@ -331,3 +331,35 @@ describe("deriveRtkHeadline", () => {
     expect(deriveRtkHeadline(status)).toBe("corrections_active");
   });
 });
+
+describe("toRtkControlView never throws on incomplete payloads", () => {
+  it("returns idle for empty object", () => {
+    expect(toRtkControlView({} as never).headline).toBe("off");
+  });
+
+  it("returns idle for { status: null }", () => {
+    expect(toRtkControlView({ status: null } as never).headline).toBe("off");
+  });
+
+  it("returns idle for { status: {} }", () => {
+    expect(toRtkControlView({ status: {} } as never).headline).toBe("off");
+  });
+
+  it("accepts an unwrapped complete status", () => {
+    const wrapped = makeStatus({ desired: "STOPPED", manager: "STOPPED" });
+    expect(toRtkControlView(wrapped.status).headline).toBe("off");
+  });
+
+  it("coerces non-string fix_name", () => {
+    const wrapped = makeStatus({
+      desired: "RUNNING",
+      manager: "RUNNING",
+      streamHealthy: true,
+      fixType: 6,
+      fixName: 6 as unknown as string,
+    });
+    const view = toRtkControlView(wrapped);
+    expect(view.gnssFixName).toBeNull();
+    expect(view.headline).toBe("rtk_fixed");
+  });
+});

@@ -9,7 +9,7 @@ import {
   TextInput,
   Image,
 } from "react-native";
-import { GestureDetector } from "react-native-gesture-handler";
+import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
 import {
@@ -424,7 +424,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
   return (
     <View style={styles.container}>
-      <GestureDetector gesture={dragGesture}>
+      <OptionalGestureDetector gesture={dragGesture}>
         <View
           style={[
             styles.panelHeader,
@@ -453,7 +453,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             )}
           </View>
         </View>
-      </GestureDetector>
+      </OptionalGestureDetector>
       <View style={styles.cardPadding}>
         {/* Control Buttons */}
         <View style={styles.buttonsContainer}>

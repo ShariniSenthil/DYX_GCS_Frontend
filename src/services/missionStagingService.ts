@@ -7,7 +7,7 @@
  * All methods use apiClient with operator token injection.
  */
 
-import { apiGet, apiPost, apiPut } from './apiClient';
+import { apiGet, apiPost, apiPostMultipart } from './apiClient';
 import { PX4_PATH } from '../config/px4Endpoints';
 import type {
   AlignRequest,
@@ -117,22 +117,7 @@ export interface ParseDxfResponse {
 
 /** Upload a DXF file for parsing on the server. */
 export async function parseDxf(formData: FormData): Promise<ParseDxfResponse> {
-  // For multipart uploads, skip Content-Type (let fetch set boundary)
-  const base = (await import('../config')).getBackendURL().replace(/\/$/, '');
-  const token = ''; // Will be set by actual caller using getToken
-  const url = `${base}${PX4_PATH.PARSE_DXF}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`DXF parse failed (${response.status}): ${text}`);
-  }
-
-  return response.json();
+  return apiPostMultipart<ParseDxfResponse>(PX4_PATH.PARSE_DXF, formData);
 }
 
 export default {

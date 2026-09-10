@@ -22,7 +22,7 @@ function viewportEqual(a: Viewport, b: Viewport): boolean {
 function CADGridImpl({ viewport, canvasSize, spacing, majorEveryN, showAxes }: CADGridProps) {
   const { dots, majorDots, originScreen } = useMemo(() => {
     // Adaptive spacing: keep dots readable at any zoom
-    let effectiveSpacing = spacing;
+    let effectiveSpacing = spacing > 0 && Number.isFinite(spacing) ? spacing : 1;
     const minPixelSpacing = 10;
     let pixelSpacing = effectiveSpacing * viewport.scale;
 

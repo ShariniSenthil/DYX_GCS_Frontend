@@ -124,17 +124,28 @@ const IDLE_VIEW: RtkControlViewModel = {
   disabledReason: "Rover Offline",
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCompleteRtkStatus(value: unknown): value is RtkStatus {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return isRecord(value.persisted) && isRecord(value.runtime);
+}
+
 export function unwrapRtkStatus(
   input: RtkStatusResponse | RtkStatus | null | undefined,
 ): RtkStatus | null {
-  if (!input) {
+  if (!input || !isRecord(input)) {
     return null;
   }
-  if ("status" in input && input.status && typeof input.status === "object") {
+  if ("status" in input && isCompleteRtkStatus(input.status)) {
     return input.status;
   }
-  if ("persisted" in input && "runtime" in input) {
-    return input as RtkStatus;
+  if (isCompleteRtkStatus(input)) {
+    return input;
   }
   return null;
 }
@@ -181,8 +192,8 @@ function runningHeadline(
 }
 
 export function deriveRtkHeadline(status: RtkStatus): RtkHeadlineState {
-  const desired = status.persisted.desired_state;
-  const managerState = status.runtime.manager?.state ?? null;
+  const desired = status.persisted?.desired_state;
+  const managerState = status.runtime?.manager?.state ?? null;
   const correctionHealthy = Boolean(status.correction_stream?.healthy);
   const gnss = status.gnss_solution;
 
@@ -294,16 +305,17 @@ export function toRtkControlView(
     };
   }
 
+  try {
   const headline = deriveRtkHeadline(status);
   const stream: RtkCorrectionStream | undefined = status.correction_stream;
   const gnss: RtkGnssSolution | undefined = status.gnss_solution;
   const gga: RtkGgaTelemetry | undefined = stream?.gga;
-  const managerState = status.runtime.manager?.state ?? null;
-  const desired = status.persisted.desired_state;
+  const managerState = status.runtime?.manager?.state ?? null;
+  const desired = status.persisted?.desired_state ?? null;
   const activeProfile = status.active_profile;
   const activeEnabled = Boolean(activeProfile?.enabled);
   const hasActiveProfile =
-    activeProfile != null && status.persisted.active_profile_id != null;
+    activeProfile != null && status.persisted?.active_profile_id != null;
 
   const canStart =
     !mutationBusy &&
@@ -330,18 +342,19 @@ export function toRtkControlView(
     tone: toneForHeadline(headline),
     desiredState: desired,
     managerState,
-    supervisorRunning: status.runtime.supervisor?.running ?? null,
+    supervisorRunning: status.runtime?.supervisor?.running ?? null,
     mavrosReady:
-      status.runtime.manager?.mavros_ready ??
-      status.runtime.supervisor?.mavros_ready ??
+      status.runtime?.manager?.mavros_ready ??
+      status.runtime?.supervisor?.mavros_ready ??
       stream?.mavros_ready ??
       null,
-    errorReason: status.runtime.manager?.error_reason ?? null,
-    correctionState: stream?.state ?? null,
+    errorReason: status.runtime?.manager?.error_reason ?? null,
+    correctionState: typeof stream?.state === "string" ? stream.state : null,
     correctionConnected: Boolean(stream?.connected),
     correctionHealthy: Boolean(stream?.healthy),
     correctionAgeSec:
-      typeof stream?.correction_age_sec === "number"
+      typeof stream?.correction_age_sec === "number" &&
+      Number.isFinite(stream.correction_age_sec)
         ? stream.correction_age_sec
         : null,
     publishedFrames:
@@ -352,8 +365,10 @@ export function toRtkControlView(
       typeof stream?.socket_bytes_received === "number"
         ? stream.socket_bytes_received
         : null,
-    gnssFixType: typeof gnss?.fix_type === "number" ? gnss.fix_type : null,
-    gnssFixName: gnss?.fix_name ?? null,
+    gnssFixType: typeof gnss?.fix_type === "number" && Number.isFinite(gnss.fix_type)
+      ? gnss.fix_type
+      : null,
+    gnssFixName: typeof gnss?.fix_name === "string" ? gnss.fix_name : null,
     rtkFloat: Boolean(gnss?.rtk_float) || gnss?.fix_type === 5,
     rtkFixed: Boolean(gnss?.rtk_fixed) || gnss?.fix_type === 6,
     satellitesVisible:
@@ -361,9 +376,9 @@ export function toRtkControlView(
         ? gnss.satellites_visible
         : null,
     ggaEnabled: Boolean(gga?.enabled),
-    ggaState: gga?.state ?? null,
+    ggaState: typeof gga?.state === "string" ? gga.state : null,
     activeProfile,
-    activeProfileId: status.persisted.active_profile_id,
+    activeProfileId: status.persisted?.active_profile_id ?? null,
     canStart,
     canStop,
     canEdit,
@@ -378,6 +393,18 @@ export function toRtkControlView(
       activeEnabled,
     }),
   };
+  } catch (error) {
+    console.warn("[rtkControlAdapter] Failed to project RTK status:", error);
+    return {
+      ...IDLE_VIEW,
+      headline: "off",
+      headlineLabel: RTK_HEADLINE_LABEL.off,
+      tone: "idle",
+      canEdit: !mutationBusy,
+      canDelete: false,
+      disabledReason: "RTK status was incomplete",
+    };
+  }
 }
 
 export function isRuntimeSignificantProfileChange(

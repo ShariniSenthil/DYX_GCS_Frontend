@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-import { ActivityIndicator, StatusBar, View } from "react-native";
+import { ActivityIndicator, StatusBar, StyleSheet, View } from "react-native";
 
 import { NavigationContainer } from "@react-navigation/native";
 
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useFonts } from "expo-font";
 
@@ -79,6 +81,7 @@ function AuthGate({
   const { isAuthenticated, isLoading, session, invalidateSession } = useAuth();
   const [sessionValidation, setSessionValidation] =
     useState<SessionValidationState>(AUTH_ENABLED ? "checking" : "valid");
+  const validatedOnceRef = useRef(!AUTH_ENABLED);
 
   /**
    * Validate the saved token against the selected rover.
@@ -91,11 +94,14 @@ function AuthGate({
   useEffect(() => {
     if (!AUTH_ENABLED) {
       setSessionValidation("valid");
+      validatedOnceRef.current = true;
       return;
     }
 
     if (isLoading) {
-      setSessionValidation("checking");
+      if (!validatedOnceRef.current) {
+        setSessionValidation("checking");
+      }
       return;
     }
 
@@ -125,6 +131,7 @@ function AuthGate({
 
         if (mounted) {
           setSessionValidation("valid");
+          validatedOnceRef.current = true;
         }
       } catch (error) {
         if (!mounted) {
@@ -148,12 +155,15 @@ function AuthGate({
           error,
         );
         setSessionValidation("valid");
+        validatedOnceRef.current = true;
       } finally {
         validationInFlight = false;
       }
     };
 
-    setSessionValidation("checking");
+    if (!validatedOnceRef.current) {
+      setSessionValidation("checking");
+    }
     void validateStoredSession();
 
     // Detect server-side token invalidation while the app remains open.
@@ -171,29 +181,35 @@ function AuthGate({
     return <>{children}</>;
   }
 
-  if (isLoading || (isAuthenticated && sessionValidation === "checking")) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: "#0A1628",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <ActivityIndicator size="large" color="#4ADE80" />
-      </View>
-    );
-  }
+  const showBootstrapSpinner =
+    isLoading ||
+    (!validatedOnceRef.current &&
+      isAuthenticated &&
+      sessionValidation === "checking");
 
-  if (!isAuthenticated || sessionValidation === "invalid") {
-    return <LoginScreen onBack={onBackToDiscovery} />;
-  }
+  const showLogin = !isAuthenticated || sessionValidation === "invalid";
+
+  const coverGcs = showBootstrapSpinner || showLogin;
 
   return (
-    <React.Fragment key={session?.token ?? "authenticated-session"}>
-      {children}
-    </React.Fragment>
+    <View style={styles.fill}>
+      <View
+        style={[styles.fill, coverGcs && styles.gcsParked]}
+        pointerEvents={coverGcs ? "none" : "auto"}
+        collapsable={false}
+      >
+        {children}
+      </View>
+      {showBootstrapSpinner ? (
+        <View style={styles.blockingOverlayCentered}>
+          <ActivityIndicator size="large" color="#4ADE80" />
+        </View>
+      ) : showLogin ? (
+        <View style={styles.blockingOverlay}>
+          <LoginScreen onBack={onBackToDiscovery} />
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -205,6 +221,7 @@ function AppContent(): React.ReactElement {
   const [backendReady, setBackendReady] = useState(false);
 
   const [backendConfigured, setBackendConfigured] = useState(false);
+  const [gcsMounted, setGcsMounted] = useState(false);
 
   /**
    * Restore the previously selected rover.
@@ -233,7 +250,11 @@ function AppContent(): React.ReactElement {
         // login screen for an unreachable localhost backend.
         const configuredURL = savedBackendURL?.trim() ?? "";
         const isPlaceholderBackend = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\\d+)?\/?$/i.test(configuredURL);
-        setBackendConfigured(Boolean(configuredURL) && !isPlaceholderBackend);
+        const hasRover = Boolean(configuredURL) && !isPlaceholderBackend;
+        setBackendConfigured(hasRover);
+        if (hasRover) {
+          setGcsMounted(true);
+        }
       } catch (error) {
         console.warn("[App] Could not restore saved backend:", error);
 
@@ -262,6 +283,7 @@ function AppContent(): React.ReactElement {
 
     await saveBackendURL(device.url, device.ip, device.port);
 
+    setGcsMounted(true);
     setBackendConfigured(true);
   };
 
@@ -311,24 +333,37 @@ function AppContent(): React.ReactElement {
    * - Wi-Fi loss does not reopen discovery.
    * - Jetson restart does not reopen discovery.
    */
-  if (!backendConfigured) {
-    return <RoverDiscoveryScreen onRoverSelected={handleRoverSelected} />;
-  }
+  const showDiscovery = !backendConfigured;
 
   return (
-    <AuthGate onBackToDiscovery={handleBackToDiscovery}>
-      <WaypointProvider>
-        <VerifiedMissionProvider>
-          <MissionStagingProvider>
-            <RoverProvider>
-              <NavigationContainer>
-                <TabNavigator />
-              </NavigationContainer>
-            </RoverProvider>
-          </MissionStagingProvider>
-        </VerifiedMissionProvider>
-      </WaypointProvider>
-    </AuthGate>
+    <View style={styles.fill}>
+      {gcsMounted ? (
+        <View
+          style={[styles.fill, showDiscovery && styles.gcsParked]}
+          pointerEvents={showDiscovery ? "none" : "auto"}
+          collapsable={false}
+        >
+          <AuthGate onBackToDiscovery={handleBackToDiscovery}>
+            <WaypointProvider>
+              <VerifiedMissionProvider>
+                <MissionStagingProvider>
+                  <RoverProvider>
+                    <NavigationContainer>
+                      <TabNavigator />
+                    </NavigationContainer>
+                  </RoverProvider>
+                </MissionStagingProvider>
+              </VerifiedMissionProvider>
+            </WaypointProvider>
+          </AuthGate>
+        </View>
+      ) : null}
+      {showDiscovery ? (
+        <View style={styles.blockingOverlay}>
+          <RoverDiscoveryScreen onRoverSelected={handleRoverSelected} />
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -343,7 +378,11 @@ export default function App(): React.ReactElement | null {
   });
 
   if (!fontsLoaded) {
-    return null;
+    return (
+      <View style={styles.blockingOverlayCentered}>
+        <ActivityIndicator size="large" color="#4ADE80" />
+      </View>
+    );
   }
 
   return (
@@ -353,16 +392,46 @@ export default function App(): React.ReactElement | null {
           flex: 1,
         }}
       >
-        <StatusBar barStyle="light-content" backgroundColor="#0A1628" hidden />
+        <SafeAreaProvider>
+          <StatusBar barStyle="light-content" backgroundColor="#0A1628" hidden />
 
-        <ComponentReadinessProvider>
-          <AuthProvider>
-            <ErrorBoundary componentName="Main Content">
-              <AppContent />
-            </ErrorBoundary>
-          </AuthProvider>
-        </ComponentReadinessProvider>
+          <ComponentReadinessProvider>
+            <AuthProvider>
+              <ErrorBoundary componentName="Main Content">
+                <AppContent />
+              </ErrorBoundary>
+            </AuthProvider>
+          </ComponentReadinessProvider>
+        </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  fill: {
+    flex: 1,
+    backgroundColor: "#0A1628",
+  },
+  /**
+   * Keep MapView mounted (no display:none / unmount) but invisible so
+   * Marking Plan zIndex/elevation cannot punch through Discovery or Login.
+   */
+  gcsParked: {
+    opacity: 0,
+  },
+  blockingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#0A1628",
+    zIndex: 100000,
+    elevation: 100000,
+  },
+  blockingOverlayCentered: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#0A1628",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 100000,
+    elevation: 100000,
+  },
+});

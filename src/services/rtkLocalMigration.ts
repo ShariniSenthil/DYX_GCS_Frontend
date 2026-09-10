@@ -72,10 +72,15 @@ export async function listLocalRtkProfilesForMigration(): Promise<
   // Do not place legacy plaintext passwords into React/UI state merely by
   // opening the RTK control screen. Full rows are re-read only after an
   // explicit Import action.
-  return profiles.map((profile) => ({
-    id: profile.id,
-    name: profile.name,
-  }));
+  if (!Array.isArray(profiles)) {
+    return [];
+  }
+  return profiles
+    .filter((profile) => profile && profile.id != null)
+    .map((profile) => ({
+      id: profile.id,
+      name: String(profile.name ?? profile.id),
+    }));
 }
 
 export async function importLocalRtkProfiles(options: {
