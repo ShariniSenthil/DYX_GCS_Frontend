@@ -770,6 +770,19 @@ export function useBackendMissionStatus(
           return;
         }
 
+        /*
+         * /mission_manager/point_event also transports system notifications.
+         * RTK_FLOAT / RTK_RECOVERED do not identify a mission point and must
+         * never overwrite activePointState or last point progress.
+         */
+        if (
+          event.pointId === null &&
+          event.pointIndex === null &&
+          event.pathIndex === null
+        ) {
+          return;
+        }
+
         setMission(
           previous => ({
             ...previous,

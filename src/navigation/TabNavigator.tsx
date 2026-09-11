@@ -10,6 +10,7 @@ import { FieldMapProvider, useFieldMap } from '../context/FieldMapContext';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import { colors } from '../theme/colors';
 import PersistentStorage from '../services/PersistentStorage';
+import { RtkRuntimeNotice } from '../components/rtk/RtkRuntimeNotice';
 
 const MemoDashboardScreen = React.memo(DashboardScreen);
 const MemoPathPlanScreen = React.memo(PathPlanScreen);
@@ -101,6 +102,8 @@ function TabNavigatorInner() {
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
+
+        <RtkRuntimeNotice />
 
         <View style={styles.body}>
           <View
