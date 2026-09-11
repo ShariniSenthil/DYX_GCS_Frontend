@@ -78,6 +78,7 @@ const FieldMapHostBase: React.FC = () => {
     canMount,
     onLayout,
     onMapReady,
+    onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
 
@@ -226,8 +227,39 @@ const FieldMapHostBase: React.FC = () => {
     if (didFitRef.current || !mapReady) return;
     if (fallbackSnapshot.waypoints.length === 0) return;
     didFitRef.current = true;
-    handleFitMission();
-  }, [fallbackSnapshot.waypoints.length, mapReady, handleFitMission]);
+    const pts = fallbackSnapshot.waypoints.filter((wp) =>
+      isValidLngLat(wp.lon, wp.lat),
+    );
+    if (pts.length === 0) return;
+    let minLon = pts[0].lon;
+    let minLat = pts[0].lat;
+    let maxLon = pts[0].lon;
+    let maxLat = pts[0].lat;
+    for (const wp of pts) {
+      minLon = Math.min(minLon, wp.lon);
+      minLat = Math.min(minLat, wp.lat);
+      maxLon = Math.max(maxLon, wp.lon);
+      maxLat = Math.max(maxLat, wp.lat);
+    }
+    if (hasRoverPosition) {
+      minLon = Math.min(minLon, rover.lon);
+      minLat = Math.min(minLat, rover.lat);
+      maxLon = Math.max(maxLon, rover.lon);
+      maxLat = Math.max(maxLat, rover.lat);
+    }
+    cameraRef.current?.fitBounds(
+      [maxLon, maxLat],
+      [minLon, minLat],
+      50,
+      0,
+    );
+  }, [
+    fallbackSnapshot.waypoints,
+    mapReady,
+    hasRoverPosition,
+    rover.lat,
+    rover.lon,
+  ]);
 
   const handleCenterRover = useCallback(() => {
     if (!hasRoverPosition) return;
@@ -263,6 +295,29 @@ const FieldMapHostBase: React.FC = () => {
 
   const cameraCenter = initialCenterRef.current ?? defaultCenter;
 
+  const initialZoom = useMemo(() => {
+    const pts = fallbackSnapshot.waypoints.filter((wp) =>
+      isValidLngLat(wp.lon, wp.lat),
+    );
+    if (pts.length < 2) return DEFAULT_ZOOM;
+    let minLon = pts[0].lon;
+    let minLat = pts[0].lat;
+    let maxLon = pts[0].lon;
+    let maxLat = pts[0].lat;
+    for (const wp of pts) {
+      minLon = Math.min(minLon, wp.lon);
+      minLat = Math.min(minLat, wp.lat);
+      maxLon = Math.max(maxLon, wp.lon);
+      maxLat = Math.max(maxLat, wp.lat);
+    }
+    const span = Math.max(maxLon - minLon, maxLat - minLat);
+    if (span > 0.05) return 13;
+    if (span > 0.02) return 14;
+    if (span > 0.008) return 15;
+    if (span > 0.003) return 16;
+    return 17;
+  }, [fallbackSnapshot.waypoints]);
+
   if (MapView == null) {
     return (
       <View style={styles.root}>
@@ -284,7 +339,9 @@ const FieldMapHostBase: React.FC = () => {
           surfaceView={true}
           pitchEnabled={false}
           rotateEnabled={false}
+          onDidFinishLoadingStyle={onStyleLoaded}
           onDidFinishLoadingMap={onMapReady}
+          onDidFinishRenderingMap={onMapReady}
           onMapLoadingError={onMapError}
           onDidFailLoadingMap={onMapError}
           onPress={handlePress}
@@ -293,7 +350,7 @@ const FieldMapHostBase: React.FC = () => {
             ref={cameraRef}
             defaultSettings={{
               centerCoordinate: cameraCenter,
-              zoomLevel: DEFAULT_ZOOM,
+              zoomLevel: initialZoom,
             }}
           />
 
@@ -344,7 +401,7 @@ const FieldMapHostBase: React.FC = () => {
             </ShapeSource>
           )}
 
-          {mapReady && hasRoverPosition && (
+          {hasRoverPosition && (
             <MarkerView
               coordinate={[rover.lon, rover.lat]}
               anchor={{ x: 0.5, y: 0.5 }}

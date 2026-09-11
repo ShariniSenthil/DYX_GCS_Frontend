@@ -11,10 +11,11 @@ export const MAPBOX_ACCESS_TOKEN =
 
 export const MAPBOX_VERSION = '2.15.0';
 
-// Map styles
-export const MAPBOX_STYLE_SATELLITE = 'mapbox://styles/mapbox/satellite-streets-v12';
-export const MAPBOX_STYLE_STREETS   = 'mapbox://styles/mapbox/streets-v12';
-export const MAPBOX_STYLE_DARK      = 'mapbox://styles/mapbox/dark-v11';
+// Raster satellite only — satellite-streets-v12 also pulls vector roads
+// and makes first load much slower on tablet Wi-Fi.
+export const MAPBOX_STYLE_SATELLITE = "mapbox://styles/mapbox/satellite-v9";
+export const MAPBOX_STYLE_STREETS = "mapbox://styles/mapbox/streets-v12";
+export const MAPBOX_STYLE_DARK = "mapbox://styles/mapbox/dark-v11";
 
 // CDN URLs — loaded inside WebView HTML, no bundling needed
 export const MAPBOX_JS_URL  = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.js`;

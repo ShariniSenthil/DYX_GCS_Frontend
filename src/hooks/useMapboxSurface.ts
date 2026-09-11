@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { LayoutChangeEvent } from "react-native";
+import { Dimensions, type LayoutChangeEvent } from "react-native";
 import MapboxGL from "@rnmapbox/maps";
 import { MAPBOX_ACCESS_TOKEN } from "../config/mapboxConfig";
 
@@ -7,14 +7,21 @@ if (MAPBOX_ACCESS_TOKEN) {
   MapboxGL.setAccessToken(MAPBOX_ACCESS_TOKEN);
 }
 
+const windowSize = Dimensions.get("window");
+
 /**
  * One native MapView for the process. Do not remount it on tab switches —
  * TextureView dies under display:none and looks like a missing map.
+ *
+ * Treat style-loaded as ready so the operator sees rover/points without
+ * waiting for every satellite tile.
  */
 export function useMapboxSurface() {
   const [usingFallback, setUsingFallback] = useState(!MAPBOX_ACCESS_TOKEN);
   const [mapReady, setMapReady] = useState(false);
-  const [hasLayout, setHasLayout] = useState(false);
+  const [hasLayout, setHasLayout] = useState(
+    windowSize.width > 1 && windowSize.height > 1,
+  );
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -23,7 +30,7 @@ export function useMapboxSurface() {
     }
   }, []);
 
-  const onMapReady = useCallback(() => {
+  const markReady = useCallback(() => {
     setMapReady(true);
     setUsingFallback(false);
   }, []);
@@ -38,11 +45,10 @@ export function useMapboxSurface() {
     usingFallback,
     mapReady,
     canMount: hasLayout,
-    // Kept for callers; do not use as a React key — remounting MapView
-    // while GL is initializing aborts the process on Android.
     mapKey: usingFallback ? "fallback" : "online",
     onLayout,
-    onMapReady,
+    onMapReady: markReady,
+    onStyleLoaded: markReady,
     onMapError,
   };
 }

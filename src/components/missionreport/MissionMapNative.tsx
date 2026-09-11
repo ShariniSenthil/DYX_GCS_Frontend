@@ -84,9 +84,9 @@ const MissionMapNativeBase: React.FC<Props> = ({
     usingFallback,
     mapReady,
     canMount,
-
     onLayout,
     onMapReady,
+    onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
 
@@ -222,7 +222,9 @@ const MissionMapNativeBase: React.FC<Props> = ({
         surfaceView={true}
         pitchEnabled={false}
         rotateEnabled={false}
+        onDidFinishLoadingStyle={onStyleLoaded}
         onDidFinishLoadingMap={onMapReady}
+        onDidFinishRenderingMap={onMapReady}
         onMapLoadingError={onMapError}
         onDidFailLoadingMap={onMapError}
       >

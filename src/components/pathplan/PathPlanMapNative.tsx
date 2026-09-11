@@ -22,6 +22,7 @@ export const PathPlanMapNative: React.FC<any> = ({
     canMount,
     onLayout,
     onMapReady,
+    onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
   const center = useMemo(() => {
@@ -117,7 +118,9 @@ export const PathPlanMapNative: React.FC<any> = ({
         surfaceView={true}
         pitchEnabled={false}
         rotateEnabled={false}
+        onDidFinishLoadingStyle={onStyleLoaded}
         onDidFinishLoadingMap={onMapReady}
+        onDidFinishRenderingMap={onMapReady}
         onMapLoadingError={onMapError}
         onDidFailLoadingMap={onMapError}
         onPress={(e: any) => {
@@ -151,8 +154,7 @@ export const PathPlanMapNative: React.FC<any> = ({
           </ShapeSource>
         )}
 
-        {mapReady &&
-          roverPosition &&
+        {roverPosition &&
           visualization?.roverIcon !== false &&
           isValidLngLat(roverPosition.lon, roverPosition.lat) && (
           <MarkerView
