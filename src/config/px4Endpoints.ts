@@ -1,8 +1,7 @@
 /**
  * DYX 4WD Rover Backend endpoint catalog.
  *
- * Backend:
- * http://192.168.3.101:5001
+ * Backend host comes from rover discovery on the current Wi‑Fi.
  *
  * All protected routes use:
  * X-Rover-Token: <token>

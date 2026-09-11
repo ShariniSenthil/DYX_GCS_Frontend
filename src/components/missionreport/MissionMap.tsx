@@ -431,19 +431,26 @@ const MissionMapBase: React.FC<Props> = ({
 
       // Draw rover marker and heading
       if (roverData.hasPosition) {
-        const size = 64;
-        const half = 32;
+        const size = 40;
         const rotation = roverData.heading !== null ? roverData.heading : 0;
 
         const roverIconSVG = \`
-          <svg width="\${size}" height="\${size}" viewBox="-20 -20 40 40" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
-            <circle cx="0" cy="0" r="18.7" fill="rgba(14,165,233,0.12)"/>
-            <polygon points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
-            <polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a"/>
-            <polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a"/>
-            <polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a"/>
-            <polygon points="-4.5,-2 4.5,-2 3.5,2 -3.5,2" fill="rgba(186,230,253,0.85)"/>
-            <circle cx="0" cy="-7.5" r="2.5" fill="#fbbf24" stroke="#fff" stroke-width="1"/>
+          <svg width="\${size}" height="\${size}" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg" style="background: transparent; transform: rotate(\${rotation}deg); will-change: transform;">
+            <ellipse cx="-10.4" cy="-7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+            <ellipse cx="10.4" cy="-7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+            <ellipse cx="-10.4" cy="7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+            <ellipse cx="10.4" cy="7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+            <ellipse cx="-10.4" cy="-7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+            <ellipse cx="10.4" cy="-7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+            <ellipse cx="-10.4" cy="7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+            <ellipse cx="10.4" cy="7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+            <rect x="-6.6" y="-8.4" width="13.2" height="16.8" rx="2.6" fill="#f5c518" stroke="#ffffff" stroke-width="1.15"/>
+            <rect x="-5.4" y="-8.4" width="10.8" height="3.4" rx="1.2" fill="#334155"/>
+            <rect x="-4.6" y="-4.6" width="9.2" height="5.4" rx="1.1" fill="rgba(15,23,42,0.2)"/>
+            <rect x="-3.3" y="2.2" width="6.6" height="4.4" rx="1" fill="#0f172a"/>
+            <rect x="-3.6" y="-7.5" width="2.5" height="1.35" rx="0.45" fill="#67e8f9"/>
+            <rect x="1.1" y="-7.5" width="2.5" height="1.35" rx="0.45" fill="#67e8f9"/>
+            <circle cx="0" cy="8.2" r="1.05" fill="#94a3b8" stroke="#fff" stroke-width="0.45"/>
           </svg>
         \`;
 
@@ -853,19 +860,26 @@ const MissionMapBase: React.FC<Props> = ({
       (function() {
         try {
           if (!roverMarker && ${Number.isFinite(roverLat)} && ${Number.isFinite(roverLon)}) {
-            const size = 64;
-            const half = 32;
+            const size = 40;
             const rotation = ${heading || 0};
 
             const roverIconSVG = \`
-              <svg width="\${size}" height="\${size}" viewBox="-20 -20 40 40" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(\${rotation}deg); will-change: transform;">
-                <circle cx="0" cy="0" r="18.7" fill="rgba(14,165,233,0.12)"/>
-                <polygon points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
-                <polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a"/>
-                <polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a"/>
-                <polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a"/>
-                <polygon points="-4.5,-2 4.5,-2 3.5,2 -3.5,2" fill="rgba(186,230,253,0.85)"/>
-                <circle cx="0" cy="-7.5" r="2.5" fill="#fbbf24" stroke="#fff" stroke-width="1"/>
+              <svg width="\${size}" height="\${size}" viewBox="-16 -16 32 32" xmlns="http://www.w3.org/2000/svg" style="background: transparent; transform: rotate(\${rotation}deg); will-change: transform;">
+                <ellipse cx="-10.4" cy="-7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+                <ellipse cx="10.4" cy="-7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+                <ellipse cx="-10.4" cy="7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+                <ellipse cx="10.4" cy="7.1" rx="3.15" ry="5.15" fill="#0f172a"/>
+                <ellipse cx="-10.4" cy="-7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+                <ellipse cx="10.4" cy="-7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+                <ellipse cx="-10.4" cy="7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+                <ellipse cx="10.4" cy="7.1" rx="1.55" ry="2.7" fill="#64748b"/>
+                <rect x="-6.6" y="-8.4" width="13.2" height="16.8" rx="2.6" fill="#f5c518" stroke="#ffffff" stroke-width="1.15"/>
+                <rect x="-5.4" y="-8.4" width="10.8" height="3.4" rx="1.2" fill="#334155"/>
+                <rect x="-4.6" y="-4.6" width="9.2" height="5.4" rx="1.1" fill="rgba(15,23,42,0.2)"/>
+                <rect x="-3.3" y="2.2" width="6.6" height="4.4" rx="1" fill="#0f172a"/>
+                <rect x="-3.6" y="-7.5" width="2.5" height="1.35" rx="0.45" fill="#67e8f9"/>
+                <rect x="1.1" y="-7.5" width="2.5" height="1.35" rx="0.45" fill="#67e8f9"/>
+                <circle cx="0" cy="8.2" r="1.05" fill="#94a3b8" stroke="#fff" stroke-width="0.45"/>
               </svg>
             \`;
 

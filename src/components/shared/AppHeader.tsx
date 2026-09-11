@@ -12,6 +12,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
 import { SettingsScreen } from "../../screens/SettingsScreen";
 import { useRover } from "../../context/RoverContext";
+import { useConnection } from "../../context/ConnectionContext";
+import { getBackendURL } from "../../config";
 import { ModeSelectionDialog } from "../pathplan/ModeSelectionDialog";
 import { DashConfigDialog } from "../pathplan/DashConfigDialog";
 import { setMissionMode as setBackendMissionMode } from "../../services/missionModeService";
@@ -80,6 +82,20 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
   // Note: useRover() still triggers re-renders on every telemetry tick because
   // it subscribes to the full context. Phase 2 (context split) will fix this.
   const { missionMode, setMissionMode } = useRover();
+  const { connectionState, socketTransport, reconnect } = useConnection();
+  const roverHost = getBackendURL().replace(/^https?:\/\//, "") || "no rover";
+  const wsOnline = connectionState === "connected" && socketTransport === "websocket";
+  const wsLabel =
+    connectionState === "connecting"
+      ? "Connecting"
+      : connectionState !== "connected"
+        ? "WS down"
+        : socketTransport === "websocket"
+          ? "WebSocket"
+          : socketTransport === "polling"
+            ? "Polling"
+            : "Socket";
+  const wsColor = wsOnline ? "#4ADE80" : connectionState === "connected" ? "#FBBF24" : "#F87171";
   const mpOverlay = useMissionProgressOverlayOptional();
   const showMissionProgressWidget =
     activeTab === "Mission Progress" && mpOverlay != null;
@@ -276,6 +292,24 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
 
       {/* Right: Settings and Mode Unified Capsule */}
       <View style={styles.rightSection}>
+        <TouchableOpacity
+          onPress={reconnect}
+          style={styles.wsChip}
+          activeOpacity={0.7}
+          accessibilityLabel="Rover websocket status"
+          accessibilityRole="button"
+        >
+          <View style={[styles.wsDot, { backgroundColor: wsColor }]} />
+          <View>
+            <Text style={[styles.wsLabel, { color: wsColor }]}>{wsLabel}</Text>
+            <Text style={styles.wsHost} numberOfLines={1}>
+              {roverHost}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <View style={styles.rightDivider} />
+
         {/* Mode Selector Button */}
         <TouchableOpacity
           onPress={() => setShowModeDialog(true)}
@@ -470,6 +504,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 5,
+  },
+  wsChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: 160,
+    paddingRight: 4,
+  },
+  wsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  wsLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  wsHost: {
+    color: "#94A3B8",
+    fontSize: 9,
+    maxWidth: 140,
   },
   modeCapsuleBtn: {
     justifyContent: "center",

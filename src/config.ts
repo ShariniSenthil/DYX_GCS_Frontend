@@ -1,35 +1,14 @@
 /**
  * Backend Configuration for React Native Mobile App
  *
- * Environment variables:
- * - VITE_ROS_HTTP_BASE: Backend HTTP base URL (e.g., http://192.168.1.101:5001)
- * - VITE_ROS_WS_URL: WebSocket URL (e.g., ws://192.168.1.101:5001/ws/telemetry)
+ * The rover address is never hardcoded. It comes from:
+ * - a rover selected on the current Wi‑Fi (discovery / beacon / manual URL)
+ * - the last selected rover saved in AsyncStorage
  *
- * Dynamic URL Configuration:
- * - Backend URL can be set at runtime via setBackendURL()
- * - Saved URL is loaded from AsyncStorage on app start
- * - Falls back to environment variables or defaults
+ * Socket.IO attaches to that selected HTTP origin on /socket.io/.
  */
 
 import { getSavedBackendURL } from "./utils/backendStorage";
-
-// Default fallback values (supports multiple env variable names).
-// The hardcoded IP is a last-resort development fallback only — in production
-// the URL is always set via env vars or runtime setBackendURL().
-// Do NOT rely on this value in production builds.
-// Default DYX rover backend address.
-// A rover selected through discovery or manual entry overrides this value.
-const DEFAULT_BACKEND_URL =
-  process.env.REACT_APP_ROS_HTTP_BASE ||
-  process.env.EXPO_PUBLIC_ROS_HTTP_BASE ||
-  process.env.VITE_ROS_HTTP_BASE ||
-  "http://192.168.3.101:5001";
-
-const DEFAULT_WS_URL =
-  process.env.REACT_APP_ROS_WS_URL ||
-  process.env.EXPO_PUBLIC_ROS_WS_URL ||
-  process.env.VITE_ROS_WS_URL ||
-  "ws://192.168.3.101:5001";
 
 // Runtime-selected backend address.
 let dynamicBackendURL: string | null = null;
@@ -70,6 +49,13 @@ export async function initializeBackendURL(): Promise<void> {
     if (savedURL) {
       const normalizedURL = normalizeBackendURL(savedURL);
 
+      if (isMetroBundlerUrl(normalizedURL)) {
+        dynamicBackendURL = null;
+        dynamicWsURL = null;
+        _offlineMode = false;
+        return;
+      }
+
       dynamicBackendURL = normalizedURL;
 
       dynamicWsURL = createWebSocketURL(normalizedURL);
@@ -84,10 +70,8 @@ export async function initializeBackendURL(): Promise<void> {
     console.warn("[config] Could not restore saved backend URL:", error);
   }
 
-  dynamicBackendURL = normalizeBackendURL(DEFAULT_BACKEND_URL);
-
-  dynamicWsURL = createWebSocketURL(DEFAULT_WS_URL);
-
+  dynamicBackendURL = null;
+  dynamicWsURL = null;
   _offlineMode = false;
 }
 
@@ -96,6 +80,13 @@ export async function initializeBackendURL(): Promise<void> {
  */
 export function setBackendURL(url: string): void {
   const normalizedURL = normalizeBackendURL(url);
+
+  if (isMetroBundlerUrl(normalizedURL)) {
+    dynamicBackendURL = null;
+    dynamicWsURL = null;
+    _offlineMode = false;
+    return;
+  }
 
   dynamicBackendURL = normalizedURL;
 
@@ -116,7 +107,7 @@ export function isOfflineMode(): boolean {
  * Return the currently selected backend HTTP address.
  */
 export function getBackendURL(): string {
-  return dynamicBackendURL || normalizeBackendURL(DEFAULT_BACKEND_URL);
+  return dynamicBackendURL || "";
 }
 
 /**
@@ -125,31 +116,55 @@ export function getBackendURL(): string {
  * Socket.IO still uses the configured `/socket.io/` path separately.
  */
 export function getWsURL(): string {
-  return dynamicWsURL || createWebSocketURL(DEFAULT_WS_URL);
+  if (dynamicWsURL) {
+    return dynamicWsURL;
+  }
+  const http = getBackendURL();
+  return http ? createWebSocketURL(http) : "";
 }
 
 /**
  * The full URL for the backend API (Socket.IO and HTTP endpoints)
  * @deprecated Use getBackendURL() instead for dynamic URL support
  */
-export const BACKEND_URL = DEFAULT_BACKEND_URL;
+export const BACKEND_URL = "";
 
 /**
  * WebSocket URL for real-time telemetry
  * @deprecated Use getWsURL() instead for dynamic URL support
  */
-export const WS_URL = DEFAULT_WS_URL;
+export const WS_URL = "";
 
 /**
  * Socket.IO configuration options
  * Optimized for high-frequency telemetry data
  */
+/**
+ * Metro bundler ports (8081/8082) are the JS packager, not the rover
+ * Socket.IO server (port 5001). Operators sometimes paste the Expo URL
+ * into rover discovery; reject that so the connection screen cannot
+ * display a packager URL as the rover websocket.
+ */
+export function isMetroBundlerUrl(url: string): boolean {
+  const value = String(url ?? "").trim();
+  if (!value) return false;
+  try {
+    const parsed = new URL(
+      /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`,
+    );
+    const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    return port === "8081" || port === "8082";
+  } catch {
+    return /:(8081|8082)(?:\/|$)/.test(value);
+  }
+}
+
 export const SOCKET_CONFIG = {
   /*
-   * Establish a reliable HTTP polling connection first,
-   * then upgrade to WebSocket automatically.
+   * Prefer a real WebSocket to the rover. Fall back to HTTP polling if
+   * the access point blocks the upgrade.
    */
-  transports: ["polling", "websocket"],
+  transports: ["websocket", "polling"],
 
   reconnection: false,
 

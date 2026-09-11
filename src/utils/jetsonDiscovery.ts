@@ -29,7 +29,7 @@ export async function getLocalNetworkBase(): Promise<string> {
       return prefix;
     }
   }
-  return "192.168.3";
+  return "";
 }
 
 export async function testJetsonConnection(
@@ -58,6 +58,17 @@ export async function scanForJetsonDevices(
   onProgress?: (current: number, total: number) => void,
 ): Promise<JetsonDevice[]> {
   const prefix = baseIP || (await getLocalNetworkBase());
+  if (!prefix) {
+    const found = await scanKnownPrefixes([], onProgress);
+    return found.map((rover) => ({
+      id: rover.roverId,
+      name: rover.roverName,
+      ip: rover.ip,
+      port: rover.port,
+      url: rover.url,
+      responseTime: 0,
+    }));
+  }
   const found = await scanSubnet(prefix, onProgress);
   return found.map((rover) => ({
     id: rover.roverId,
@@ -74,7 +85,9 @@ export async function quickScanForJetsonDevices(
 ): Promise<JetsonDevice[]> {
   const extra: string[] = [];
   const base = await getLocalNetworkBase();
-  extra.push(base);
+  if (base) {
+    extra.push(base);
+  }
   const found = await scanKnownPrefixes(extra, onProgress);
   return found.map((rover) => ({
     id: rover.roverId,

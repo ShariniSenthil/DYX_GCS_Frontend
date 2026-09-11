@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list";
 import { colors } from "../../theme/colors";
@@ -9,6 +9,13 @@ import type { WaypointUiStatus } from "../../types/missionWaypointStatus";
 import type { RawGnssSurveySnapshot } from "../../services/missionApi";
 import { getStatusPresentation } from "../../utils/missionStatusPresentation";
 import { formatCoord } from "../../utils/formatCoord";
+import {
+  buildMarkingPointListRevision,
+  buildMarkingPointRows,
+  markingPointStatusRevision,
+  type MarkingPointRow,
+  type MarkingPointStatus,
+} from "../../utils/markingPointTableRows";
 
 // DYX RAW GNSS WAYPOINT DISPLAY
 // DYX KEEP RPP ADD RAW LIVE
@@ -81,6 +88,22 @@ interface RowProps {
   wpStatus: any;
   isCurrentWaypoint: boolean;
   embedded?: boolean;
+}
+
+function waypointRowPropsAreEqual(prev: RowProps, next: RowProps): boolean {
+  return (
+    prev.index === next.index &&
+    prev.embedded === next.embedded &&
+    prev.isCurrentWaypoint === next.isCurrentWaypoint &&
+    prev.wp.sn === next.wp.sn &&
+    prev.wp.block === next.wp.block &&
+    prev.wp.row === next.wp.row &&
+    prev.wp.pile === next.wp.pile &&
+    prev.wp.lat === next.wp.lat &&
+    prev.wp.lon === next.wp.lon &&
+    markingPointStatusRevision(prev.wpStatus) ===
+      markingPointStatusRevision(next.wpStatus)
+  );
 }
 
 const WaypointRow = React.memo(
@@ -223,6 +246,7 @@ const WaypointRow = React.memo(
       </View>
     );
   },
+  waypointRowPropsAreEqual,
 );
 
 // ── Main table component ─────────────────────────────────────────────────────
@@ -261,6 +285,12 @@ interface Props {
   embedded?: boolean;
 }
 
+type TableExtraData = {
+  statusMap: Props["statusMap"];
+  currentWaypointNumber: number | null;
+  revision: string;
+};
+
 const ROW_HEIGHT = 58;
 
 export const WaypointsTable = React.memo<Props>(
@@ -279,25 +309,66 @@ export const WaypointsTable = React.memo<Props>(
 
     const safeWaypoints = Array.isArray(waypoints) ? waypoints : [];
 
+    const listRevision = useMemo(
+      () =>
+        buildMarkingPointListRevision(
+          safeWaypoints,
+          statusMap as Record<number, MarkingPointStatus | undefined>,
+          currentWaypointNumber,
+        ),
+      [safeWaypoints, statusMap, currentWaypointNumber],
+    );
+
+    const rows = useMemo(
+      () =>
+        buildMarkingPointRows(
+          safeWaypoints,
+          statusMap as Record<number, MarkingPointStatus | undefined>,
+          currentWaypointNumber,
+        ),
+      [listRevision, safeWaypoints, statusMap, currentWaypointNumber],
+    );
+
+    const extraData = useMemo<TableExtraData>(
+      () => ({
+        statusMap,
+        currentWaypointNumber,
+        revision: listRevision,
+      }),
+      [listRevision, statusMap, currentWaypointNumber],
+    );
+
     const renderItem = useCallback(
-      (props: LegendListRenderItemProps<Waypoint>) => (
-        <WaypointRow
-          wp={props.item}
-          index={props.index}
-          wpStatus={statusMap[props.item.sn]}
-          isCurrentWaypoint={
-            currentWaypointNumber !== null &&
-            props.item.sn === currentWaypointNumber
-          }
-          embedded={embedded}
-        />
-      ),
-      [statusMap, currentWaypointNumber, embedded],
+      ({
+        item,
+        extraData: live,
+      }: LegendListRenderItemProps<MarkingPointRow<Waypoint>>) => {
+        const extra = live as TableExtraData | undefined;
+        const wpStatus = extra
+          ? extra.statusMap[item.waypoint.sn]
+          : item.wpStatus;
+        const currentNumber =
+          extra?.currentWaypointNumber ?? null;
+        const isCurrentWaypoint = extra
+          ? currentNumber !== null && item.waypoint.sn === currentNumber
+          : item.isCurrentWaypoint;
+
+        return (
+          <WaypointRow
+            wp={item.waypoint}
+            index={item.index}
+            wpStatus={wpStatus}
+            isCurrentWaypoint={isCurrentWaypoint}
+            embedded={embedded}
+          />
+        );
+      },
+      [embedded],
     );
 
     const keyExtractor = useCallback(
-      (item: Waypoint, index: number) =>
-        `wp-${item.sn ?? "x"}-${index}-${item.lat}-${item.lon}`,
+      (item: MarkingPointRow<Waypoint>) =>
+        `wp-${item.waypoint.sn ?? "x"}-${item.index}`,
       [],
     );
 
@@ -421,11 +492,13 @@ export const WaypointsTable = React.memo<Props>(
               </Text>
             </View>
 
-            {/* Virtualized table body — only visible rows are mounted */}
+            {/* Recycled cells must see status via extraData + dataVersion. */}
             <LegendList
-              data={safeWaypoints}
+              data={rows}
               renderItem={renderItem}
               keyExtractor={keyExtractor}
+              extraData={extraData}
+              dataVersion={listRevision}
               recycleItems={true}
               estimatedItemSize={ROW_HEIGHT}
               style={[

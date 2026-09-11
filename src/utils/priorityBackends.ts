@@ -21,32 +21,7 @@ export async function getPriorityBackendIPs(): Promise<string[]> {
     console.error('Failed to get priority backend IPs:', error);
   }
 
-  // Return default priority IPs
   return [
-    // Primary range: 100-102
-    '192.168.1.100',
-    '192.168.1.101',
-    '192.168.1.102',
-
-    // Secondary range: 210-214
-    '192.168.1.210',
-    '192.168.1.211',
-    '192.168.1.102',
-    '192.168.1.213',
-    '192.168.1.214',
-
-    // Tertiary range: 25-35
-    '192.168.1.25',
-    '192.168.1.26',
-    '192.168.1.27',
-    '192.168.1.28',
-    '192.168.1.29',
-    '192.168.1.30',
-    '192.168.1.31',
-    '192.168.1.32',
-    '192.168.1.33',
-    '192.168.1.34',
-    '192.168.1.35',
   ];
 }
 

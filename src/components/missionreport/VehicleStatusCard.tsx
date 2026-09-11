@@ -11,6 +11,7 @@ interface Props {
   status: VehicleStatus;
   telemetry?: RoverTelemetry;
   isConnected: boolean;
+  socketTransport?: "websocket" | "polling" | null;
   /** Injected by DraggableCard (handleType="custom") */
   dragGesture?: any;
   isDraggingActive?: boolean;
@@ -87,6 +88,7 @@ export const VehicleStatusCard: React.FC<Props> = ({
   status,
   telemetry,
   isConnected,
+  socketTransport = null,
   dragGesture,
   isDraggingActive,
   onClose,
@@ -99,7 +101,21 @@ export const VehicleStatusCard: React.FC<Props> = ({
   const vrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.vrms ?? 0), (telemetry as any)?.vrms);
   const satColor = useDebouncedColor(() => getSatelliteColor(telemetry), telemetry?.global?.satellites_visible);
 
+  const socketLabel = !isConnected
+    ? 'Down'
+    : socketTransport === 'websocket'
+      ? 'WebSocket'
+      : socketTransport === 'polling'
+        ? 'Polling'
+        : 'Connecting';
+  const socketColor = socketTransport === 'websocket' && isConnected
+    ? colors.success
+    : isConnected
+      ? colors.warning
+      : colors.danger;
+
   const rows: StatusRowItem[] = [
+    { key: 'websocket', label: 'WebSocket', value: socketLabel, color: socketColor, icon: 'pulse' },
     { key: 'battery', label: 'Battery', value: status.battery, color: batteryColor, icon: 'battery-charging' },
     { key: 'gps', label: 'GPS / RTK', value: status.gps, color: rtkColor, icon: 'cellular' },
     { key: 'satellites', label: 'Satellites', value: status.satellites, color: satColor, icon: 'radio' },

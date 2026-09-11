@@ -11,7 +11,7 @@ import { getBackendURL } from '../../config';
 
 export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string }) {
   const [showVoiceModal, setShowVoiceModal] = useState(false);
-  const { gpsFailsafeMode, setGpsFailsafeMode, telemetry, services, connectionState, reconnect } = useRover();
+  const { gpsFailsafeMode, setGpsFailsafeMode, telemetry, services, connectionState, socketTransport, reconnect } = useRover();
   const [showFailsafeModeSelector, setShowFailsafeModeSelector] = useState(false);
   const [isEmergencyStopping, setIsEmergencyStopping] = useState(false);
   const [isReleasingEstop, setIsReleasingEstop] = useState(false);
@@ -33,21 +33,28 @@ export function HeaderBar({ missionMode = 'DGPS Mark' }: { missionMode?: string 
   };
 
   const connectionInfo = useMemo(() => {
-    const host = getBackendURL().replace(/^https?:\/\//, '');
+    const host = getBackendURL().replace(/^https?:\/\//, '') || 'no rover';
+    const transportLabel =
+      socketTransport === 'websocket'
+        ? 'WebSocket'
+        : socketTransport === 'polling'
+          ? 'Polling'
+          : 'Socket down';
     if (connectionState === 'connecting') {
       return { label: 'Connecting…', sublabel: host, color: colors.warning, dot: colors.warning };
     }
     if (connectionState === 'connected') {
       const fcuUp = telemetry.fcu_connected !== false;
+      const sublabel = `${transportLabel} · ${host}`;
       return fcuUp
-        ? { label: 'Online', sublabel: host, color: colors.success, dot: colors.success }
-        : { label: 'GCS only', sublabel: `${host} · FCU offline`, color: colors.warning, dot: colors.warning };
+        ? { label: 'Online', sublabel, color: colors.success, dot: colors.success }
+        : { label: 'GCS only', sublabel: `${sublabel} · FCU offline`, color: colors.warning, dot: colors.warning };
     }
     if (connectionState === 'error') {
-      return { label: 'Error', sublabel: host, color: colors.danger, dot: colors.danger };
+      return { label: 'Error', sublabel: `${transportLabel} · ${host}`, color: colors.danger, dot: colors.danger };
     }
-    return { label: 'Offline', sublabel: host, color: colors.danger, dot: colors.danger };
-  }, [connectionState, telemetry.fcu_connected]);
+    return { label: 'Offline', sublabel: `${transportLabel} · ${host}`, color: colors.danger, dot: colors.danger };
+  }, [connectionState, socketTransport, telemetry.fcu_connected]);
 
   const handleEmergencyStop = async () => {
     Alert.alert(

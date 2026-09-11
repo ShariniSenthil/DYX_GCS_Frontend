@@ -43,7 +43,7 @@ import { apiGet } from "./src/services/apiClient";
 
 import { UnauthorizedError } from "./src/services/apiError";
 
-import { initializeBackendURL, setBackendURL } from "./src/config";
+import { initializeBackendURL, isMetroBundlerUrl, setBackendURL } from "./src/config";
 
 import { PX4_AUTH } from "./src/config/px4Endpoints";
 
@@ -250,7 +250,10 @@ function AppContent(): React.ReactElement {
         // login screen for an unreachable localhost backend.
         const configuredURL = savedBackendURL?.trim() ?? "";
         const isPlaceholderBackend = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\\d+)?\/?$/i.test(configuredURL);
-        const hasRover = Boolean(configuredURL) && !isPlaceholderBackend;
+        const hasRover =
+          Boolean(configuredURL) &&
+          !isPlaceholderBackend &&
+          !isMetroBundlerUrl(configuredURL);
         setBackendConfigured(hasRover);
         if (hasRover) {
           setGcsMounted(true);

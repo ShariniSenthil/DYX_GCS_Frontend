@@ -127,12 +127,29 @@ const DISCONNECTED_TELEMETRY: RoverTelemetry = {
   accuracy_status: null,
   accuracy_pass: false,
   within_test_tolerance: false,
+
+  rpp_debug_available: false,
+  rpp_debug_fresh: false,
+  rpp_control_mode: null,
+  rpp_goal_number: null,
+  rpp_actual_speed_mps: null,
+  rpp_command_speed_mps: null,
+  rpp_current_yaw_deg: null,
+  rpp_path_bearing_deg: null,
+  rpp_guidance_bearing_deg: null,
+  rpp_heading_error_deg: null,
+  rpp_distance_to_goal_m: null,
+  rpp_cross_track_error_mm: null,
+  rpp_cross_track_side: null,
+  rpp_along_remaining_mm: null,
+  rpp_along_position: null,
 };
 
 export interface TelemetryContextValue {
   telemetry: RoverTelemetry;
   roverPosition: { lat: number; lng: number; timestamp: number } | null;
   connectionState: ConnectionState;
+  socketTransport: "websocket" | "polling" | null;
   reconnect: () => void;
   services: RoverServices;
   onMissionEvent: (callback: (event: any) => void) => () => void;
@@ -221,6 +238,7 @@ export function TelemetryProvider({
       telemetry: visibleTelemetry,
       roverPosition: visibleRoverPosition,
       connectionState: rover.connectionState,
+      socketTransport: rover.socketTransport,
       reconnect: rover.reconnect,
       services: rover.services,
       onMissionEvent: rover.onMissionEvent,
@@ -237,6 +255,7 @@ export function TelemetryProvider({
       visibleTelemetry,
       visibleRoverPosition,
       rover.connectionState,
+      rover.socketTransport,
       rover.reconnect,
       rover.services,
       rover.onMissionEvent,

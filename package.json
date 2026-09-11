@@ -19,7 +19,7 @@
     "@react-navigation/bottom-tabs": "^7.8.8",
     "@react-navigation/native": "^7.1.22",
     "@rnmapbox/maps": "^10.3.5",
-    "axios": "^1.13.2",
+    "axios": "^1.20.0",
     "dxf-parser": "^1.1.2",
     "exceljs": "^4.4.0",
     "expo": "~54.0.35",

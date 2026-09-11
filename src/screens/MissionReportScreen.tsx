@@ -45,6 +45,7 @@ import {
 } from "../components/missionreport/types";
 import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
 import { useTelemetry } from "../context/TelemetryContext";
+import { useFieldMap } from "../context/FieldMapContext";
 import { useConnection } from "../context/ConnectionContext";
 import { useMission } from "../context/MissionContext";
 import { AutoAssignDialog } from "../components/missionreport/AutoAssignDialog";
@@ -90,10 +91,26 @@ import { verifiedProgressToLegacy } from "../adapters/verifiedTargetBridge";
 import { clearVerifiedMission } from "../services/verifiedMissionService";
 import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
+  getMissionStartEligibility,
+  shouldAutoResumeAfterStart,
+  shouldSkipExecutionModePost,
+} from "../utils/missionStartEligibility";
+import { shouldAcceptCanonicalReport } from "../utils/missionReportRunGuard";
+import {
+  extractRawGnssSurvey,
+  pickBestRawGnssSurvey,
+  surveyFromRadialMm,
+} from "../utils/rawGnssSurvey";
+import {
+  createMissionStartAttemptId,
+  logMissionStartTiming,
+} from "../utils/missionStartTiming";
+import {
   getMissionStatus,
   getMissionReport,
   getLoadedMissionPath,
   setMissionExecutionMode,
+  prepareMission,
   startMission,
   pauseMission,
   resumeMission,
@@ -164,6 +181,7 @@ const getRtkFailureMessage = (err: unknown, fallback: string) =>
 
 interface MissionReportScreenProps {
   isVisible?: boolean;
+  embedMap?: boolean;
 }
 
 export default function MissionReportScreen({
@@ -184,7 +202,8 @@ export default function MissionReportScreen({
     if (normalized === "dash") return "DASH";
     return null;
   };
-  const { telemetry, roverPosition, onMissionEvent, socket } = useTelemetry();
+  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport } = useTelemetry();
+  const { setMissionSnapshot } = useFieldMap();
   const { services, connectionState } = useConnection();
 
   // 4WD verified mission hooks
@@ -233,6 +252,16 @@ export default function MissionReportScreen({
 
   const [canonicalMissionReport, setCanonicalMissionReport] =
     useState<CanonicalMissionReport | null>(null);
+  const canonicalMissionReportRef = useRef<CanonicalMissionReport | null>(
+    null,
+  );
+  const staleMissionRunIdRef = useRef<string | null>(null);
+  const holdingForNewReportRunRef = useRef(false);
+  const [isPreparingMission, setIsPreparingMission] = useState(false);
+  const startTimingAttemptRef = useRef<string | null>(null);
+  const startOriginRef = useRef<{ lat: number; lon: number } | null>(null);
+  const firstMotionLoggedRef = useRef(false);
+  const lastLoggedStartPhaseRef = useRef<string | null>(null);
 
   /**
    * Temporary frontend fallback for terminal RPP accuracy.
@@ -770,12 +799,33 @@ export default function MissionReportScreen({
    *
    * MANUAL means the backend waits for NEXT after
    * each completed marking point.
+   *
+   * After COMPLETED/STOPPED the stored CSV stays loaded.
+   * If mission-manager dropped `ready`, Start prepares
+   * that CSV instead of forcing a Path Plan re-upload.
    */
-  const canStartMission =
-    connectionState === "connected" &&
-    hasUploadedMission &&
-    backendMission?.ready === true &&
-    (mode === "AUTO" || mode === "MANUAL");
+  const startEligibility = useMemo(
+    () =>
+      getMissionStartEligibility({
+        connected: connectionState === "connected",
+        loaded: hasUploadedMission,
+        ready: backendMission?.ready === true,
+        state: backendMissionState,
+        mode,
+        joystickActive: telemetry.joystick_active === true,
+        controlOwner: telemetry.control_owner,
+      }),
+    [
+      connectionState,
+      hasUploadedMission,
+      backendMission?.ready,
+      backendMissionState,
+      mode,
+      telemetry.joystick_active,
+      telemetry.control_owner,
+    ],
+  );
+  const canStartMission = startEligibility.canPressStart;
 
   const isBackendMissionPaused = backendMissionState === "PAUSED";
 
@@ -919,13 +969,17 @@ export default function MissionReportScreen({
           ?.survey;
 
       const surveySnapshot: RawGnssSurveySnapshot | null =
-        runtimeSurveyCandidate &&
-        typeof runtimeSurveyCandidate === "object"
-          ? runtimeSurveyCandidate as RawGnssSurveySnapshot
-          : reportSurveyCandidate &&
-              typeof reportSurveyCandidate === "object"
-            ? reportSurveyCandidate
-            : null;
+        pickBestRawGnssSurvey(
+          extractRawGnssSurvey(runtimeSurveyCandidate),
+          extractRawGnssSurvey(reportSurveyCandidate),
+          extractRawGnssSurvey(runtimeRow?.survey),
+          extractRawGnssSurvey(runtimeAccuracy),
+          surveyFromRadialMm(
+            typeof runtimeRow?.position_error_cm === "number"
+              ? runtimeRow.position_error_cm * 10
+              : null,
+          ),
+        );
 
       // DYX FINAL POINT RUNTIME STATUS
       //
@@ -1271,8 +1325,22 @@ export default function MissionReportScreen({
       }
 
       if (response.available === true && response.report) {
+        const accept = shouldAcceptCanonicalReport({
+          incomingRunId: response.report.mission_run_id,
+          staleRunId: staleMissionRunIdRef.current,
+          holdingForNewRun: holdingForNewReportRunRef.current,
+        });
+
+        if (!accept) {
+          return;
+        }
+
+        holdingForNewReportRunRef.current = false;
+        staleMissionRunIdRef.current = null;
+        canonicalMissionReportRef.current = response.report;
         setCanonicalMissionReport(response.report);
-      } else {
+      } else if (!holdingForNewReportRunRef.current) {
+        canonicalMissionReportRef.current = null;
         setCanonicalMissionReport(null);
       }
     } catch (error) {
@@ -1484,6 +1552,62 @@ export default function MissionReportScreen({
       clearInterval(timer);
     };
   }, [isVisible, connectionState, refreshCanonicalMissionReport]);
+
+  useEffect(() => {
+    canonicalMissionReportRef.current = canonicalMissionReport;
+  }, [canonicalMissionReport]);
+
+  useEffect(() => {
+    const attemptId = startTimingAttemptRef.current;
+    if (!attemptId || !isMissionActive) {
+      return;
+    }
+
+    const phase = backendMissionState || String(telemetry.mission?.status ?? "");
+    if (!phase || lastLoggedStartPhaseRef.current === phase) {
+      return;
+    }
+
+    lastLoggedStartPhaseRef.current = phase;
+    logMissionStartTiming(attemptId, "backend_phase", phase);
+  }, [
+    backendMissionState,
+    telemetry.mission?.status,
+    isMissionActive,
+  ]);
+
+  useEffect(() => {
+    const attemptId = startTimingAttemptRef.current;
+    const origin = startOriginRef.current;
+    if (
+      !attemptId ||
+      !origin ||
+      firstMotionLoggedRef.current ||
+      !isMissionActive
+    ) {
+      return;
+    }
+
+    const lat = roverPosition?.lat ?? 0;
+    const lon = roverPosition?.lng ?? 0;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return;
+    }
+
+    const moved =
+      Math.abs(lat - origin.lat) > 0.00001 ||
+      Math.abs(lon - origin.lon) > 0.00001;
+    if (!moved) {
+      return;
+    }
+
+    firstMotionLoggedRef.current = true;
+    logMissionStartTiming(
+      attemptId,
+      "first_motion",
+      `lat=${lat.toFixed(7)} lon=${lon.toFixed(7)}`,
+    );
+  }, [roverPosition?.lat, roverPosition?.lng, isMissionActive]);
 
   /*
    * ============================================================
@@ -2453,6 +2577,35 @@ export default function MissionReportScreen({
     missionEndTime,
   ]);
 
+  useEffect(() => {
+    const statusMap: Record<number, { status?: string }> = {};
+    Object.entries(displayData.statusMap ?? {}).forEach(([key, value]) => {
+      const sn = Number(key);
+      if (!Number.isFinite(sn)) return;
+      const raw =
+        value && typeof value === "object" && "status" in value
+          ? String((value as { status?: string }).status ?? "")
+          : "";
+      statusMap[sn] = { status: raw.toLowerCase() };
+    });
+    setMissionSnapshot({
+      waypoints: (displayData.waypoints ?? []).map((wp) => ({
+        lat: wp.lat,
+        lon: wp.lon,
+        sn: wp.sn,
+      })),
+      statusMap,
+      activeWaypointIndex: effectiveCurrentIndex,
+      trajectoryPoints,
+    });
+  }, [
+    displayData.waypoints,
+    displayData.statusMap,
+    effectiveCurrentIndex,
+    trajectoryPoints,
+    setMissionSnapshot,
+  ]);
+
   const missionProgressRef = useMemo(
     () =>
       getMissionProgressRef(
@@ -2550,6 +2703,14 @@ export default function MissionReportScreen({
      * previous mission run to leak into the next run.
      */
     clearTerminalRppAccuracyFallback();
+    const previousRunId =
+      canonicalMissionReportRef.current?.mission_run_id ?? null;
+    if (previousRunId) {
+      staleMissionRunIdRef.current = previousRunId;
+    }
+    holdingForNewReportRunRef.current = true;
+    canonicalMissionReportRef.current = null;
+    setCanonicalMissionReport(null);
     setCurrentIndex(null);
     setMissionStartTime(null);
     setMissionEndTime(null);
@@ -2615,16 +2776,30 @@ export default function MissionReportScreen({
       };
     }
 
+    const attemptId = createMissionStartAttemptId();
+    startTimingAttemptRef.current = attemptId;
+    lastLoggedStartPhaseRef.current = null;
+    firstMotionLoggedRef.current = false;
+    logMissionStartTiming(attemptId, "handle_enter");
+
     try {
       console.log("[MissionReportScreen] Requesting mission start...");
 
-      // The backend mission must exist and its trajectory must
-      // have been prepared successfully.
-      if (!canStartMission) {
+      let latestMission = backendMission;
+
+      const eligibility = getMissionStartEligibility({
+        connected: connectionState === "connected",
+        loaded: latestMission?.loaded === true,
+        ready: latestMission?.ready === true,
+        state: latestMission?.state,
+        mode,
+        joystickActive: telemetry.joystick_active === true,
+        controlOwner: telemetry.control_owner,
+      });
+
+      if (!eligibility.canPressStart) {
         const message =
-          backendMission?.loaded === true
-            ? "The mission file is stored, but its trajectory is not ready."
-            : "Upload and prepare a mission before starting.";
+          eligibility.reason ?? "Mission is not ready to start.";
 
         showNotification("error", "Mission Not Ready", message, 4000);
 
@@ -2634,7 +2809,6 @@ export default function MissionReportScreen({
         };
       }
 
-      // Keep the frontend waypoint display as a second safety check.
       if (waypoints.length === 0) {
         const message = "No marking points are available in the frontend.";
 
@@ -2646,20 +2820,6 @@ export default function MissionReportScreen({
         };
       }
 
-      // Never allow mission start while manual joystick control owns
-      // the rover.
-      if (telemetry.joystick_active || telemetry.control_owner === "joystick") {
-        const message = "Release manual drive before starting the mission.";
-
-        showNotification("error", "Joystick Active", message, 4000);
-
-        return {
-          success: false,
-          message,
-        };
-      }
-
-      // Validate locally displayed GPS marking coordinates.
       const invalidWaypoints = waypoints.filter(
         (waypoint) =>
           !Number.isFinite(waypoint.lat) ||
@@ -2692,39 +2852,109 @@ export default function MissionReportScreen({
         };
       }
 
-      /**
-       * Set execution mode immediately before START.
-       * This guarantees backend and frontend agree
-       * even after reconnect/reload.
-       */
-      const modeResponse = await setMissionExecutionMode(mode);
+      const executionMode: "AUTO" | "MANUAL" =
+        mode === "MANUAL" ? "MANUAL" : "AUTO";
 
-      setBackendMission(modeResponse.mission);
+      if (eligibility.needsPrepare) {
+        setIsPreparingMission(true);
+        logMissionStartTiming(attemptId, "backend_phase", "prepare");
 
-      console.log(
-        "[MissionReportScreen] Start execution mode confirmed:",
-        modeResponse.mission?.execution_mode,
-      );
+        const prepareResponse = await prepareMission();
+        latestMission = prepareResponse.mission;
+        setBackendMission(prepareResponse.mission);
 
-      // A prior mission's auto-completion latches E-stop on the backend
-      // (mission_manager's shared STOP contract), and only an explicit
-      // RELEASE can clear it. There's no separate Release control in the
-      // UI, so clear it transparently here. If this fails because a real,
-      // newer E-stop is active, the START call below still enforces that
-      // safety gate and reports it.
+        if (!prepareResponse.success) {
+          const message =
+            prepareResponse.mission?.message ||
+            "Failed to prepare the stored mission.";
+
+          showNotification("error", "Prepare Failed", message, 4000);
+
+          return {
+            success: false,
+            message,
+          };
+        }
+
+        if (prepareResponse.mission?.ready !== true) {
+          const deadline = Date.now() + 20_000;
+          let readyMission = prepareResponse.mission;
+
+          while (
+            Date.now() < deadline &&
+            readyMission?.ready !== true &&
+            mountedRef.current
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            const status = await getMissionStatus();
+            if (status?.success && status.mission) {
+              readyMission = status.mission;
+              latestMission = status.mission;
+              setBackendMission(status.mission);
+              const prepState = String(status.mission.state ?? "")
+                .trim()
+                .toUpperCase();
+              if (prepState === "ERROR" || prepState === "EMPTY") {
+                break;
+              }
+            }
+          }
+
+          if (readyMission?.ready !== true) {
+            const message =
+              "The stored mission did not become ready after prepare.";
+
+            showNotification("error", "Mission Not Ready", message, 4000);
+
+            return {
+              success: false,
+              message,
+            };
+          }
+        }
+      }
+
+      if (
+        !shouldSkipExecutionModePost(
+          latestMission?.execution_mode,
+          executionMode,
+        )
+      ) {
+        const modeResponse = await setMissionExecutionMode(executionMode);
+        latestMission = modeResponse.mission;
+        setBackendMission(modeResponse.mission);
+        logMissionStartTiming(
+          attemptId,
+          "execution_mode",
+          String(modeResponse.mission?.execution_mode ?? mode),
+        );
+      } else {
+        logMissionStartTiming(attemptId, "execution_mode", "skipped");
+      }
+
+      // Previous Complete/Stop latches the shared STOP contract.
+      // That latch is not always visible as emergency_stop=true, so
+      // Start must always RELEASE before POST /api/mission/start.
       try {
         await releaseEmergencyStop();
+        logMissionStartTiming(attemptId, "estop_release");
       } catch (releaseError) {
+        logMissionStartTiming(attemptId, "estop_release", "failed");
         console.log(
           "[MissionReportScreen] Pre-start E-stop release skipped/failed:",
           releaseError,
         );
       }
 
-      // Current backend contract:
-      // POST /api/mission/start
-      // No mission_id body is required.
+      logMissionStartTiming(attemptId, "start_post_sent");
       const response = await startMission();
+      logMissionStartTiming(
+        attemptId,
+        "start_post_returned",
+        `success=${String(response.success)} state=${String(
+          response.mission?.state ?? "",
+        )} pause=${String(response.mission?.pause_reason ?? "")}`,
+      );
 
       if (!response.success) {
         const message =
@@ -2739,20 +2969,60 @@ export default function MissionReportScreen({
         };
       }
 
-      // The backend accepted Start. Clear old runtime display data,
-      // but retain the uploaded marking points.
       clearCurrentMissionData();
 
-      setBackendMission(response.mission);
+      let startedMission = response.mission;
+      setBackendMission(startedMission);
+
+      const leftoverPause = (mission: typeof startedMission) =>
+        shouldAutoResumeAfterStart({
+          state: mission?.state,
+          resumeAvailable: mission?.resume_available,
+          pauseReason: mission?.pause_reason,
+          emergencyStop: mission?.emergency_stop,
+        });
+
+      if (!leftoverPause(startedMission)) {
+        try {
+          const status = await getMissionStatus();
+          if (status?.success && status.mission) {
+            startedMission = status.mission;
+            setBackendMission(startedMission);
+          }
+        } catch {
+          // Start already succeeded; pause check is best-effort.
+        }
+      }
+
+      if (leftoverPause(startedMission)) {
+        logMissionStartTiming(
+          attemptId,
+          "backend_phase",
+          `auto_resume pause=${String(startedMission?.pause_reason ?? "")}`,
+        );
+
+        try {
+          const resumed = await resumeMission();
+          if (resumed?.mission) {
+            startedMission = resumed.mission;
+            setBackendMission(startedMission);
+          }
+        } catch (resumeError) {
+          console.log(
+            "[MissionReportScreen] Auto-resume after Start failed:",
+            resumeError,
+          );
+        }
+      }
+
       setIsMissionActive(true);
       setMissionStartTime(new Date());
       setMissionEndTime(null);
       setCurrentIndex(0);
-
-      /**
-       * Backend rebuilds the trajectory from the rover's current
-       * position when Start is pressed.
-       */
+      startOriginRef.current = {
+        lat: roverPosition?.lat ?? 0,
+        lon: roverPosition?.lng ?? 0,
+      };
 
       showNotification(
         "success",
@@ -2761,31 +3031,26 @@ export default function MissionReportScreen({
       );
 
       console.log("[MissionReportScreen] Mission start accepted:", {
-        state: response.mission.state,
-        loaded: response.mission.loaded,
-        ready: response.mission.ready,
+        state: startedMission?.state,
+        loaded: startedMission?.loaded,
+        ready: startedMission?.ready,
+        pause_reason: startedMission?.pause_reason,
       });
 
-      return response;
+      return {
+        ...response,
+        mission: startedMission,
+      };
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to start mission.";
 
       console.error("[MissionReportScreen] Mission start failed:", error);
 
-      /*
-       * Backend remains the source of truth.
-       * Refresh immediately so the diagnostic fields on the
-       * screen also reflect the failed Start attempt.
-       */
       void refreshBackendMission();
 
       showNotification("error", "Mission Start Blocked", message, 8000);
 
-      /*
-       * Field-test requirement:
-       * Don't make the operator guess why Start failed.
-       */
       Alert.alert("Mission Start Blocked", message, [
         {
           text: "OK",
@@ -2796,6 +3061,8 @@ export default function MissionReportScreen({
         success: false,
         message,
       };
+    } finally {
+      setIsPreparingMission(false);
     }
   };
 
@@ -3940,6 +4207,17 @@ export default function MissionReportScreen({
               (isSkipped ? "Skipped" : "Marked"),
 
             ...accuracyData,
+
+            survey: pickBestRawGnssSurvey(
+              prevEntry?.survey,
+              extractRawGnssSurvey(event),
+              extractRawGnssSurvey(event.data),
+              extractRawGnssSurvey(event.accuracy),
+              surveyFromRadialMm(backendAccuracyMm, {
+                point_id: `P${String(statusKey).padStart(4, "0")}`,
+                point_index: statusKey,
+              }),
+            ),
           };
 
           const changed =
@@ -3951,7 +4229,8 @@ export default function MissionReportScreen({
             prevEntry.rowNo !== nextEntry.rowNo ||
             prevEntry.remark !== nextEntry.remark ||
             prevEntry.accuracy_level !== nextEntry.accuracy_level ||
-            prevEntry.position_error_cm !== nextEntry.position_error_cm;
+            prevEntry.position_error_cm !== nextEntry.position_error_cm ||
+            prevEntry.survey !== nextEntry.survey;
 
           if (!changed) {
             return prev;
@@ -4505,10 +4784,15 @@ export default function MissionReportScreen({
   // No need to fetch from backend as PathPlan handles upload and syncs to context
 
   return (
-    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView
+      style={[styles.container, !embedMap && styles.containerOverMap]}
+      edges={["left", "right", "bottom"]}
+      pointerEvents={embedMap ? "auto" : "box-none"}
+    >
       <StatusBar backgroundColor={colors.headerBlue} barStyle="light-content" />
 
       <View style={styles.absoluteMapContainer}>
+        {embedMap && (
         <MissionMap
           waypoints={displayData.waypoints}
           trajectoryPoints={trajectoryPoints}
@@ -4522,6 +4806,7 @@ export default function MissionReportScreen({
           edgeToEdge
           isVisible={isVisible}
         />
+        )}
       </View>
 
       {isRobotStatusVisible && (
@@ -4537,6 +4822,7 @@ export default function MissionReportScreen({
               connectionState === "connected" &&
               telemetry.fcu_connected !== false
             }
+            socketTransport={socketTransport}
             onClose={() => setPanelVisible("robotStatus", false)}
           />
         </DraggableCard>
@@ -4602,30 +4888,14 @@ export default function MissionReportScreen({
         >
           <AccuracyMonitorCard
             isMissionActive={accuracyMissionActive}
-            alongSideMm={
-              telemetry.rpp_debug_available ? telemetry.rpp_along_remaining_mm : null
-            }
-            alongSidePosition={
-              telemetry.rpp_debug_available ? telemetry.rpp_along_position : null
-            }
-            crossTrackMm={
-              telemetry.rpp_debug_available ? telemetry.rpp_cross_track_error_mm : null
-            }
-            crossTrackSide={
-              telemetry.rpp_debug_available ? telemetry.rpp_cross_track_side : null
-            }
-            actualSpeedMps={
-              telemetry.rpp_debug_available ? telemetry.rpp_actual_speed_mps : null
-            }
-            targetHeadingDeg={
-              telemetry.rpp_debug_available ? telemetry.rpp_guidance_bearing_deg : null
-            }
-            headingErrorDeg={
-              telemetry.rpp_debug_available ? telemetry.rpp_heading_error_deg : null
-            }
-            distanceToGoalM={
-              telemetry.rpp_debug_available ? telemetry.rpp_distance_to_goal_m : null
-            }
+            alongSideMm={telemetry.rpp_along_remaining_mm}
+            alongSidePosition={telemetry.rpp_along_position}
+            crossTrackMm={telemetry.rpp_cross_track_error_mm}
+            crossTrackSide={telemetry.rpp_cross_track_side}
+            actualSpeedMps={telemetry.rpp_actual_speed_mps}
+            targetHeadingDeg={telemetry.rpp_guidance_bearing_deg}
+            headingErrorDeg={telemetry.rpp_heading_error_deg}
+            distanceToGoalM={telemetry.rpp_distance_to_goal_m}
             onClose={() => setPanelVisible("accuracyMonitor", false)}
           />
         </DraggableCard>
@@ -4693,6 +4963,7 @@ export default function MissionReportScreen({
             waitingForManual={effectiveWaitingForManual}
             isMissionLoaded={hasUploadedMission}
             isMissionReady={canStartMission}
+            isPreparing={isPreparingMission}
             onClose={() => setPanelVisible("missionControls", false)}
           />
         </DraggableCard>
@@ -4866,6 +5137,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.primary,
     position: "relative",
+  },
+  containerOverMap: {
+    backgroundColor: "transparent",
   },
   absoluteMapContainer: {
     position: "absolute",

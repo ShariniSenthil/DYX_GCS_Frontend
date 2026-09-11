@@ -38,6 +38,10 @@ export function isPx4Payload(data: unknown): data is Px4TelemetryData {
     "battery_pct" in d ||
     "gps_fix" in d ||
     "rpp_state" in d ||
+    "rpp_state_name" in d ||
+    "rpp" in d ||
+    "rpp_debug" in d ||
+    "rpp_debug_available" in d ||
     "heading_ned_deg" in d
   );
 }
@@ -74,12 +78,186 @@ function mapGpsFix(fix: unknown): number {
   return Math.max(0, Math.min(6, safeNum(fix, 0)));
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function firstPresent(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    return value;
+  }
+  return undefined;
+}
+
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null || value === "";
+}
+
+const RPP_DEBUG_FIELD_MAP: Array<{ flat: string; aliases: string[] }> = [
+  {
+    flat: "rpp_debug_available",
+    aliases: ["rpp_debug_available", "debug_available", "available"],
+  },
+  {
+    flat: "rpp_debug_fresh",
+    aliases: ["rpp_debug_fresh", "debug_fresh", "fresh"],
+  },
+  {
+    flat: "rpp_control_mode",
+    aliases: ["rpp_control_mode", "control_mode"],
+  },
+  {
+    flat: "rpp_goal_number",
+    aliases: ["rpp_goal_number", "goal_number"],
+  },
+  {
+    flat: "rpp_actual_speed_mps",
+    aliases: ["rpp_actual_speed_mps", "actual_speed_mps"],
+  },
+  {
+    flat: "rpp_command_speed_mps",
+    aliases: ["rpp_command_speed_mps", "command_speed_mps"],
+  },
+  {
+    flat: "rpp_current_yaw_deg",
+    aliases: ["rpp_current_yaw_deg", "current_yaw_deg"],
+  },
+  {
+    flat: "rpp_path_bearing_deg",
+    aliases: ["rpp_path_bearing_deg", "path_bearing_deg"],
+  },
+  {
+    flat: "rpp_guidance_bearing_deg",
+    aliases: ["rpp_guidance_bearing_deg", "guidance_bearing_deg"],
+  },
+  {
+    flat: "rpp_heading_error_deg",
+    aliases: ["rpp_heading_error_deg", "heading_error_deg"],
+  },
+  {
+    flat: "rpp_distance_to_goal_m",
+    aliases: ["rpp_distance_to_goal_m", "distance_to_goal_m", "dist_to_goal_m"],
+  },
+  {
+    flat: "rpp_cross_track_error_mm",
+    aliases: ["rpp_cross_track_error_mm", "cross_track_error_mm"],
+  },
+  {
+    flat: "rpp_cross_track_side",
+    aliases: ["rpp_cross_track_side", "cross_track_side"],
+  },
+  {
+    flat: "rpp_along_remaining_mm",
+    aliases: ["rpp_along_remaining_mm", "along_remaining_mm"],
+  },
+  {
+    flat: "rpp_along_position",
+    aliases: ["rpp_along_position", "along_position"],
+  },
+];
+
+/**
+ * Accept wrapped backend packets such as `{ data: {...} }` or `{ telemetry: {...} }`.
+ * Outer timestamp fields are preserved when the inner body is the live snapshot.
+ */
+export function unwrapTelemetryPayload(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return data;
+  }
+
+  const root = data as Record<string, unknown>;
+  const outerGeneratedAt = root.generated_at;
+  const outerTimestamp = root.timestamp;
+  const outerCreatedAt = root.created_at;
+  const wrappers = [
+    root.telemetry,
+    root.data,
+    root.payload,
+    root.rover_data,
+    root.body,
+    root.result,
+  ];
+
+  if (isPx4Payload(root)) {
+    return root;
+  }
+
+  for (const candidate of wrappers) {
+    if (!isPx4Payload(candidate)) continue;
+    const inner = candidate as Record<string, unknown>;
+    return {
+      ...inner,
+      generated_at: firstPresent(outerGeneratedAt, inner.generated_at),
+      timestamp: firstPresent(outerTimestamp, inner.timestamp),
+      created_at: firstPresent(outerCreatedAt, inner.created_at),
+    };
+  }
+
+  return data;
+}
+
+/**
+ * Copy nested `rpp` / `rpp_debug` fields onto the flat telemetry contract.
+ * Existing flat values always win so mixed payloads stay stable.
+ */
+export function flattenRppFields(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const flattened: Record<string, unknown> = { ...raw };
+  const rpp = asRecord(raw.rpp);
+  const rppDebug =
+    asRecord(raw.rpp_debug) ??
+    asRecord(rpp?.debug) ??
+    asRecord(rpp?.rpp_debug);
+
+  const rppState = firstPresent(raw.rpp_state, rpp?.state, rpp?.rpp_state);
+  if (
+    isAbsent(flattened.rpp_state) &&
+    rppState !== undefined &&
+    typeof rppState !== "object"
+  ) {
+    flattened.rpp_state = rppState;
+  }
+
+  const rppStateName = firstPresent(
+    raw.rpp_state_name,
+    rpp?.state_name,
+    rpp?.rpp_state_name,
+    rpp?.name,
+  );
+  if (isAbsent(flattened.rpp_state_name) && typeof rppStateName === "string") {
+    flattened.rpp_state_name = rppStateName;
+  }
+
+  const nestedSources = [rppDebug, rpp].filter(
+    (value): value is Record<string, unknown> => Boolean(value),
+  );
+
+  for (const { flat, aliases } of RPP_DEBUG_FIELD_MAP) {
+    if (!isAbsent(flattened[flat])) continue;
+    const nestedValues = nestedSources.flatMap((source) =>
+      aliases.map((alias) => source[alias]),
+    );
+    const value = firstPresent(...nestedValues);
+    if (value !== undefined) {
+      flattened[flat] = value;
+    }
+  }
+
+  return flattened;
+}
+
 
 export function toTelemetryEnvelopeFromRoverData(
-  flat: any,
+  raw: any,
   now: number = Date.now(),
 ): TelemetryEnvelope {
   const envelope: TelemetryEnvelope = { timestamp: now };
+  const flat = flattenRppFields(asRecord(raw) ?? {});
 
   const optNum = (val: any) => {
     if (val === null || val === undefined || val === "") return undefined;
@@ -109,11 +287,11 @@ export function toTelemetryEnvelopeFromRoverData(
     return hasKeys ? cleaned : undefined;
   };
 
-  const position = flat.position || {};
-  const vehicle = flat.vehicle || {};
-  const gps = flat.gps || {};
-  const battery = flat.battery || {};
-  const mission = flat.mission || {};
+  const position = asRecord(flat.position) ?? {};
+  const vehicle = asRecord(flat.vehicle) ?? {};
+  const gps = asRecord(flat.gps) ?? {};
+  const battery = asRecord(flat.battery) ?? {};
+  const mission = asRecord(flat.mission) ?? {};
   
   envelope.state = cleanObj({
     armed: optBool(flat.armed ?? vehicle.armed),
@@ -152,14 +330,39 @@ export function toTelemetryEnvelopeFromRoverData(
 
   envelope.fcu_connected = optBool(flat.connected ?? vehicle.connected);
   envelope.mission_state = optStr(mission.state ?? flat.mission_state);
+  envelope.rpp_state_name = optStr(flat.rpp_state_name);
+
+  const rppDebugAvailable = optBool(flat.rpp_debug_available);
+  envelope.rpp_debug_available =
+    rppDebugAvailable ??
+    (optNum(flat.rpp_actual_speed_mps) !== undefined ||
+    optNum(flat.rpp_cross_track_error_mm) !== undefined ||
+    optNum(flat.rpp_along_remaining_mm) !== undefined ||
+    optNum(flat.rpp_distance_to_goal_m) !== undefined
+      ? true
+      : undefined);
+  envelope.rpp_control_mode = optStr(flat.rpp_control_mode);
+  envelope.rpp_goal_number = optNum(flat.rpp_goal_number);
+  envelope.rpp_actual_speed_mps = optNum(flat.rpp_actual_speed_mps);
+  envelope.rpp_command_speed_mps = optNum(flat.rpp_command_speed_mps);
+  envelope.rpp_current_yaw_deg = optNum(flat.rpp_current_yaw_deg);
+  envelope.rpp_path_bearing_deg = optNum(flat.rpp_path_bearing_deg);
+  envelope.rpp_guidance_bearing_deg = optNum(flat.rpp_guidance_bearing_deg);
+  envelope.rpp_heading_error_deg = optNum(flat.rpp_heading_error_deg);
+  envelope.rpp_distance_to_goal_m = optNum(flat.rpp_distance_to_goal_m);
+  envelope.rpp_cross_track_error_mm = optNum(flat.rpp_cross_track_error_mm);
+  envelope.rpp_cross_track_side = optStr(flat.rpp_cross_track_side);
+  envelope.rpp_along_remaining_mm = optNum(flat.rpp_along_remaining_mm);
+  envelope.rpp_along_position = optStr(flat.rpp_along_position);
 
   return envelope;
 }
 
 export function toRoverTelemetry(
-  flat: Px4TelemetryData,
+  raw: Px4TelemetryData,
   now: number = Date.now(),
 ): RoverTelemetry {
+  const flat = flattenRppFields(asRecord(raw) ?? {}) as Px4TelemetryData;
   const vehicle = flat.vehicle;
   const position = flat.position;
   const gps = flat.gps;
@@ -212,6 +415,12 @@ export function toRoverTelemetry(
     activePointIndex !== null ? activePointIndex + 1 : null,
   );
 
+  const rppState = firstOptionalNum(flat.rpp_state);
+  const rppStateName =
+    typeof flat.rpp_state_name === "string" && flat.rpp_state_name.trim()
+      ? flat.rpp_state_name
+      : undefined;
+
   const mission: TelemetryMission & {
     rpp_state?: number;
     rpp_state_name?: string;
@@ -238,10 +447,10 @@ export function toRoverTelemetry(
     ),
     loaded: Boolean(missionSection?.loaded),
     ready: Boolean(missionSection?.ready),
-    rpp_state: safeNum(flat.rpp_state),
-    rpp_state_name: flat.rpp_state_name ?? "",
     dist_to_goal_m: safeNum(flat.dist_to_goal_m ?? flat.dist_to_goal),
     xtrack_m: safeNum(flat.xtrack_m),
+    ...(rppState !== null ? { rpp_state: rppState } : {}),
+    ...(rppStateName ? { rpp_state_name: rppStateName } : {}),
   };
 
   const markingActive = safeBool(
@@ -379,16 +588,12 @@ const accuracyAvailable = safeBool(
  *
  * These values are calculated by RPP and forwarded by the backend.
  * Preserve their values, signs and units without reconstructing geometry.
+ * Absent fields stay undefined so a later partial packet cannot wipe live values.
  */
-const rppDebugAvailable = safeBool(
-  flat.rpp_debug_available,
-  false,
-);
-
 const rppControlMode =
   typeof flat.rpp_control_mode === "string"
     ? flat.rpp_control_mode
-    : null;
+    : undefined;
 
 const rppGoalNumber = firstOptionalNum(
   flat.rpp_goal_number,
@@ -429,7 +634,7 @@ const rppCrossTrackErrorMm = firstOptionalNum(
 const rppCrossTrackSide =
   typeof flat.rpp_cross_track_side === "string"
     ? flat.rpp_cross_track_side
-    : null;
+    : undefined;
 
 const rppAlongRemainingMm = firstOptionalNum(
   flat.rpp_along_remaining_mm,
@@ -438,7 +643,34 @@ const rppAlongRemainingMm = firstOptionalNum(
 const rppAlongPosition =
   typeof flat.rpp_along_position === "string"
     ? flat.rpp_along_position
-    : null;
+    : undefined;
+
+const hasRppDebugValues =
+  rppControlMode !== undefined ||
+  rppGoalNumber !== null ||
+  rppActualSpeedMps !== null ||
+  rppCommandSpeedMps !== null ||
+  rppCurrentYawDeg !== null ||
+  rppPathBearingDeg !== null ||
+  rppGuidanceBearingDeg !== null ||
+  rppHeadingErrorDeg !== null ||
+  rppDistanceToGoalM !== null ||
+  rppCrossTrackErrorMm !== null ||
+  rppCrossTrackSide !== undefined ||
+  rppAlongRemainingMm !== null ||
+  rppAlongPosition !== undefined;
+
+const hasExplicitRppDebugFlag = !isAbsent(flat.rpp_debug_available);
+
+const rppDebugAvailable = hasRppDebugValues
+  ? true
+  : hasExplicitRppDebugFlag
+    ? safeBool(flat.rpp_debug_available, false)
+    : undefined;
+
+const rppDebugFresh = isAbsent(flat.rpp_debug_fresh)
+  ? undefined
+  : safeBool(flat.rpp_debug_fresh, false);
 
   return {
     state,
@@ -455,7 +687,7 @@ const rppAlongPosition =
     fcu_connected: connected,
     gps_fix_name: flat.gps_fix_name ?? gps?.fix_name,
     mission_state: mission.status,
-    rpp_state_name: flat.rpp_state_name ?? undefined,
+    rpp_state_name: rppStateName,
     xtrack_cm: safeNum(flat.xtrack_m) * 100,
     accuracy: {
   available: accuracyAvailable,
@@ -508,23 +740,24 @@ within_test_tolerance:
   withinTestTolerance,
 
 rpp_debug_available: rppDebugAvailable,
+rpp_debug_fresh: rppDebugFresh,
 rpp_control_mode: rppControlMode,
-rpp_goal_number: rppGoalNumber,
+rpp_goal_number: rppGoalNumber ?? undefined,
 
-rpp_actual_speed_mps: rppActualSpeedMps,
-rpp_command_speed_mps: rppCommandSpeedMps,
+rpp_actual_speed_mps: rppActualSpeedMps ?? undefined,
+rpp_command_speed_mps: rppCommandSpeedMps ?? undefined,
 
-rpp_current_yaw_deg: rppCurrentYawDeg,
-rpp_path_bearing_deg: rppPathBearingDeg,
-rpp_guidance_bearing_deg: rppGuidanceBearingDeg,
-rpp_heading_error_deg: rppHeadingErrorDeg,
+rpp_current_yaw_deg: rppCurrentYawDeg ?? undefined,
+rpp_path_bearing_deg: rppPathBearingDeg ?? undefined,
+rpp_guidance_bearing_deg: rppGuidanceBearingDeg ?? undefined,
+rpp_heading_error_deg: rppHeadingErrorDeg ?? undefined,
 
-rpp_distance_to_goal_m: rppDistanceToGoalM,
+rpp_distance_to_goal_m: rppDistanceToGoalM ?? undefined,
 
-rpp_cross_track_error_mm: rppCrossTrackErrorMm,
+rpp_cross_track_error_mm: rppCrossTrackErrorMm ?? undefined,
 rpp_cross_track_side: rppCrossTrackSide,
 
-rpp_along_remaining_mm: rppAlongRemainingMm,
+rpp_along_remaining_mm: rppAlongRemainingMm ?? undefined,
 rpp_along_position: rppAlongPosition,
     distance_to_next_m: (() => {
       const distanceM = firstOptionalNum(
@@ -550,6 +783,72 @@ rpp_along_position: rppAlongPosition,
       flat.joystick_last_valid_cmd_age_ms ?? null,
     joystick_stop_reason: flat.joystick_stop_reason ?? null,
     control_owner: flat.control_owner ?? null,
+  };
+}
+
+/**
+ * Copy adapted rover telemetry into the live envelope used by applyEnvelope.
+ * Undefined RPP fields stay undefined so partial packets do not wipe live values.
+ */
+export function toLiveTelemetryEnvelope(
+  adapted: RoverTelemetry,
+  timestamp: number,
+): TelemetryEnvelope {
+  return {
+    timestamp,
+    state: adapted.state,
+    global: adapted.global,
+    battery: adapted.battery,
+    rtk: adapted.rtk,
+    mission: adapted.mission,
+    servo: adapted.servo,
+    hrms: adapted.hrms,
+    vrms: adapted.vrms,
+    imu_status: adapted.imu_status,
+    distance_to_next_m: adapted.distance_to_next_m,
+    xtrack_cm: adapted.xtrack_cm,
+    accuracy: adapted.accuracy,
+    accuracy_available: adapted.accuracy_available,
+    cross_track_error_mm: adapted.cross_track_error_mm,
+    cross_track_abs_mm: adapted.cross_track_abs_mm,
+    cross_track_side: adapted.cross_track_side,
+    front_back_error_mm: adapted.front_back_error_mm,
+    front_back_abs_mm: adapted.front_back_abs_mm,
+    front_back_position: adapted.front_back_position,
+    radial_error_mm: adapted.radial_error_mm,
+    closest_radial_error_mm: adapted.closest_radial_error_mm,
+    accuracy_target_mm: adapted.accuracy_target_mm,
+    test_tolerance_mm: adapted.test_tolerance_mm,
+    accuracy_status: adapted.accuracy_status,
+    accuracy_pass: adapted.accuracy_pass,
+    within_test_tolerance: adapted.within_test_tolerance,
+    attitude: adapted.attitude,
+    fcu_connected: adapted.fcu_connected,
+    gps_fix_name: adapted.gps_fix_name,
+    rpp_state_name: adapted.rpp_state_name,
+    rpp_debug_available: adapted.rpp_debug_available,
+    rpp_debug_fresh: adapted.rpp_debug_fresh,
+    rpp_control_mode: adapted.rpp_control_mode,
+    rpp_goal_number: adapted.rpp_goal_number,
+    rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
+    rpp_command_speed_mps: adapted.rpp_command_speed_mps,
+    rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
+    rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
+    rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
+    rpp_heading_error_deg: adapted.rpp_heading_error_deg,
+    rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
+    rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
+    rpp_cross_track_side: adapted.rpp_cross_track_side,
+    rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
+    rpp_along_position: adapted.rpp_along_position,
+    measured_speed_m_s: adapted.measured_speed_m_s,
+    along_track_speed_mps: adapted.along_track_speed_mps,
+    cross_track_speed_mps: adapted.cross_track_speed_mps,
+    joystick_state: adapted.joystick_state,
+    joystick_active: adapted.joystick_active,
+    joystick_last_valid_cmd_age_ms: adapted.joystick_last_valid_cmd_age_ms,
+    joystick_stop_reason: adapted.joystick_stop_reason,
+    control_owner: adapted.control_owner,
   };
 }
 
@@ -579,10 +878,14 @@ export function mergeMissionStatus(
     rpp_state_name?: string;
   } = {
     status: status.state ?? base.mission.status,
-    rpp_state: status.rpp_state ?? (base.mission as any).rpp_state,
-    rpp_state_name:
-      status.rpp_state_name ?? (base.mission as any).rpp_state_name,
   };
+
+  if (typeof status.rpp_state === "number" && Number.isFinite(status.rpp_state)) {
+    missionPatch.rpp_state = status.rpp_state;
+  }
+  if (typeof status.rpp_state_name === "string" && status.rpp_state_name.trim()) {
+    missionPatch.rpp_state_name = status.rpp_state_name;
+  }
 
   if (typeof status.total_points === "number") {
     missionPatch.total_wp = Math.max(0, status.total_points);
@@ -616,10 +919,16 @@ export function mergeMissionStatus(
     missionPatch.active_point_state = status.active_point_state;
   }
 
+  const nextRppStateName =
+    missionPatch.rpp_state_name ??
+    base.rpp_state_name ??
+    (base.mission as { rpp_state_name?: string }).rpp_state_name;
+
   return {
     ...base,
     mission: { ...base.mission, ...missionPatch },
     mission_state: status.state ?? base.mission_state,
+    rpp_state_name: nextRppStateName,
     distance_to_next_m:
       typeof status.dist_to_goal === "number"
         ? status.dist_to_goal

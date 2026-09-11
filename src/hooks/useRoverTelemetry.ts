@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import io from "socket.io-client";
 import type { Socket, ManagerOptions, SocketOptions } from "socket.io-client";
 import {
@@ -36,6 +37,8 @@ import {
   isPx4Payload,
   toRoverTelemetry,
   toTelemetryEnvelopeFromRoverData,
+  toLiveTelemetryEnvelope,
+  unwrapTelemetryPayload,
   mergeMissionStatus,
 } from "../adapters/px4TelemetryAdapter";
 import { toNetworkData } from "../adapters/px4NetworkAdapter";
@@ -90,7 +93,6 @@ const nrpRosLegacyDisabled = (label: string): Promise<ServiceResponse> =>
   });
 
 // Default constants
-const THROTTLE_MS = 50; // ~20 Hz - Faster updates for better responsiveness
 const MAX_BACKOFF_MS = 8000;
 const INITIAL_BACKOFF_MS = 1000;
 
@@ -296,6 +298,7 @@ accuracy_pass: false,
 within_test_tolerance: false,
 
 rpp_debug_available: false,
+rpp_debug_fresh: false,
 rpp_control_mode: null,
 rpp_goal_number: null,
 rpp_actual_speed_mps: null,
@@ -828,6 +831,11 @@ export interface UseRoverTelemetryResult {
   } | null;
 
   connectionState: ConnectionState;
+  /**
+   * Live Socket.IO transport after connect: "websocket" or "polling".
+   * Null when the rover socket is down.
+   */
+  socketTransport: "websocket" | "polling" | null;
   reconnect: () => void;
   services: RoverServices;
   onMissionEvent: (callback: (event: MissionEventData) => void) => () => void;
@@ -865,6 +873,9 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   );
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("connecting");
+  const [socketTransport, setSocketTransport] = useState<
+    "websocket" | "polling" | null
+  >(null);
 
   const [hasLiveTelemetry, setHasLiveTelemetry] = useState(false);
 
@@ -872,6 +883,7 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
    * Client time when the current Socket.IO connection was established.
    */
   const socketConnectedAtRef = useRef<number | null>(null);
+  const lastSocketPacketTsRef = useRef<number | null>(null);
 
   /**
    * Prevent any packet belonging to an older socket connection from updating UI.
@@ -901,7 +913,7 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   });
   const lastDispatchRef = useRef<number>(0);
   const lastMissionStatusRef = useRef<string>("");
-  const pendingDispatchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDispatchRef = useRef<number | null>(null);
   const missionStatusDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -1156,6 +1168,9 @@ if (envelope.within_test_tolerance !== undefined) {
     if (envelope.rpp_debug_available !== undefined) {
       next.rpp_debug_available = envelope.rpp_debug_available;
     }
+    if (envelope.rpp_debug_fresh !== undefined) {
+      next.rpp_debug_fresh = envelope.rpp_debug_fresh;
+    }
     if (envelope.rpp_control_mode !== undefined) {
       next.rpp_control_mode = envelope.rpp_control_mode;
     }
@@ -1255,6 +1270,8 @@ if (envelope.within_test_tolerance !== undefined) {
 }
     if (envelope.rpp_debug_available !== undefined)
       changed = changed || prev.rpp_debug_available !== next.rpp_debug_available;
+    if (envelope.rpp_debug_fresh !== undefined)
+      changed = changed || prev.rpp_debug_fresh !== next.rpp_debug_fresh;
     if (envelope.rpp_control_mode !== undefined)
       changed = changed || prev.rpp_control_mode !== next.rpp_control_mode;
     if (envelope.rpp_goal_number !== undefined)
@@ -1417,44 +1434,24 @@ if (envelope.within_test_tolerance !== undefined) {
     mutable.telemetry = next;
     mutable.lastEnvelopeTs = Date.now();
 
-    const now = performance.now();
-    const elapsed = now - lastDispatchRef.current;
-
-    // ✅ CRITICAL FIX: Check if we already have a pending dispatch to prevent accumulation
-    if (pendingDispatchRef.current) {
-      // Already have a pending update scheduled, just update the ref
-      // The pending timeout will pick up the latest data when it fires
+    // Paint live RPP / telemetry on the next frame. Coalesce packets in the
+    // same frame so the UI never waits on a 50–100ms timer.
+    if (pendingDispatchRef.current != null) {
       return;
     }
 
-    // ✅ Throttle UI updates to prevent excessive re-renders
-    if (elapsed >= THROTTLE_MS) {
-      lastDispatchRef.current = now;
-      // Only update if component is still mounted
-      if (mountedRef.current) {
-        // Use reference directly — applyEnvelope already creates new objects via spread,
-        // so React will see new references for changed fields. Deep clone was costing
-        // 1-5ms per tick × 20Hz = 20-100ms/sec of JS thread time.
-        setTelemetrySnapshot(next);
-      }
-    } else {
-      // Schedule update only if not already scheduled (using a flag to prevent re-entry)
-      const delay = THROTTLE_MS - elapsed;
-      const timeoutId = setTimeout(() => {
-        // Double-check the timeout hasn't been cleared
-        if (pendingDispatchRef.current === timeoutId) {
-          pendingDispatchRef.current = null; // Clear FIRST to prevent race conditions
-          if (mountedRef.current) {
-            lastDispatchRef.current = performance.now();
-            setTelemetrySnapshot(mutableRef.current.telemetry);
-          }
-        }
-      }, delay);
-      pendingDispatchRef.current = timeoutId;
-    }
+    pendingDispatchRef.current = requestAnimationFrame(() => {
+      pendingDispatchRef.current = null;
+      if (!mountedRef.current) return;
+      lastDispatchRef.current = performance.now();
+      setTelemetrySnapshot(mutableRef.current.telemetry);
+    });
   }, []); // ✅ Empty dependency array - this function is stable and uses refs for all external values
 
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const robotStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
@@ -1495,13 +1492,24 @@ if (envelope.within_test_tolerance !== undefined) {
         envelope.rtk_ui_state = toRtkUiState(rtkRaw);
       }
       if (healthRaw) {
-        envelope.fcu_connected = Boolean(healthRaw.fcu_connected);
+        const fcuConnected = Boolean(
+          healthRaw.fcu_connected ?? healthRaw.vehicle_connected,
+        );
+        envelope.fcu_connected = fcuConnected;
         if (healthRaw.mission_state != null) {
           envelope.mission_state = String(healthRaw.mission_state);
         }
         envelope.state = {
-          system_status: healthRaw.fcu_connected ? "ACTIVE" : "STANDBY",
+          system_status: fcuConnected ? "ACTIVE" : "STANDBY",
         };
+        if (
+          typeof healthRaw.rpp_state === "number" &&
+          Number.isFinite(healthRaw.rpp_state)
+        ) {
+          envelope.mission = {
+            rpp_state: healthRaw.rpp_state,
+          };
+        }
       }
 
       if (envelope) applyEnvelopeRef.current(envelope);
@@ -1551,7 +1559,7 @@ if (envelope.within_test_tolerance !== undefined) {
   const fetchTelemetrySnapshot = useCallback(async () => {
     if (!mountedRef.current || isOfflineMode()) return;
     try {
-      const latest = await apiGet(PX4_TELEMETRY.LATEST);
+      const latest = unwrapTelemetryPayload(await apiGet(PX4_TELEMETRY.LATEST));
       if (!isPx4Payload(latest)) {
         telemetryDiagLog("REST /telemetry/latest — payload not PX4", {
           keys:
@@ -1564,87 +1572,13 @@ if (envelope.within_test_tolerance !== undefined) {
       const adapted = toRoverTelemetry(
         latest as Parameters<typeof toRoverTelemetry>[0]
       );
-      applyEnvelopeRef.current({
-        timestamp: Date.now(),
-        state: adapted.state,
-        global: adapted.global,
-        battery: adapted.battery,
-        rtk: adapted.rtk,
-        mission: adapted.mission,
-        servo: adapted.servo,
-        hrms: adapted.hrms,
-        vrms: adapted.vrms,
-        imu_status: adapted.imu_status,
-        distance_to_next_m: adapted.distance_to_next_m,
-xtrack_cm: adapted.xtrack_cm,
-
-accuracy: adapted.accuracy,
-accuracy_available: adapted.accuracy_available,
-
-cross_track_error_mm:
-  adapted.cross_track_error_mm,
-cross_track_abs_mm:
-  adapted.cross_track_abs_mm,
-cross_track_side:
-  adapted.cross_track_side,
-
-front_back_error_mm:
-  adapted.front_back_error_mm,
-front_back_abs_mm:
-  adapted.front_back_abs_mm,
-front_back_position:
-  adapted.front_back_position,
-
-radial_error_mm:
-  adapted.radial_error_mm,
-closest_radial_error_mm:
-  adapted.closest_radial_error_mm,
-
-accuracy_target_mm:
-  adapted.accuracy_target_mm,
-test_tolerance_mm:
-  adapted.test_tolerance_mm,
-
-accuracy_status:
-  adapted.accuracy_status,
-accuracy_pass:
-  adapted.accuracy_pass,
-within_test_tolerance:
-  adapted.within_test_tolerance,
-
-rpp_debug_available: adapted.rpp_debug_available,
-rpp_control_mode: adapted.rpp_control_mode,
-rpp_goal_number: adapted.rpp_goal_number,
-
-rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
-rpp_command_speed_mps: adapted.rpp_command_speed_mps,
-
-rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
-rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
-rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
-rpp_heading_error_deg: adapted.rpp_heading_error_deg,
-
-rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
-
-rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
-rpp_cross_track_side: adapted.rpp_cross_track_side,
-
-rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
-rpp_along_position: adapted.rpp_along_position,
-
-attitude: adapted.attitude,
-        fcu_connected: adapted.fcu_connected,
-        gps_fix_name: adapted.gps_fix_name,
-        rpp_state_name: adapted.rpp_state_name,
-        measured_speed_m_s: adapted.measured_speed_m_s,
-        along_track_speed_mps: adapted.along_track_speed_mps,
-        cross_track_speed_mps: adapted.cross_track_speed_mps,
-        joystick_state: adapted.joystick_state,
-        joystick_active: adapted.joystick_active,
-        joystick_last_valid_cmd_age_ms: adapted.joystick_last_valid_cmd_age_ms,
-        joystick_stop_reason: adapted.joystick_stop_reason,
-        control_owner: adapted.control_owner,
-      });
+      applyEnvelopeRef.current(
+        toLiveTelemetryEnvelope(adapted, Date.now()),
+      );
+      if (!hasLiveTelemetryRef.current) {
+        hasLiveTelemetryRef.current = true;
+        setHasLiveTelemetry(true);
+      }
       patchRobotStatusDebug({
         lastSource: "rest_telemetry",
         px4Detected: true,
@@ -1694,6 +1628,11 @@ attitude: adapted.attitude,
       pingIntervalRef.current = null;
     }
 
+    if (restFallbackTimerRef.current) {
+      clearTimeout(restFallbackTimerRef.current);
+      restFallbackTimerRef.current = null;
+    }
+
     if (socketRef.current) {
       manualDisconnectRef.current = true;
       socketRef.current.removeAllListeners();
@@ -1704,8 +1643,8 @@ attitude: adapted.attitude,
       socketRef.current = null;
     }
 
-    if (pendingDispatchRef.current) {
-      clearTimeout(pendingDispatchRef.current);
+    if (pendingDispatchRef.current != null) {
+      cancelAnimationFrame(pendingDispatchRef.current);
       pendingDispatchRef.current = null;
     }
 
@@ -1763,13 +1702,15 @@ attitude: adapted.attitude,
   });
 
   const handleRoverData = useRef((payload: any) => {
-    // console.log('[ROVER_DATA] 🚨 handleRoverData CALLED!');
-    // console.log('[ROVER_DATA] 📡 RAW PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
-    // Reduced logging - only log periodically (10% of the time)
-    // if (TELEMETRY_LOGS_ENABLED && Math.random() < 0.1) telemLog('[ROVER_DATA] Receiving data...');
-    const envelope = toTelemetryEnvelopeFromRoverData(payload);
-    if (envelope) {
-      if (envelope) applyEnvelopeRef.current(envelope);
+    try {
+      const envelope = toTelemetryEnvelopeFromRoverData(
+        unwrapTelemetryPayload(payload),
+      );
+      if (envelope) {
+        applyEnvelopeRef.current(envelope);
+      }
+    } catch (err) {
+      console.warn("[ROVER_DATA] Failed to apply payload", err);
     }
   });
 
@@ -1811,6 +1752,15 @@ attitude: adapted.attitude,
 
       try {
         const backendUrl = getHttpBase();
+
+        if (!backendUrl) {
+          telemetryDiagLog(
+            "Socket connection skipped: no rover selected on this network",
+          );
+          setSocketTransport(null);
+          setConnectionState("disconnected");
+          return;
+        }
 
         // Auth token must be present before socket.connect() when AUTH_ENABLED.
                /*
@@ -1920,6 +1870,16 @@ attitude: adapted.attitude,
           setHasLiveTelemetry(false);
 
           setConnectionState("connected");
+          setSocketTransport(
+            (socket.io.engine?.transport?.name as "websocket" | "polling") ??
+              "polling",
+          );
+          socket.io.engine?.on("upgrade", () => {
+            setSocketTransport(
+              (socket.io.engine?.transport?.name as "websocket" | "polling") ??
+                "websocket",
+            );
+          });
 
           if (isRobotStatusDebugEnabled()) {
             patchRobotStatusDebug({
@@ -1934,12 +1894,22 @@ attitude: adapted.attitude,
           }
 
           /*
-           * Do not call REST telemetry here.
-           *
-           * Removed:
-           * void fetchTelemetrySnapshot();
-           * void pollRobotStatus();
+           * If the first live socket packet is delayed, seed UI from REST.
+           * Skip the fallback once a live telemetry packet has already arrived.
            */
+          if (restFallbackTimerRef.current) {
+            clearTimeout(restFallbackTimerRef.current);
+          }
+          restFallbackTimerRef.current = setTimeout(() => {
+            restFallbackTimerRef.current = null;
+            if (!mountedRef.current) return;
+            if (connectionGeneration !== socketGenerationRef.current) return;
+            if (hasLiveTelemetryRef.current) return;
+            telemetryDiagLog(
+              "No live socket telemetry yet — REST snapshot fallback",
+            );
+            void fetchTelemetrySnapshot();
+          }, 1500);
         });
 
         // NRP_ROS LEGACY DISABLED — custom ping/pong and subscription ack events.
@@ -2058,6 +2028,7 @@ attitude: adapted.attitude,
           socketConnectedAtRef.current = null;
           hasLiveTelemetryRef.current = false;
           connectionGeneration = null;
+          lastSocketPacketTsRef.current = null;
 
           const emptyTelemetry = createDefaultTelemetry();
 
@@ -2067,6 +2038,7 @@ attitude: adapted.attitude,
 
           setTelemetrySnapshot(emptyTelemetry);
           setHasLiveTelemetry(false);
+          setSocketTransport(null);
 
           if (manualDisconnectRef.current) {
             manualDisconnectRef.current = false;
@@ -2108,274 +2080,96 @@ attitude: adapted.attitude,
         // 4WD_SERVER — flat telemetry socket contract
 
         socket.on(SOCKET_EVENTS.TELEMETRY, (payload: unknown) => {
-          /*
-           * Reject packets handled by an older socket connection.
-           */
-          if (
-            connectionGeneration === null ||
-            connectionGeneration !== socketGenerationRef.current
-          ) {
-            return;
-          }
-
-          if (!socket.connected) {
-            return;
-          }
-
-          const connectedAt = socketConnectedAtRef.current;
-
-          if (connectedAt === null) {
-            return;
-          }
-
-          const backendGeneratedAt = getTelemetryGeneratedTime(payload);
-
-          /*
-           * A packet received through the currently connected socket is treated as live.
-           * When the backend later supplies generated_at, that backend timestamp is used.
-           */
-          const generatedAt = backendGeneratedAt ?? Date.now();
-
-          /*
-           * Connection generation already drops packets from a previous
-           * socket. Do not compare rover generated_at to tablet wall clock —
-           * a tablet that is 500ms behind would discard every live packet.
-           */
-
-          // console.log("[TELEMETRY] Live packet received", {
-          //   generation: connectionGeneration,
-          //   currentGeneration: socketGenerationRef.current,
-          //   hasBackendTimestamp: getTelemetryGeneratedTime(payload) !== null,
-          //   keys:
-          //     payload && typeof payload === "object"
-          //       ? Object.keys(payload as Record<string, unknown>).slice(0, 20)
-          //       : [],
-          // });
-
-          const raw =
-            payload && typeof payload === "object"
-              ? pickRawRobotFields(payload as Record<string, unknown>)
-              : null;
-
-          const px4 = isPx4Payload(payload);
-
-          const dbg = getRobotStatusDebug();
-
-          if (!px4) {
-            patchRobotStatusDebug({
-              lastSource: "rejected",
-
-              rejectReason: "telemetry payload failed isPx4Payload()",
-
-              px4Detected: false,
-
-              rawPayload: raw,
-
-              telemetryEventCount: dbg.telemetryEventCount + 1,
-
-              rejectedEventCount: dbg.rejectedEventCount + 1,
-
-              socketConnected: true,
-
-              connectionState: "connected",
-            });
-
-            return;
-          }
-
-          const adapted = toRoverTelemetry(
-            payload as Parameters<typeof toRoverTelemetry>[0]
-          );
-
-          // console.log("[TELEMETRY] Adapted values", {
-          //   lat: adapted.global.lat,
-          //   lon: adapted.global.lon,
-          //   battery: adapted.battery.percentage,
-          //   satellites: adapted.global.satellites_visible,
-          //   fixType: adapted.rtk.fix_type,
-          //   mode: adapted.state.mode,
-          //   fcuConnected: adapted.fcu_connected,
-          //   accuracyAvailable: adapted.accuracy_available,
-          //   overallMm: adapted.radial_error_mm,
-          //   alongMm: adapted.front_back_error_mm,
-          //   crossMm: adapted.cross_track_error_mm,
-          //   alongPosition: adapted.front_back_position,
-          //   crossSide: adapted.cross_track_side,
-          // });
-          const envelope: TelemetryEnvelope = {
-            timestamp: generatedAt,
-
-            state: adapted.state,
-
-            global: adapted.global,
-
-            battery: adapted.battery,
-
-            rtk: adapted.rtk,
-
-            mission: adapted.mission,
-
-            servo: adapted.servo,
-
-            hrms: adapted.hrms,
-
-            vrms: adapted.vrms,
-
-            imu_status: adapted.imu_status,
-
-distance_to_next_m: adapted.distance_to_next_m,
-
-xtrack_cm: adapted.xtrack_cm,
-
-accuracy: adapted.accuracy,
-
-accuracy_available:
-  adapted.accuracy_available,
-
-cross_track_error_mm:
-  adapted.cross_track_error_mm,
-
-cross_track_abs_mm:
-  adapted.cross_track_abs_mm,
-
-cross_track_side:
-  adapted.cross_track_side,
-
-front_back_error_mm:
-  adapted.front_back_error_mm,
-
-front_back_abs_mm:
-  adapted.front_back_abs_mm,
-
-front_back_position:
-  adapted.front_back_position,
-
-radial_error_mm:
-  adapted.radial_error_mm,
-
-closest_radial_error_mm:
-  adapted.closest_radial_error_mm,
-
-accuracy_target_mm:
-  adapted.accuracy_target_mm,
-
-test_tolerance_mm:
-  adapted.test_tolerance_mm,
-
-accuracy_status:
-  adapted.accuracy_status,
-
-accuracy_pass:
-  adapted.accuracy_pass,
-
-within_test_tolerance:
-  adapted.within_test_tolerance,
-
-rpp_debug_available: adapted.rpp_debug_available,
-rpp_control_mode: adapted.rpp_control_mode,
-rpp_goal_number: adapted.rpp_goal_number,
-
-rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,
-rpp_command_speed_mps: adapted.rpp_command_speed_mps,
-
-rpp_current_yaw_deg: adapted.rpp_current_yaw_deg,
-rpp_path_bearing_deg: adapted.rpp_path_bearing_deg,
-rpp_guidance_bearing_deg: adapted.rpp_guidance_bearing_deg,
-rpp_heading_error_deg: adapted.rpp_heading_error_deg,
-
-rpp_distance_to_goal_m: adapted.rpp_distance_to_goal_m,
-
-rpp_cross_track_error_mm: adapted.rpp_cross_track_error_mm,
-rpp_cross_track_side: adapted.rpp_cross_track_side,
-
-rpp_along_remaining_mm: adapted.rpp_along_remaining_mm,
-rpp_along_position: adapted.rpp_along_position,
-
-attitude: adapted.attitude,
-
-            fcu_connected: adapted.fcu_connected,
-
-            gps_fix_name: adapted.gps_fix_name,
-
-            rpp_state_name: adapted.rpp_state_name,
-
-            measured_speed_m_s: adapted.measured_speed_m_s,
-
-            along_track_speed_mps: adapted.along_track_speed_mps,
-
-            cross_track_speed_mps: adapted.cross_track_speed_mps,
-
-            joystick_state: adapted.joystick_state,
-
-            joystick_active: adapted.joystick_active,
-
-            joystick_last_valid_cmd_age_ms:
-              adapted.joystick_last_valid_cmd_age_ms,
-
-            joystick_stop_reason: adapted.joystick_stop_reason,
-
-            control_owner: adapted.control_owner,
-          };
-
-          /*
-           * First valid packet received after this socket connected.
-           */
-          if (!hasLiveTelemetryRef.current) {
-            hasLiveTelemetryRef.current = true;
-
-            setHasLiveTelemetry(true);
-          }
-
-          applyEnvelopeRef.current(envelope);
-
-          if (isRobotStatusDebugEnabled()) {
-            patchRobotStatusDebug({
-              lastSource: "socket_telemetry",
-
-              rejectReason: null,
-
-              px4Detected: true,
-
-              rawPayload: raw,
-
-              telemetryEventCount: dbg.telemetryEventCount + 1,
-
-              socketConnected: true,
-
-              connectionState: "connected",
-
-              lastMessageTs: generatedAt,
-
-              adapted: {
-                battery_pct: adapted.battery.percentage,
-
-                battery_v: adapted.battery.voltage,
-
-                gps_fix: adapted.rtk.fix_type,
-
-                gps_fix_name: adapted.gps_fix_name,
-
-                gps_sat: adapted.global.satellites_visible,
-
-                hrms: adapted.hrms,
-
-                vrms: adapted.vrms,
-
-                mode: adapted.state.mode,
-
-                armed: adapted.state.armed,
-
-                fcu_connected: adapted.fcu_connected,
-
-                rpp_state_name: adapted.rpp_state_name,
-
-                imu_status: adapted.imu_status,
-
-                lat: adapted.global.lat,
-
-                lon: adapted.global.lon,
-              },
-            });
+          try {
+            /*
+             * Reject packets handled by an older socket connection.
+             */
+            if (
+              connectionGeneration === null ||
+              connectionGeneration !== socketGenerationRef.current
+            ) {
+              return;
+            }
+
+            if (!socket.connected) {
+              return;
+            }
+
+            const connectedAt = socketConnectedAtRef.current;
+
+            if (connectedAt === null) {
+              return;
+            }
+
+            const livePayload = unwrapTelemetryPayload(payload);
+            const backendGeneratedAt = getTelemetryGeneratedTime(livePayload);
+            const generatedAt = backendGeneratedAt ?? Date.now();
+
+            const raw =
+              livePayload && typeof livePayload === "object"
+                ? pickRawRobotFields(livePayload as Record<string, unknown>)
+                : null;
+
+            const px4 = isPx4Payload(livePayload);
+            const dbg = getRobotStatusDebug();
+
+            if (!px4) {
+              patchRobotStatusDebug({
+                lastSource: "rejected",
+                rejectReason: "telemetry payload failed isPx4Payload()",
+                px4Detected: false,
+                rawPayload: raw,
+                telemetryEventCount: dbg.telemetryEventCount + 1,
+                rejectedEventCount: dbg.rejectedEventCount + 1,
+                socketConnected: true,
+                connectionState: "connected",
+              });
+              return;
+            }
+
+            const adapted = toRoverTelemetry(
+              livePayload as Parameters<typeof toRoverTelemetry>[0],
+            );
+            const envelope = toLiveTelemetryEnvelope(adapted, generatedAt);
+
+            if (!hasLiveTelemetryRef.current) {
+              hasLiveTelemetryRef.current = true;
+              setHasLiveTelemetry(true);
+            }
+
+            lastSocketPacketTsRef.current = Date.now();
+            applyEnvelopeRef.current(envelope);
+
+            if (isRobotStatusDebugEnabled()) {
+              patchRobotStatusDebug({
+                lastSource: "socket_telemetry",
+                rejectReason: null,
+                px4Detected: true,
+                rawPayload: raw,
+                telemetryEventCount: dbg.telemetryEventCount + 1,
+                socketConnected: true,
+                connectionState: "connected",
+                lastMessageTs: generatedAt,
+                adapted: {
+                  battery_pct: adapted.battery.percentage,
+                  battery_v: adapted.battery.voltage,
+                  gps_fix: adapted.rtk.fix_type,
+                  gps_fix_name: adapted.gps_fix_name,
+                  gps_sat: adapted.global.satellites_visible,
+                  hrms: adapted.hrms,
+                  vrms: adapted.vrms,
+                  mode: adapted.state.mode,
+                  armed: adapted.state.armed,
+                  fcu_connected: adapted.fcu_connected,
+                  rpp_state_name: adapted.rpp_state_name,
+                  imu_status: adapted.imu_status,
+                  lat: adapted.global.lat,
+                  lon: adapted.global.lon,
+                },
+              });
+            }
+          } catch (err) {
+            console.warn("[TELEMETRY] Failed to apply live payload", err);
           }
         });
 
@@ -2397,47 +2191,42 @@ attitude: adapted.attitude,
 
         // 4WD_SERVER — flat mission_status socket contract
         socket.on(SOCKET_EVENTS.MISSION_STATUS, (data: any) => {
-          if (!data || typeof data !== "object") {
-            return;
-          }
-          if (isRobotStatusDebugEnabled()) {
-            const mdbg = getRobotStatusDebug();
-            patchRobotStatusDebug({
-              lastSource: "socket_mission_status",
-              missionStatusEventCount: mdbg.missionStatusEventCount + 1,
-              socketConnected: true,
-              rawPayload: pickRawRobotFields(data),
-            });
-          }
-
-          const statusKey = `${data.state}-${data.rpp_state}-${data.dist_to_goal}`;
-          if (statusKey !== lastMissionStatusRef.current) {
-            lastMissionStatusRef.current = statusKey;
-            const base = mutableRef.current.telemetry;
-            const merged = mergeMissionStatus(base, {
-              state: data.state,
-              rpp_state: data.rpp_state,
-              rpp_state_name: data.rpp_state_name,
-              dist_to_goal: data.dist_to_goal,
-              speed: data.speed,
-              xtrack: data.xtrack,
-            });
-            const envelope: TelemetryEnvelope = {
-              timestamp: Date.now(),
-              mission: merged.mission,
-              global: merged.global,
-              distance_to_next_m: merged.distance_to_next_m,
-              xtrack_cm: merged.xtrack_cm,
-            };
-            if (missionStatusDebounceRef.current) {
-              clearTimeout(missionStatusDebounceRef.current);
-            }
-            missionStatusDebounceRef.current = setTimeout(() => {
-              if (envelope) applyEnvelopeRef.current(envelope);
-              missionStatusDebounceRef.current = null;
-            }, 100);
-          }
           try {
+            if (!data || typeof data !== "object") {
+              return;
+            }
+            if (isRobotStatusDebugEnabled()) {
+              const mdbg = getRobotStatusDebug();
+              patchRobotStatusDebug({
+                lastSource: "socket_mission_status",
+                missionStatusEventCount: mdbg.missionStatusEventCount + 1,
+                socketConnected: true,
+                rawPayload: pickRawRobotFields(data),
+              });
+            }
+
+            const statusKey = `${data.state}-${data.rpp_state}-${data.dist_to_goal}`;
+            if (statusKey !== lastMissionStatusRef.current) {
+              lastMissionStatusRef.current = statusKey;
+              const base = mutableRef.current.telemetry;
+              const merged = mergeMissionStatus(base, {
+                state: data.state,
+                rpp_state: data.rpp_state,
+                rpp_state_name: data.rpp_state_name,
+                dist_to_goal: data.dist_to_goal,
+                speed: data.speed,
+                xtrack: data.xtrack,
+              });
+              const envelope: TelemetryEnvelope = {
+                timestamp: Date.now(),
+                mission: merged.mission,
+                global: merged.global,
+                distance_to_next_m: merged.distance_to_next_m,
+                xtrack_cm: merged.xtrack_cm,
+                rpp_state_name: merged.rpp_state_name,
+              };
+              applyEnvelopeRef.current(envelope);
+            }
             missionEventCallbackRef.current.forEach((cb) => cb(data as any));
           } catch (err) {
             console.error("[MISSION_STATUS] Error:", err);
@@ -2526,7 +2315,7 @@ attitude: adapted.attitude,
     }, 100);
     // ✅ CRITICAL: Removed handleBridgeTelemetry and handleRoverData from dependencies
     // They are now refs and won't cause re-registrations
-  }, [clearReconnectTimer, resetTelemetry, scheduleReconnect, teardownSocket]);
+  }, [clearReconnectTimer, fetchTelemetrySnapshot, resetTelemetry, scheduleReconnect, teardownSocket]);
 
     const reconnect = useCallback(() => {
     if (
@@ -2549,6 +2338,39 @@ attitude: adapted.attitude,
   useEffect(() => {
     connectSocketRef.current = connectSocket;
   }, [connectSocket]);
+
+  /**
+   * Rover Wi-Fi changes do not always emit Socket.IO disconnect immediately.
+   * Reconnect when the app returns to the foreground, and if the socket
+   * stays "connected" with no live telemetry packets.
+   */
+  useEffect(() => {
+    const onAppState = (next: AppStateStatus) => {
+      if (next !== "active") return;
+      if (connectionState !== "connected") {
+        reconnect();
+      }
+    };
+    const sub = AppState.addEventListener("change", onAppState);
+    const watchdog = setInterval(() => {
+      if (connectionState !== "connected") return;
+      const lastPacket = lastSocketPacketTsRef.current;
+      const connectedAt = socketConnectedAtRef.current;
+      const now = Date.now();
+      const stale =
+        (lastPacket != null && now - lastPacket > 8_000) ||
+        (lastPacket == null &&
+          connectedAt != null &&
+          now - connectedAt > 8_000);
+      if (stale) {
+        reconnect();
+      }
+    }, 4_000);
+    return () => {
+      sub.remove();
+      clearInterval(watchdog);
+    };
+  }, [connectionState, reconnect]);
 
     /**
    * Component lifecycle cleanup.
@@ -2582,6 +2404,11 @@ attitude: adapted.attitude,
         pingIntervalRef.current = null;
       }
 
+      if (restFallbackTimerRef.current) {
+        clearTimeout(restFallbackTimerRef.current);
+        restFallbackTimerRef.current = null;
+      }
+
       if (gpsFixTypeDebounceRef.current) {
         clearTimeout(gpsFixTypeDebounceRef.current);
         gpsFixTypeDebounceRef.current = null;
@@ -2599,8 +2426,8 @@ attitude: adapted.attitude,
         socketRef.current = null;
       }
 
-      if (pendingDispatchRef.current) {
-        clearTimeout(pendingDispatchRef.current);
+      if (pendingDispatchRef.current != null) {
+        cancelAnimationFrame(pendingDispatchRef.current);
         pendingDispatchRef.current = null;
       }
     };
@@ -3015,6 +2842,8 @@ attitude: adapted.attitude,
     roverPosition,
 
     connectionState,
+
+    socketTransport,
 
     reconnect,
 

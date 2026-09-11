@@ -137,6 +137,13 @@ export interface Px4TelemetryData {
   rpp_state?: number | null;
   rpp_state_name?: string | null;
 
+  /**
+   * Nested RPP snapshot. Production backends may send this instead of
+   * (or in addition to) the flat rpp_* compatibility fields.
+   */
+  rpp?: Record<string, unknown> | null;
+  rpp_debug?: Record<string, unknown> | null;
+
   // Exact live RPP controller telemetry from backend /rpp/debug.
   rpp_debug_available?: boolean;
   rpp_control_mode?: string | null;

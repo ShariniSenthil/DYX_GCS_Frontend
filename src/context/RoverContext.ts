@@ -17,6 +17,7 @@ export interface RoverContextValue {
   telemetry: RoverTelemetry;
   roverPosition: { lat: number; lng: number; timestamp: number } | null;
   connectionState: string;
+  socketTransport: "websocket" | "polling" | null;
   reconnect: () => void;
   services: RoverServices;
   onMissionEvent: (callback: (event: any) => void) => () => void;
@@ -91,6 +92,7 @@ function RoverContextBridge({ children }: { children: ReactNode }): React.ReactE
     telemetry: tel.telemetry,
     roverPosition: tel.roverPosition,
     connectionState: tel.connectionState,
+    socketTransport: tel.socketTransport,
     reconnect: tel.reconnect,
     services: tel.services,
     onMissionEvent: tel.onMissionEvent,
@@ -118,6 +120,7 @@ function RoverContextBridge({ children }: { children: ReactNode }): React.ReactE
     tel.telemetry,
     tel.roverPosition,
     tel.connectionState,
+    tel.socketTransport,
     tel.reconnect,
     tel.services,
     tel.onMissionEvent,

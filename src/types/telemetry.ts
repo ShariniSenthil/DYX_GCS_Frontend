@@ -49,6 +49,8 @@ export interface TelemetryMission {
   navigation_point_count?: number;
   loaded?: boolean;
   ready?: boolean;
+  rpp_state?: number;
+  rpp_state_name?: string;
 }
 
 export interface TelemetryAccuracy {
@@ -159,6 +161,7 @@ within_test_tolerance?: boolean;
   transport_error?: string | null;
 
   rpp_debug_available?: boolean;
+  rpp_debug_fresh?: boolean;
   rpp_control_mode?: string | null;
   rpp_goal_number?: number | null;
   rpp_actual_speed_mps?: number | null;
@@ -231,6 +234,7 @@ within_test_tolerance?: boolean;
   control_owner?: string | null;
 
   rpp_debug_available?: boolean;
+  rpp_debug_fresh?: boolean;
   rpp_control_mode?: string | null;
   rpp_goal_number?: number | null;
   rpp_actual_speed_mps?: number | null;

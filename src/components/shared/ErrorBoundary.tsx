@@ -17,6 +17,9 @@ interface Props {
   onError?: (error: Error, errorInfo: ErrorInfo) => void;
   /** Screen/component name for better error reporting */
   componentName?: string;
+  /** Auto-remount after a short delay for first-layout native races. */
+  autoResetMs?: number;
+  maxAutoResets?: number;
 }
 
 interface State {
@@ -26,6 +29,9 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
+  autoResetCount = 0;
+  autoResetTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -33,6 +39,12 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
     };
+  }
+
+  componentWillUnmount() {
+    if (this.autoResetTimer) {
+      clearTimeout(this.autoResetTimer);
+    }
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -57,9 +69,23 @@ export class ErrorBoundary extends Component<Props, State> {
       errorInfo,
     });
 
-    // Call optional error callback
     if (onError) {
       onError(error, errorInfo);
+    }
+
+    const autoResetMs = this.props.autoResetMs ?? 0;
+    const maxAutoResets = this.props.maxAutoResets ?? 0;
+    if (
+      autoResetMs > 0 &&
+      this.autoResetCount < maxAutoResets
+    ) {
+      this.autoResetCount += 1;
+      if (this.autoResetTimer) {
+        clearTimeout(this.autoResetTimer);
+      }
+      this.autoResetTimer = setTimeout(() => {
+        this.handleReset();
+      }, autoResetMs);
     }
 
     // In production, you might want to send error to logging service

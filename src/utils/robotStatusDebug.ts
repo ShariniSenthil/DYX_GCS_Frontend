@@ -99,8 +99,6 @@ export function patchRobotStatusDebug(
     adapted: patch.adapted ? { ...snapshot.adapted, ...patch.adapted } : snapshot.adapted,
   };
   listeners.forEach((fn) => fn());
-  snapshot = { ...DEFAULT_SNAPSHOT };
-  listeners.forEach((fn) => fn());
 }
 
 // function formatRobotStatusDebugLine(s: RobotStatusDebugSnapshot): string {
@@ -130,7 +128,9 @@ export function pickRawRobotFields(
   const pick = [
     'battery_pct', 'battery_v', 'gps_fix', 'gps_fix_name', 'gps_sat',
     'hrms', 'vrms', 'armed', 'mode', 'connected', 'lat', 'lon', 'alt',
-    'rpp_state', 'rpp_state_name', 'imu_status', 'pos_n', 'pos_e',
+    'rpp_state', 'rpp_state_name', 'rpp_debug_available',
+    'rpp_actual_speed_mps', 'rpp_cross_track_error_mm', 'rpp_along_remaining_mm',
+    'imu_status', 'pos_n', 'pos_e',
     'heading_ned_deg', 'speed_m_s',
   ];
   const out: Record<string, unknown> = {};

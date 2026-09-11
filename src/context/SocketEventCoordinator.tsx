@@ -25,12 +25,22 @@
  *   </WaypointProvider>
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { useTelemetry } from './TelemetryContext';
 import { useMission } from './MissionContext';
-import { useTelemetry } from './TelemetryContext';
 import { ROVER_ENABLED } from '../config/featureFlags';
 import type { GpsSafetyAbortEvent } from '../types/px4/mission';
+
+function isValidGpsSafetyAbort(event: unknown): event is GpsSafetyAbortEvent {
+  if (!event || typeof event !== 'object') {
+    return false;
+  }
+  const payload = event as Record<string, unknown>;
+  return (
+    typeof payload.reason === 'string' ||
+    typeof payload.message === 'string'
+  );
+}
 
 /**
  * SocketEventCoordinator
@@ -71,7 +81,9 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       }
       console.warn('[SocketEventCoordinator] gps_safety_abort:', event.reason, 'manual_resume_required:', event.manual_resume_required);
       reportGpsSafetyAbort(
-        event.reason || 'GPS safety abort — resume from the rover is required',
+        event.reason ||
+          (event as { message?: string }).message ||
+          'GPS safety abort — resume from the rover is required',
       );
     };
 

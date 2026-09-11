@@ -8,7 +8,7 @@ import {
   MarkerView,
   ShapeSource,
 } from "@rnmapbox/maps";
-import Svg, { Circle, Polygon } from "react-native-svg";
+import { RoverVehicleIcon } from "./RoverVehicleIcon";
 import {
   MAPBOX_FALLBACK_STYLE_JSON,
   mapboxStyleUrlForMode,
@@ -50,40 +50,6 @@ function asLineCollection(coordinates: [number, number][]) {
   };
 }
 
-function RoverVehicle({
-  heading,
-  status,
-}: {
-  heading: number | null | undefined;
-  status: string;
-}) {
-  const rotationDeg = heading ?? 0;
-  const fill =
-    status === "armed" ? "#22c55e" : status === "rtk" ? "#0ea5e9" : "#fbbf24";
-  return (
-    <View style={{ transform: [{ rotate: `${rotationDeg}deg` }] }}>
-      <Svg width={64} height={64} viewBox="-20 -20 40 40">
-        <Circle cx={0} cy={0} r={18.7} fill="rgba(14,165,233,0.12)" />
-        <Polygon
-          points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4"
-          fill={fill}
-          stroke="#ffffff"
-          strokeWidth={1.8}
-          strokeLinejoin="round"
-        />
-        <Polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a" />
-        <Polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a" />
-        <Polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a" />
-        <Polygon
-          points="-4.5,-2 4.5,-2 3.5,2 -3.5,2"
-          fill="rgba(186,230,253,0.85)"
-        />
-        <Circle cx={0} cy={-7.5} r={2.5} fill="#fbbf24" stroke="#fff" strokeWidth={1} />
-      </Svg>
-    </View>
-  );
-}
-
 const FieldMapHostBase: React.FC = () => {
   const {
     activeSurface,
@@ -116,10 +82,12 @@ const FieldMapHostBase: React.FC = () => {
   } = useMapboxSurface();
 
   useEffect(() => {
+    const yaw = telemetry.attitude?.yaw_deg;
     const next = {
       lat: roverPosition?.lat ?? 0,
       lon: roverPosition?.lng ?? 0,
-      heading: telemetry.attitude?.yaw_deg ?? null,
+      heading:
+        typeof yaw === "number" && Number.isFinite(yaw) ? yaw : null,
       armed: telemetry.state?.armed ?? false,
       rtk: telemetry.rtk?.fix_type ?? 0,
     };
@@ -305,8 +273,8 @@ const FieldMapHostBase: React.FC = () => {
 
   return (
     <View style={styles.root} collapsable={false} onLayout={onLayout}>
-      {canMount && (
-        <MapView
+      {canMount ? (
+      <MapView
           style={styles.map}
           {...mapStyleProps}
           compassEnabled={false}
@@ -380,14 +348,18 @@ const FieldMapHostBase: React.FC = () => {
             <MarkerView
               coordinate={[rover.lon, rover.lat]}
               anchor={{ x: 0.5, y: 0.5 }}
+              allowOverlap
+              style={{ backgroundColor: "transparent" }}
             >
-              <RoverVehicle heading={rover.heading} status={roverStatus} />
+              <RoverVehicleIcon heading={rover.heading} status={roverStatus} />
             </MarkerView>
           )}
         </MapView>
+      ) : (
+        <View style={styles.map} />
       )}
 
-      {usingFallback && (
+      {usingFallback && !mapReady && (
         <View style={styles.fallbackBanner} pointerEvents="none">
           <Text style={styles.fallbackBannerText}>
             Map tiles unavailable — showing rover & path only

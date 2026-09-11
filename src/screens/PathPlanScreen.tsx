@@ -73,6 +73,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { downloadFileToDevice } from "../utils/downloadHelper";
 import PersistentStorage from "../services/PersistentStorage";
+import { useFieldMap } from "../context/FieldMapContext";
 import {
   validateWaypoints,
   hasCriticalErrors,
@@ -358,6 +359,7 @@ const buildMissionCsvFromWaypoints = (
 };
 
 interface PathPlanScreenProps {
+  embedMap?: boolean;
   isVisible?: boolean;
   isDrawingToolsVisible?: boolean;
   setIsDrawingToolsVisible?: (val: boolean) => void;
@@ -399,6 +401,7 @@ export default function PathPlanScreen({
     showManualConnectionCanvas,
     setShowManualConnectionCanvas,
   } = useRover();
+  const { setMarkingSnapshot, markingPressRef } = useFieldMap();
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
 
@@ -692,6 +695,16 @@ export default function PathPlanScreen({
 
   // When precise path mode is active, the map shows preview waypoints instead
   const displayedWaypoints = precisePathPreview ?? waypoints;
+
+  useEffect(() => {
+    setMarkingSnapshot({
+      waypoints: displayedWaypoints.map((wp, index) => ({
+        lat: wp.lat,
+        lon: wp.lon,
+        sn: typeof wp.id === "number" ? wp.id : index + 1,
+      })),
+    });
+  }, [displayedWaypoints, setMarkingSnapshot]);
 
   const handlePrecisePathPreviewChange = React.useCallback(
     (preview: PathPlanWaypoint[]) => {
@@ -1091,6 +1104,8 @@ export default function PathPlanScreen({
 
     recordAndApply([...waypoints, newWp]);
   };
+
+  markingPressRef.current = handleMapPress;
 
   const handleWaypointClick = (id: number) => {
     if (!isConnectingPath) return;
@@ -3268,14 +3283,21 @@ export default function PathPlanScreen({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, !embedMap && styles.containerOverMap]}
+      pointerEvents={embedMap ? "auto" : "box-none"}
+    >
       <StatusBar backgroundColor={colors.headerBlue} barStyle="light-content" />
 
       {/* Main Content - full height */}
-      <View style={styles.mainContent}>
+      <View
+        style={[styles.mainContent, !embedMap && styles.containerOverMap]}
+        pointerEvents={embedMap ? "auto" : "box-none"}
+      >
         {isMapFullscreen ? (
           /* Full Screen Map Mode */
           <View style={styles.fullscreenMap}>
+            {embedMap && (
             <PathPlanMap
               waypoints={displayedWaypoints}
               dxfEntities={dxfMapEntities}
@@ -3334,11 +3356,13 @@ export default function PathPlanScreen({
               setIsWidgetMenuOpen={setIsWidgetMenuOpen}
               onDismissPanel={() => setActivePanel(null)}
             />
+            )}
           </View>
         ) : (
           <>
             {/* Absolute Map Background */}
             <View style={styles.absoluteMapContainer}>
+              {embedMap && (
               <PathPlanMap
                 waypoints={displayedWaypoints}
                 dxfEntities={dxfMapEntities}
@@ -3390,6 +3414,7 @@ export default function PathPlanScreen({
                 setIsWidgetMenuOpen={setIsWidgetMenuOpen}
                 onDismissPanel={() => setActivePanel(null)}
               />
+              )}
             </View>
 
             {/* Layer Settings / Widget Controller — standalone, always visible so it can re-enable Drawing Tools */}
@@ -4592,6 +4617,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.primary,
+  },
+  containerOverMap: {
+    backgroundColor: "transparent",
   },
   floatingLayerControlsWrapper: {
     position: "absolute",

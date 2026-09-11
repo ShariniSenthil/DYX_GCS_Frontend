@@ -76,6 +76,11 @@ export type MissionControlCardProps = {
    */
   isMissionReady?: boolean;
 
+  /**
+   * True while GCS is re-preparing a stored CSV after COMPLETED/STOPPED.
+   */
+  isPreparing?: boolean;
+
   dragGesture?: any;
   isDraggingActive?: boolean;
   onClose?: () => void;
@@ -102,6 +107,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   waitingForManual = false,
   isMissionLoaded = false,
   isMissionReady = false,
+  isPreparing = false,
   dragGesture,
   isDraggingActive,
   onClose,
@@ -148,7 +154,18 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     missionStatus === "paused" ||
     isWaitingForNext;
 
-  const isPaused = isMissionPaused || missionStatus === "paused";
+  const isPaused = isMissionPaused;
+
+  const startPhaseLabel =
+    isPreparing
+      ? "Preparing..."
+      : missionStatus === "arming"
+        ? "Arming..."
+        : missionStatus === "switching_offboard"
+          ? "Switching offboard..."
+          : missionStatus === "loading"
+            ? "Starting..."
+            : "Starting...";
 
   // Debug: log when mission status changes to trace button state issues
   React.useEffect(() => {
@@ -467,18 +484,24 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
               if (isRunning) {
                 showConfirmDialog("Stop Mission", handleStop);
               } else {
-                showConfirmDialog("Start Mission", handleStart);
+                showConfirmDialog("Start Mission", () => {
+                  console.log("[MissionStartTiming] confirm");
+                  void handleStart();
+                });
               }
             }}
             disabled={
-              isStarting || isStopping || (!isRunning && !isMissionReady)
+              isStarting ||
+              isStopping ||
+              isPreparing ||
+              (!isRunning && !isMissionReady)
             }
           >
             <Text style={styles.buttonText}>
-              {isStarting
-                ? "⏳ Starting..."
+              {isPreparing || isStarting
+                ? startPhaseLabel
                 : isStopping
-                  ? "⏳ Stopping..."
+                  ? "Stopping..."
                   : isRunning
                     ? "STOP"
                     : !isMissionLoaded
@@ -623,14 +646,18 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
         </Modal>
 
         {/* Start Mission Modal */}
-        <Modal transparent visible={isStarting} animationType="fade">
+        <Modal
+          transparent
+          visible={isStarting || isPreparing}
+          animationType="fade"
+        >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <ActivityIndicator size="large" color={colors.greenBtn} />
-              <Text style={styles.modalTitle}>Starting Mission</Text>
-              <Text style={styles.modalText}>
-                Initializing mission controller...
+              <Text style={styles.modalTitle}>
+                {isPreparing ? "Preparing Mission" : "Starting Mission"}
               </Text>
+              <Text style={styles.modalText}>{startPhaseLabel}</Text>
             </View>
           </View>
         </Modal>

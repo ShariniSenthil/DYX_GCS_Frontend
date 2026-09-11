@@ -8,7 +8,7 @@ import {
   LineLayer,
   CircleLayer,
 } from "@rnmapbox/maps";
-import Svg, { Polygon, Circle } from "react-native-svg";
+import { RoverVehicleIcon } from "../shared/RoverVehicleIcon";
 import {
   MAPBOX_FALLBACK_STYLE_JSON,
   mapboxStyleUrlForMode,
@@ -31,31 +31,6 @@ interface Props {
   edgeToEdge?: boolean;
   isVisible?: boolean;
   statusMap?: Record<number, { status?: string } & Record<string, unknown>>;
-}
-
-function RoverVehicle({ heading, status }: { heading: number | null | undefined; status: string }) {
-  const rotationDeg = heading ?? 0;
-  const fill =
-    status === "armed" ? "#22c55e" : status === "rtk" ? "#0ea5e9" : "#fbbf24";
-  return (
-    <View style={{ transform: [{ rotate: `${rotationDeg}deg` }] }}>
-      <Svg width={64} height={64} viewBox="-20 -20 40 40">
-        <Circle cx={0} cy={0} r={18.7} fill="rgba(14,165,233,0.12)" />
-        <Polygon
-          points="-6.5,11 6.5,11 6.5,-4 0,-7.5 -6.5,-4"
-          fill={fill}
-          stroke="#ffffff"
-          strokeWidth={1.8}
-          strokeLinejoin="round"
-        />
-        <Polygon points="-9.5,5 -6.5,5 -6.5,11 -9.5,11" fill="#0f172a" />
-        <Polygon points="9.5,5 6.5,5 6.5,11 9.5,11" fill="#0f172a" />
-        <Polygon points="-2.5,3 2.5,3 2.5,-3 -2.5,-3" fill="#0f172a" />
-        <Polygon points="-4.5,-2 4.5,-2 3.5,2 -3.5,2" fill="rgba(186,230,253,0.85)" />
-        <Circle cx={0} cy={-7.5} r={2.5} fill="#fbbf24" stroke="#fff" strokeWidth={1} />
-      </Svg>
-    </View>
-  );
 }
 
 const DEFAULT_ZOOM = 15;
@@ -304,8 +279,13 @@ const MissionMapNativeBase: React.FC<Props> = ({
         )}
 
         {hasRoverPosition && (
-          <MarkerView coordinate={[roverLon, roverLat]} anchor={{ x: 0.5, y: 0.5 }}>
-            <RoverVehicle heading={heading} status={roverStatus} />
+          <MarkerView
+            coordinate={[roverLon, roverLat]}
+            anchor={{ x: 0.5, y: 0.5 }}
+            allowOverlap
+            style={{ backgroundColor: "transparent" }}
+          >
+            <RoverVehicleIcon heading={heading} status={roverStatus} />
           </MarkerView>
         )}
       </MapView>

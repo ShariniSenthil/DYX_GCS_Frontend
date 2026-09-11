@@ -24,6 +24,7 @@ interface IconVisual {
   icon: string;
   color: string;
   opacity: number;
+  label: string;
 }
 
 /**
@@ -35,49 +36,50 @@ function deriveVisuals(ind: RoverStatusIndicators): IconVisual[] {
   // 1) Network — Wi-Fi bars, ethernet, or offline.
   let network: IconVisual;
   if (ind.networkType === 'ethernet') {
-    network = { icon: 'hardware-chip', color: GREEN, opacity: 1 };
+    network = { icon: 'hardware-chip', color: GREEN, opacity: 1, label: 'ETH' };
   } else if (ind.networkType === 'wifi' && ind.wifiConnected) {
     const bars = ind.wifiSignalBars;
     network = {
       icon: 'wifi',
       color: GREEN,
       opacity: bars >= 4 ? 1 : bars >= 3 ? 0.8 : bars >= 2 ? 0.6 : 0.4,
+      label: 'WiFi',
     };
   } else {
-    network = { icon: 'wifi-outline', color: RED, opacity: 0.7 };
+    network = { icon: 'wifi-outline', color: RED, opacity: 0.7, label: 'WiFi' };
   }
 
   // 2) RTK — discrete UI state.
   const rtkVisuals: Record<RtkUiState, IconVisual> = {
-    off: { icon: 'radio-outline', color: GREY, opacity: 0.7 },
-    starting: { icon: 'radio-outline', color: AMBER, opacity: 0.9 },
-    streaming: { icon: 'radio-outline', color: CYAN, opacity: 1 },
-    rtk_float: { icon: 'radio-outline', color: AMBER, opacity: 1 },
-    rtk_fixed: { icon: 'radio-outline', color: GREEN, opacity: 1 },
-    error: { icon: 'alert-circle-outline', color: RED, opacity: 1 },
+    off: { icon: 'radio-outline', color: GREY, opacity: 0.7, label: 'RTK' },
+    starting: { icon: 'radio-outline', color: AMBER, opacity: 0.9, label: 'RTK' },
+    streaming: { icon: 'radio-outline', color: CYAN, opacity: 1, label: 'RTK' },
+    rtk_float: { icon: 'radio-outline', color: AMBER, opacity: 1, label: 'RTK' },
+    rtk_fixed: { icon: 'radio-outline', color: GREEN, opacity: 1, label: 'RTK' },
+    error: { icon: 'alert-circle-outline', color: RED, opacity: 1, label: 'RTK' },
   };
   const rtk = rtkVisuals[ind.rtkState];
 
-  // 3) GCS-link = frontend ↔ backend (Socket.IO lifecycle).
+  // 3) GCS-link = frontend ↔ backend (Socket.IO websocket).
   const gcs: IconVisual = ind.gcsConnected
-    ? { icon: 'cloud', color: GREEN, opacity: 1 }
-    : { icon: 'cloud-offline-outline', color: RED, opacity: 0.7 };
+    ? { icon: 'cloud', color: GREEN, opacity: 1, label: 'WS' }
+    : { icon: 'cloud-offline-outline', color: RED, opacity: 0.7, label: 'WS' };
 
   // 4) FCU-link = backend ↔ PX4/MAVROS (telemetry.connected).
   const fcu: IconVisual = ind.fcuConnected
-    ? { icon: 'airplane', color: GREEN, opacity: 1 }
-    : { icon: 'airplane', color: RED, opacity: 0.7 };
+    ? { icon: 'airplane', color: GREEN, opacity: 1, label: 'FCU' }
+    : { icon: 'airplane', color: RED, opacity: 0.7, label: 'FCU' };
 
   // 5) Battery — null-safe (missing telemetry shows neutral, never a false 0%).
   let battery: IconVisual;
   if (ind.batteryPct === null) {
-    battery = { icon: 'battery-dead', color: GREY, opacity: 0.7 };
+    battery = { icon: 'battery-dead', color: GREY, opacity: 0.7, label: 'BAT' };
   } else if (ind.batteryPct > 50) {
-    battery = { icon: 'battery-charging', color: GREEN, opacity: 1 };
+    battery = { icon: 'battery-charging', color: GREEN, opacity: 1, label: 'BAT' };
   } else if (ind.batteryPct > 20) {
-    battery = { icon: 'battery-half', color: AMBER, opacity: 1 };
+    battery = { icon: 'battery-half', color: AMBER, opacity: 1, label: 'BAT' };
   } else {
-    battery = { icon: 'battery-dead', color: RED, opacity: 1 };
+    battery = { icon: 'battery-dead', color: RED, opacity: 1, label: 'BAT' };
   }
 
   return [network, rtk, gcs, fcu, battery];
@@ -115,11 +117,13 @@ export const SystemStatusPanel: React.FC<Props> = ({
       <View style={styles.statusPad}>
         <View style={styles.iconRow}>
           {icons.map((v, idx) => (
-            <View
-              key={idx}
-              style={[styles.iconWrapper, { opacity: v.opacity, borderColor: `${v.color}40` }]}
-            >
-              <Ionicons name={v.icon as any} size={18} color={v.color} />
+            <View key={idx} style={styles.iconCell}>
+              <View
+                style={[styles.iconWrapper, { opacity: v.opacity, borderColor: `${v.color}40` }]}
+              >
+                <Ionicons name={v.icon as any} size={18} color={v.color} />
+              </View>
+              <Text style={[styles.iconLabel, { color: v.color }]}>{v.label}</Text>
             </View>
           ))}
         </View>
@@ -175,6 +179,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
   },
+  iconCell: {
+    alignItems: 'center',
+    gap: 4,
+  },
   iconWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -183,5 +191,10 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
     borderColor: PATH_PLAN_GLASS.borderSubtle,
+  },
+  iconLabel: {
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
 });

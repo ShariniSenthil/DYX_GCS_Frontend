@@ -40,7 +40,7 @@ import {
   refreshAllHealth,
   restoreKnownRovers,
 } from "../services/roverPresence";
-import { setBackendURL } from "../config";
+import { isMetroBundlerUrl, setBackendURL } from "../config";
 import { useAuth } from "../hooks/useAuth";
 import { AUTH_ENABLED } from "../config/featureFlags";
 import ConnectPasswordModal from "../components/common/ConnectPasswordModal";
@@ -313,13 +313,20 @@ export default function RoverDiscoveryScreen({
     }
     setTestingManualUrl(true);
     try {
-      // Accept both `192.168.3.101:5001` and a complete URL.
+      // Accept both `host:5001` and a complete URL.
       const normalizedManualUrl = /^https?:\/\//i.test(manualUrl.trim())
         ? manualUrl.trim().replace(/\/+$/, "")
         : `http://${manualUrl.trim().replace(/\/+$/, "")}`;
       const urlObj = new URL(normalizedManualUrl);
       const ip = urlObj.hostname;
       const port = urlObj.port ? parseInt(urlObj.port) : 5001;
+      if (isMetroBundlerUrl(normalizedManualUrl)) {
+        Alert.alert(
+          "That is the Metro bundler",
+          "8081/8082 is the tablet JS packager, not the rover. Enter the rover backend URL on port 5001 from this Wi‑Fi.",
+        );
+        return;
+      }
       let reachable = false;
       for (const probePath of ["/api/health", "/api/healthz", "/api/ping"]) {
         try {
@@ -338,8 +345,8 @@ export default function RoverDiscoveryScreen({
       const response = { status: reachable ? 200 : 503 };
       if (reachable) {
         const device: JetsonDevice = {
-          id: health.rover_id,
-          name: health.rover_name || `Custom Rover (${ip})`,
+          id: `manual-${ip}-${port}`,
+          name: `Custom Rover (${ip})`,
           ip,
           port,
           url: normalizedManualUrl,
@@ -789,7 +796,7 @@ export default function RoverDiscoveryScreen({
                 <Text style={styles.tipText}>
                   Beacon on{" "}
                   <Text style={styles.tipHighlightGreen}>UDP 5002</Text>
-                  {" · "}API on{" "}
+                  {" · "}API / WebSocket on{" "}
                   <Text style={styles.tipHighlightGreen}>HTTP 5001</Text>
                 </Text>
               </View>
@@ -813,6 +820,11 @@ export default function RoverDiscoveryScreen({
                 </Text>
               </View>
             </View>
+
+            <Text style={[styles.emptyDesc, { marginTop: 8 }]}>
+              Tablet Wi‑Fi must be the rover network. Metro 8081/8082 is only
+              the debug packager over USB, not the rover WebSocket.
+            </Text>
 
             {scanning && (
               <View style={[styles.scanningRow, { marginTop: 16 }]}>
@@ -871,12 +883,12 @@ export default function RoverDiscoveryScreen({
               <Text style={styles.modalTitle}>Manual Backend URL</Text>
             </View>
             <Text style={styles.modalHint}>
-              Probes /api/healthz (4WD_SERVER){"\n"}Example:
-              http://192.168.1.101:5001
+              Probes /api/health on this Wi‑Fi. Use host:5001 — not packager
+              ports 8081/8082.
             </Text>
             <TextInput
               style={styles.urlInput}
-              placeholder="http://192.168.1.x:5001"
+              placeholder="http://HOST:5001"
               placeholderTextColor="#555"
               value={manualUrl}
               onChangeText={setManualUrl}

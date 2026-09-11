@@ -18,6 +18,7 @@ import { useTelemetry } from './TelemetryContext';
 
 export interface ConnectionContextValue {
   connectionState: ConnectionState;
+  socketTransport: "websocket" | "polling" | null;
   services: RoverServices;
   socket: Socket | null;
   reconnect: () => void;
@@ -37,11 +38,13 @@ export function ConnectionProvider({ children }: ConnectionProviderProps): React
   // NOT on every 20Hz telemetry update.
   const contextValue = useMemo<ConnectionContextValue>(() => ({
     connectionState: telemetry.connectionState,
+    socketTransport: telemetry.socketTransport,
     services: telemetry.services,
     socket: telemetry.socket,
     reconnect: telemetry.reconnect,
   }), [
     telemetry.connectionState,
+    telemetry.socketTransport,
     telemetry.services,
     telemetry.socket,
     telemetry.reconnect,
