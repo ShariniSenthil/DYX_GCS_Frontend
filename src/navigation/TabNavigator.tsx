@@ -101,11 +101,10 @@ function TabNavigatorInner() {
   const isMarkingPlanVisible = activeTab === "Marking Plan";
   const isMissionProgressVisible = activeTab === "Mission Progress";
 
-  // Mission Progress intentionally uses its own MissionMap again so the
-  // backend-generated trajectory is rendered exactly as it was at c73b200:
-  // the original MissionMap purple trajectory line + generated point dots.
-  // The shared native FieldMapHost remains dedicated to Marking Plan.
-  const mapTabActive = isMarkingPlanVisible || isMissionProgressVisible;
+  // Keep the shared FieldMapHost dedicated to Marking Plan.
+  // Mission Progress mounts its own native MissionMap so the backend-generated
+  // trajectory is passed directly from MissionReportScreen to MissionMapNative.
+  const sharedMapActive = isMarkingPlanVisible;
 
   return (
     <MissionProgressOverlayProvider>
@@ -115,19 +114,21 @@ function TabNavigatorInner() {
         <RtkRuntimeNotice />
 
         <View style={styles.body}>
-          <View
-            style={styles.mapHost}
-            pointerEvents={mapTabActive ? "auto" : "none"}
-            collapsable={false}
-          >
-            <ErrorBoundary
-              componentName="Field Map"
-              autoResetMs={400}
-              maxAutoResets={2}
+          {sharedMapActive && (
+            <View
+              style={styles.mapHost}
+              pointerEvents="auto"
+              collapsable={false}
             >
-              <FieldMapHost />
-            </ErrorBoundary>
-          </View>
+              <ErrorBoundary
+                componentName="Field Map"
+                autoResetMs={400}
+                maxAutoResets={2}
+              >
+                <FieldMapHost />
+              </ErrorBoundary>
+            </View>
+          )}
 
           {mountedTabs.has("Dashboard") && (
             <View
@@ -190,7 +191,7 @@ function TabNavigatorInner() {
             >
               <ErrorBoundary componentName="Mission Progress Screen">
                 <MemoMissionReportScreen
-                  embedMap={false}
+                  embedMap={isMissionProgressVisible}
                   isVisible={isMissionProgressVisible}
                 />
               </ErrorBoundary>

@@ -136,7 +136,15 @@ const MissionMapNativeBase: React.FC<Props> = ({
   }, [waypoints]);
 
   const trajectoryCollection = useMemo(() => {
-    const coords = trajectoryPoints
+    /*
+     * Restore c73b200 generated-trajectory display semantics:
+     *
+     * - use only backend-provided latitude/longitude
+     * - keep the complete backend trajectory as one LineString
+     * - add sampled generated trajectory Point features for display
+     * - never reconstruct/reproject the trajectory in the frontend
+     */
+    const coordinates = trajectoryPoints
       .map((pt) => {
         const lon = Number(pt.longitude);
         const lat = Number(pt.latitude);
@@ -144,8 +152,54 @@ const MissionMapNativeBase: React.FC<Props> = ({
         return [lon, lat] as [number, number];
       })
       .filter((c): c is [number, number] => c != null);
-    if (coords.length < 2) return null;
-    return asLineCollection(coords);
+
+    if (coordinates.length === 0) return null;
+
+    const features: any[] = [];
+
+    if (coordinates.length >= 2) {
+      features.push({
+        type: "Feature",
+        properties: {
+          kind: "line",
+        },
+        geometry: {
+          type: "LineString",
+          coordinates,
+        },
+      });
+    }
+
+    const visiblePointStep = Math.max(
+      1,
+      Math.ceil(coordinates.length / 400),
+    );
+
+    coordinates.forEach((coordinate, index) => {
+      const isFirstPoint = index === 0;
+      const isLastPoint = index === coordinates.length - 1;
+      const shouldDisplay =
+        isFirstPoint || isLastPoint || index % visiblePointStep === 0;
+
+      if (!shouldDisplay) return;
+
+      features.push({
+        type: "Feature",
+        properties: {
+          kind: "point",
+          index,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: coordinate,
+        },
+      });
+    });
+
+    return {
+      type: "FeatureCollection" as const,
+      features,
+    };
   }, [trajectoryPoints]);
 
   const handleToggleMapStyle = useCallback(() => {
@@ -248,8 +302,63 @@ const MissionMapNativeBase: React.FC<Props> = ({
             shape={trajectoryCollection as any}
           >
             <LineLayer
-              id="generated-trajectory-layer"
-              style={{ lineColor: "#f59e0b", lineWidth: 2, lineOpacity: 0.9 }}
+              id="generated-trajectory-line"
+              filter={["==", ["get", "kind"], "line"] as any}
+              style={
+                {
+                  lineColor: "#A855F7",
+                  lineWidth: [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    15,
+                    2,
+                    19,
+                    3,
+                    22,
+                    4,
+                    24,
+                    5,
+                  ],
+                  lineOpacity: 1,
+                } as any
+              }
+            />
+            <CircleLayer
+              id="generated-trajectory-points"
+              filter={["==", ["get", "kind"], "point"] as any}
+              style={
+                {
+                  circleColor: "#F0ABFC",
+                  circleRadius: [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    15,
+                    0.5,
+                    18,
+                    1,
+                    21,
+                    2,
+                    24,
+                    3,
+                  ],
+                  circleOpacity: [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    15,
+                    0.25,
+                    18,
+                    0.5,
+                    20,
+                    0.85,
+                    22,
+                    1,
+                  ],
+                  circleStrokeWidth: 0,
+                } as any
+              }
             />
           </ShapeSource>
         )}

@@ -25,7 +25,7 @@ import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStart
 import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
 import MissionControlCard from "../components/missionreport/MissionControlCard";
 import { WaypointsTable } from "../components/missionreport/WaypointsTable";
-import { MissionMap } from "../components/missionreport/MissionMap";
+import { MissionMapNative as MissionMap } from "../components/missionreport/MissionMapNative";
 import { DraggableCard } from "../components/shared/DraggableCard";
 import { MissionTableHeader } from "../components/missionreport/MissionTableHeader";
 import { MissionTableToolbarActions } from "../components/missionreport/MissionTableToolbarActions";
