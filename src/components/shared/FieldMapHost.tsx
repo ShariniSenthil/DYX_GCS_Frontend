@@ -336,7 +336,7 @@ const FieldMapHostBase: React.FC = () => {
           logoEnabled={false}
           attributionEnabled={false}
           scaleBarEnabled={false}
-          surfaceView={false}
+          surfaceView={true}
           pitchEnabled={false}
           rotateEnabled={false}
           onDidFinishLoadingStyle={onStyleLoaded}
