@@ -93,7 +93,12 @@ function TabNavigatorInner() {
 
   const isMarkingPlanVisible = activeTab === 'Marking Plan';
   const isMissionProgressVisible = activeTab === 'Mission Progress';
-  const mapTabActive = isMarkingPlanVisible || isMissionProgressVisible;
+
+  // Mission Progress intentionally uses its own MissionMap again so the
+  // backend-generated trajectory is rendered exactly as it was at c73b200:
+  // the original MissionMap purple trajectory line + generated point dots.
+  // The shared native FieldMapHost remains dedicated to Marking Plan.
+  const sharedMapActive = isMarkingPlanVisible;
 
   return (
     <MissionProgressOverlayProvider>
@@ -107,8 +112,11 @@ function TabNavigatorInner() {
 
         <View style={styles.body}>
           <View
-            style={styles.mapHost}
-            pointerEvents={mapTabActive ? 'auto' : 'none'}
+            style={[
+              styles.mapHost,
+              { opacity: sharedMapActive ? 1 : 0 },
+            ]}
+            pointerEvents={sharedMapActive ? 'auto' : 'none'}
             collapsable={false}
           >
             <ErrorBoundary
@@ -181,7 +189,7 @@ function TabNavigatorInner() {
             >
               <ErrorBoundary componentName="Mission Progress Screen">
                 <MemoMissionReportScreen
-                  embedMap={false}
+                  embedMap={true}
                   isVisible={isMissionProgressVisible}
                 />
               </ErrorBoundary>
