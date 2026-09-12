@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { StyleSheet, Text, View } from "react-native";
 import {
   Camera,
@@ -51,12 +57,7 @@ function asLineCollection(coordinates: [number, number][]) {
 }
 
 const FieldMapHostBase: React.FC = () => {
-  const {
-    activeSurface,
-    marking,
-    mission,
-    markingPressRef,
-  } = useFieldMap();
+  const { activeSurface, marking, mission, markingPressRef } = useFieldMap();
   const { telemetry, roverPosition } = useTelemetry();
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const zoomRef = useRef(DEFAULT_ZOOM);
@@ -87,8 +88,7 @@ const FieldMapHostBase: React.FC = () => {
     const next = {
       lat: roverPosition?.lat ?? 0,
       lon: roverPosition?.lng ?? 0,
-      heading:
-        typeof yaw === "number" && Number.isFinite(yaw) ? yaw : null,
+      heading: typeof yaw === "number" && Number.isFinite(yaw) ? yaw : null,
       armed: telemetry.state?.armed ?? false,
       rtk: telemetry.rtk?.fix_type ?? 0,
     };
@@ -136,7 +136,10 @@ const FieldMapHostBase: React.FC = () => {
     return CHENNAI;
   }, [hasRoverPosition, rover.lat, rover.lon, fallbackSnapshot.waypoints]);
 
-  if (initialCenterRef.current == null && (hasRoverPosition || fallbackSnapshot.waypoints.length > 0)) {
+  if (
+    initialCenterRef.current == null &&
+    (hasRoverPosition || fallbackSnapshot.waypoints.length > 0)
+  ) {
     initialCenterRef.current = defaultCenter;
   }
 
@@ -163,7 +166,9 @@ const FieldMapHostBase: React.FC = () => {
             },
           };
         })
-        .filter((feature): feature is NonNullable<typeof feature> => feature != null),
+        .filter(
+          (feature): feature is NonNullable<typeof feature> => feature != null,
+        ),
     };
   }, [
     fallbackSnapshot.waypoints,
@@ -247,12 +252,7 @@ const FieldMapHostBase: React.FC = () => {
       maxLon = Math.max(maxLon, rover.lon);
       maxLat = Math.max(maxLat, rover.lat);
     }
-    cameraRef.current?.fitBounds(
-      [maxLon, maxLat],
-      [minLon, minLat],
-      50,
-      0,
-    );
+    cameraRef.current?.fitBounds([maxLon, maxLat], [minLon, minLat], 50, 0);
   }, [
     fallbackSnapshot.waypoints,
     mapReady,
@@ -329,14 +329,14 @@ const FieldMapHostBase: React.FC = () => {
   return (
     <View style={styles.root} collapsable={false} onLayout={onLayout}>
       {canMount ? (
-      <MapView
+        <MapView
           style={styles.map}
           {...mapStyleProps}
           compassEnabled={false}
           logoEnabled={false}
           attributionEnabled={false}
           scaleBarEnabled={false}
-          surfaceView={true}
+          surfaceView={false}
           pitchEnabled={false}
           rotateEnabled={false}
           onDidFinishLoadingStyle={onStyleLoaded}
@@ -358,7 +358,11 @@ const FieldMapHostBase: React.FC = () => {
             <ShapeSource id="field-path" shape={pathCollection as any}>
               <LineLayer
                 id="field-path-layer"
-                style={{ lineColor: "#38bdf8", lineWidth: 3, lineOpacity: 0.85 }}
+                style={{
+                  lineColor: "#38bdf8",
+                  lineWidth: 3,
+                  lineOpacity: 0.85,
+                }}
               />
             </ShapeSource>
           )}
@@ -379,24 +383,21 @@ const FieldMapHostBase: React.FC = () => {
             <ShapeSource id="field-points" shape={waypointCollection as any}>
               <CircleLayer
                 id="field-points-layer"
-                style={{
-                  circleRadius: [
-                    "case",
-                    ["==", ["get", "active"], 1],
-                    8,
-                    5,
-                  ],
-                  circleColor: [
-                    "case",
-                    ["==", ["get", "completed"], 1],
-                    "#22c55e",
-                    ["==", ["get", "active"], 1],
-                    "#fbbf24",
-                    "#ef4444",
-                  ],
-                  circleStrokeColor: "#ffffff",
-                  circleStrokeWidth: 2,
-                } as any}
+                style={
+                  {
+                    circleRadius: ["case", ["==", ["get", "active"], 1], 8, 5],
+                    circleColor: [
+                      "case",
+                      ["==", ["get", "completed"], 1],
+                      "#22c55e",
+                      ["==", ["get", "active"], 1],
+                      "#fbbf24",
+                      "#ef4444",
+                    ],
+                    circleStrokeColor: "#ffffff",
+                    circleStrokeWidth: 2,
+                  } as any
+                }
               />
             </ShapeSource>
           )}

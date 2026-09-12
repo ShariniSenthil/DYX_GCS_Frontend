@@ -1,31 +1,31 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
-import DashboardScreen from '../screens/DashboardScreen';
-import PathPlanScreen from '../screens/PathPlanScreen';
-import MissionReportScreen from '../screens/MissionReportScreen';
-import { AppHeader } from '../components/shared/AppHeader';
-import { FieldMapHost } from '../components/shared/FieldMapHost';
-import { MissionProgressOverlayProvider } from '../context/MissionProgressOverlayContext';
-import { FieldMapProvider, useFieldMap } from '../context/FieldMapContext';
-import { ErrorBoundary } from '../components/shared/ErrorBoundary';
-import { colors } from '../theme/colors';
-import PersistentStorage from '../services/PersistentStorage';
-import { RtkRuntimeNotice } from '../components/rtk/RtkRuntimeNotice';
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { StyleSheet, View } from "react-native";
+import DashboardScreen from "../screens/DashboardScreen";
+import PathPlanScreen from "../screens/PathPlanScreen";
+import MissionReportScreen from "../screens/MissionReportScreen";
+import { AppHeader } from "../components/shared/AppHeader";
+import { FieldMapHost } from "../components/shared/FieldMapHost";
+import { MissionProgressOverlayProvider } from "../context/MissionProgressOverlayContext";
+import { FieldMapProvider, useFieldMap } from "../context/FieldMapContext";
+import { ErrorBoundary } from "../components/shared/ErrorBoundary";
+import { colors } from "../theme/colors";
+import PersistentStorage from "../services/PersistentStorage";
+import { RtkRuntimeNotice } from "../components/rtk/RtkRuntimeNotice";
 
 const MemoDashboardScreen = React.memo(DashboardScreen);
 const MemoPathPlanScreen = React.memo(PathPlanScreen);
 const MemoMissionReportScreen = React.memo(MissionReportScreen);
 
-type TabName = 'Dashboard' | 'Marking Plan' | 'Mission Progress';
+type TabName = "Dashboard" | "Marking Plan" | "Mission Progress";
 
-const MAP_TABS: TabName[] = ['Marking Plan', 'Mission Progress'];
+const MAP_TABS: TabName[] = ["Marking Plan", "Mission Progress"];
 
 function TabNavigatorInner() {
-  const [activeTab, setActiveTab] = useState<TabName>('Mission Progress');
+  const [activeTab, setActiveTab] = useState<TabName>("Mission Progress");
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(
     new Set(MAP_TABS),
   );
-  const previousTabRef = useRef<string>('Mission Progress');
+  const previousTabRef = useRef<string>("Mission Progress");
   const mountedRef = useRef(true);
   const { setActiveSurface } = useFieldMap();
 
@@ -33,12 +33,16 @@ function TabNavigatorInner() {
     const loadLastActiveTab = async () => {
       try {
         const lastTab = await PersistentStorage.loadActiveTab();
-        if (lastTab === 'Dashboard' || lastTab === 'Marking Plan' || lastTab === 'Mission Progress') {
+        if (
+          lastTab === "Dashboard" ||
+          lastTab === "Marking Plan" ||
+          lastTab === "Mission Progress"
+        ) {
           setActiveTab(lastTab);
           setMountedTabs((prev) => {
             const next = new Set(prev);
             next.add(lastTab);
-            if (lastTab !== 'Dashboard') {
+            if (lastTab !== "Dashboard") {
               MAP_TABS.forEach((tab) => next.add(tab));
             }
             return next;
@@ -46,7 +50,7 @@ function TabNavigatorInner() {
           previousTabRef.current = lastTab;
         }
       } catch (error) {
-        console.error('[TabNavigator] Failed to load last active tab:', error);
+        console.error("[TabNavigator] Failed to load last active tab:", error);
       }
     };
 
@@ -54,30 +58,33 @@ function TabNavigatorInner() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'Marking Plan') setActiveSurface('marking');
-    else if (activeTab === 'Mission Progress') setActiveSurface('mission');
+    if (activeTab === "Marking Plan") setActiveSurface("marking");
+    else if (activeTab === "Mission Progress") setActiveSurface("mission");
   }, [activeTab, setActiveSurface]);
 
-  const handleTabChange = useCallback((newTab: TabName) => {
-    if (!mountedRef.current || activeTab === newTab) {
-      return;
-    }
-
-    setMountedTabs((prev) => {
-      const next = new Set(prev).add(newTab);
-      if (newTab === 'Marking Plan' || newTab === 'Mission Progress') {
-        MAP_TABS.forEach((tab) => next.add(tab));
+  const handleTabChange = useCallback(
+    (newTab: TabName) => {
+      if (!mountedRef.current || activeTab === newTab) {
+        return;
       }
-      return next;
-    });
-    setActiveTab(newTab);
 
-    PersistentStorage.saveActiveTab(newTab).catch((error) => {
-      console.error('[TabNavigator] Failed to save active tab:', error);
-    });
+      setMountedTabs((prev) => {
+        const next = new Set(prev).add(newTab);
+        if (newTab === "Marking Plan" || newTab === "Mission Progress") {
+          MAP_TABS.forEach((tab) => next.add(tab));
+        }
+        return next;
+      });
+      setActiveTab(newTab);
 
-    previousTabRef.current = newTab;
-  }, [activeTab]);
+      PersistentStorage.saveActiveTab(newTab).catch((error) => {
+        console.error("[TabNavigator] Failed to save active tab:", error);
+      });
+
+      previousTabRef.current = newTab;
+    },
+    [activeTab],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -91,32 +98,26 @@ function TabNavigatorInner() {
   const [isStatisticsVisible, setIsStatisticsVisible] = useState(true);
   const [isBottomTableVisible, setIsBottomTableVisible] = useState(true);
 
-  const isMarkingPlanVisible = activeTab === 'Marking Plan';
-  const isMissionProgressVisible = activeTab === 'Mission Progress';
+  const isMarkingPlanVisible = activeTab === "Marking Plan";
+  const isMissionProgressVisible = activeTab === "Mission Progress";
 
   // Mission Progress intentionally uses its own MissionMap again so the
   // backend-generated trajectory is rendered exactly as it was at c73b200:
   // the original MissionMap purple trajectory line + generated point dots.
   // The shared native FieldMapHost remains dedicated to Marking Plan.
-  const sharedMapActive = isMarkingPlanVisible;
+  const mapTabActive = isMarkingPlanVisible || isMissionProgressVisible;
 
   return (
     <MissionProgressOverlayProvider>
       <View style={styles.root}>
-        <AppHeader
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-        />
+        <AppHeader activeTab={activeTab} onTabChange={handleTabChange} />
 
         <RtkRuntimeNotice />
 
         <View style={styles.body}>
           <View
-            style={[
-              styles.mapHost,
-              { opacity: sharedMapActive ? 1 : 0 },
-            ]}
-            pointerEvents={sharedMapActive ? 'auto' : 'none'}
+            style={styles.mapHost}
+            pointerEvents={mapTabActive ? "auto" : "none"}
             collapsable={false}
           >
             <ErrorBoundary
@@ -128,16 +129,16 @@ function TabNavigatorInner() {
             </ErrorBoundary>
           </View>
 
-          {mountedTabs.has('Dashboard') && (
+          {mountedTabs.has("Dashboard") && (
             <View
               style={[
                 styles.screen,
                 {
-                  opacity: activeTab === 'Dashboard' ? 1 : 0,
-                  zIndex: activeTab === 'Dashboard' ? 2 : 0,
+                  opacity: activeTab === "Dashboard" ? 1 : 0,
+                  zIndex: activeTab === "Dashboard" ? 2 : 0,
                 },
               ]}
-              pointerEvents={activeTab === 'Dashboard' ? 'auto' : 'none'}
+              pointerEvents={activeTab === "Dashboard" ? "auto" : "none"}
               collapsable={false}
             >
               <ErrorBoundary componentName="Dashboard Screen">
@@ -146,7 +147,7 @@ function TabNavigatorInner() {
             </View>
           )}
 
-          {mountedTabs.has('Marking Plan') && (
+          {mountedTabs.has("Marking Plan") && (
             <View
               style={[
                 styles.overlayScreen,
@@ -155,7 +156,7 @@ function TabNavigatorInner() {
                   zIndex: isMarkingPlanVisible ? 1 : 0,
                 },
               ]}
-              pointerEvents={isMarkingPlanVisible ? 'box-none' : 'none'}
+              pointerEvents={isMarkingPlanVisible ? "box-none" : "none"}
               collapsable={false}
             >
               <ErrorBoundary componentName="Marking Plan Screen">
@@ -175,7 +176,7 @@ function TabNavigatorInner() {
             </View>
           )}
 
-          {mountedTabs.has('Mission Progress') && (
+          {mountedTabs.has("Mission Progress") && (
             <View
               style={[
                 styles.overlayScreen,
@@ -184,12 +185,12 @@ function TabNavigatorInner() {
                   zIndex: isMissionProgressVisible ? 1 : 0,
                 },
               ]}
-              pointerEvents={isMissionProgressVisible ? 'box-none' : 'none'}
+              pointerEvents={isMissionProgressVisible ? "box-none" : "none"}
               collapsable={false}
             >
               <ErrorBoundary componentName="Mission Progress Screen">
                 <MemoMissionReportScreen
-                  embedMap={true}
+                  embedMap={false}
                   isVisible={isMissionProgressVisible}
                 />
               </ErrorBoundary>
@@ -216,7 +217,7 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
   },
   mapHost: {
     ...StyleSheet.absoluteFillObject,
@@ -230,6 +231,6 @@ const styles = StyleSheet.create({
   overlayScreen: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
 });
