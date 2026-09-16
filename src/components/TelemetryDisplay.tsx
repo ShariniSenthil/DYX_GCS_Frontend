@@ -38,10 +38,7 @@ const TelemetryDisplay: React.FC = () => {
   );
 
   const onRefresh = React.useCallback(() => {
-    // Telemetry updates automatically, this is just for visual feedback
-    setTimeout(() => {
-      // Trigger re-render
-    }, 1000);
+    // Telemetry updates automatically via the socket.
   }, []);
 
   return (

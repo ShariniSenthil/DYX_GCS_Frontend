@@ -134,10 +134,7 @@ export const ServoConfigModal: React.FC<ServoConfigModalProps> = ({
       }
 
       setSaveSuccess(true);
-
-      setTimeout(() => {
-        onClose();
-      }, 700);
+      onClose();
     } catch (error) {
       Alert.alert(
         "Save Error",

@@ -186,11 +186,7 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
   // Load all settings on mount
   React.useEffect(() => {
     if (visible) {
-      // Small delay to allow backend connection to establish
-      const timer = setTimeout(() => {
-        loadAllSettings();
-      }, 100);
-      return () => clearTimeout(timer);
+      loadAllSettings();
     }
   }, [visible]);
 

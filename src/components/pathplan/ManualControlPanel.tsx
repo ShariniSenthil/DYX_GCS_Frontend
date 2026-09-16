@@ -271,17 +271,12 @@ export const ManualControlPanel: React.FC<ManualControlPanelProps> = ({
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Exit',
-          onPress: async () => {
-            // Send zero throttle
+          onPress: () => {
             leftThrottleRef.current = 0;
             rightThrottleRef.current = 0;
             setLeftThrottle(0);
             setRightThrottle(0);
             sendManualControl();
-            
-            // Wait briefly for zero command to send
-            await new Promise(resolve => setTimeout(resolve, 200));
-            
             setIsManualModeActive(false);
             onExitManualMode?.();
           },

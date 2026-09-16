@@ -1724,15 +1724,9 @@ export default function MissionReportScreen({
         "Sequence numbers auto-assigned successfully!",
       );
 
-      // Show preview dialog after auto-assignment
-      const previewTimer = setTimeout(() => {
-        if (mountedRef.current) {
-          setShowWaypointPreviewDialog(true);
-        }
-      }, 100);
-
-      // Cleanup timer (though component should be mounted, this is defensive)
-      return () => clearTimeout(previewTimer);
+      if (mountedRef.current) {
+        setShowWaypointPreviewDialog(true);
+      }
     } catch (error) {
       console.error("[MissionReportScreen] Auto-assign error:", error);
       showNotification(
@@ -2173,15 +2167,9 @@ export default function MissionReportScreen({
           "All marking points have been processed!",
         );
 
-        // Show completion dialog after a brief delay to ensure UI updates
-        const completionTimer = setTimeout(() => {
-          if (mountedRef.current) {
-            setShowCompletionDialog(true);
-          }
-        }, 1000);
-
-        // Cleanup timer on unmount or re-run
-        return () => clearTimeout(completionTimer);
+        if (mountedRef.current) {
+          setShowCompletionDialog(true);
+        }
       }
     }
   }, [currentIndex]);
@@ -2349,11 +2337,9 @@ export default function MissionReportScreen({
         "Mission Completed",
         "All marking points processed!",
       );
-      const t = setTimeout(() => {
-        if (mountedRef.current) setShowCompletionDialog(true);
-        clearVerifiedTerminal();
-      }, 1000);
-      return () => clearTimeout(t);
+      if (mountedRef.current) setShowCompletionDialog(true);
+      clearVerifiedTerminal();
+      return;
     }
 
     const detail =
@@ -2704,7 +2690,6 @@ export default function MissionReportScreen({
             readyMission?.ready !== true &&
             mountedRef.current
           ) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
             const status = await getMissionStatus();
             if (status?.success && status.mission) {
               readyMission = status.mission;
@@ -2717,6 +2702,10 @@ export default function MissionReportScreen({
                 break;
               }
             }
+            if (readyMission?.ready === true) {
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
           }
 
           if (readyMission?.ready !== true) {

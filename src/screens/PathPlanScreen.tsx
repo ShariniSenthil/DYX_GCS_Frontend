@@ -15,6 +15,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Text,
+  InteractionManager,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LegendList } from "@legendapp/list";
@@ -2280,12 +2281,9 @@ export default function PathPlanScreen({
           {
             text: "Retry",
             onPress: () => {
-              const timer = setTimeout(() => {
-                if (mountedRef.current) {
-                  handleLoadFromController();
-                }
-              }, 100);
-              addTimer(timer);
+              if (mountedRef.current) {
+                handleLoadFromController();
+              }
             },
             style: "cancel",
           },
@@ -2793,12 +2791,11 @@ export default function PathPlanScreen({
         {
           text: "Try Again",
           onPress: () => {
-            const timer = setTimeout(() => {
+            InteractionManager.runAfterInteractions(() => {
               if (mountedRef.current) {
                 handleRequestUpload();
               }
-            }, 100);
-            addTimer(timer);
+            });
           },
           style: "cancel",
         },
@@ -3949,12 +3946,11 @@ export default function PathPlanScreen({
                             text: "Upload New File",
                             onPress: () => {
                               setShowUploadPreview(false);
-                              const timer = setTimeout(() => {
+                              InteractionManager.runAfterInteractions(() => {
                                 if (mountedRef.current) {
                                   handleRequestUpload();
                                 }
-                              }, 200);
-                              addTimer(timer);
+                              });
                             },
                           },
                         ],
@@ -4083,12 +4079,11 @@ export default function PathPlanScreen({
               <TouchableOpacity
                 onPress={() => {
                   setShowUploadPreview(false);
-                  const timer = setTimeout(() => {
+                  InteractionManager.runAfterInteractions(() => {
                     if (mountedRef.current) {
                       handleRequestUpload();
                     }
-                  }, 200);
-                  addTimer(timer);
+                  });
                 }}
                 style={{
                   flex: 1,

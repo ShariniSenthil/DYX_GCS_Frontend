@@ -1569,6 +1569,11 @@ if (envelope.within_test_tolerance !== undefined) {
         });
         return;
       }
+      // Live socket packets win. REST may still complete after the first
+      // packet and must not overwrite fresher telemetry.
+      if (!mountedRef.current || hasLiveTelemetryRef.current) {
+        return;
+      }
       const adapted = toRoverTelemetry(
         latest as Parameters<typeof toRoverTelemetry>[0]
       );
@@ -1894,22 +1899,18 @@ if (envelope.within_test_tolerance !== undefined) {
           }
 
           /*
-           * If the first live socket packet is delayed, seed UI from REST.
-           * Skip the fallback once a live telemetry packet has already arrived.
+           * Seed UI from REST immediately. Live socket packets overwrite
+           * this snapshot; fetchTelemetrySnapshot no-ops if live data
+           * already arrived while the request was in flight.
            */
           if (restFallbackTimerRef.current) {
             clearTimeout(restFallbackTimerRef.current);
-          }
-          restFallbackTimerRef.current = setTimeout(() => {
             restFallbackTimerRef.current = null;
-            if (!mountedRef.current) return;
-            if (connectionGeneration !== socketGenerationRef.current) return;
-            if (hasLiveTelemetryRef.current) return;
-            telemetryDiagLog(
-              "No live socket telemetry yet — REST snapshot fallback",
-            );
+          }
+          if (!hasLiveTelemetryRef.current) {
+            telemetryDiagLog("Seeding telemetry from REST snapshot");
             void fetchTelemetrySnapshot();
-          }, 1500);
+          }
         });
 
         // NRP_ROS LEGACY DISABLED — custom ping/pong and subscription ack events.
@@ -2318,7 +2319,7 @@ if (envelope.within_test_tolerance !== undefined) {
         setConnectionState("error");
         scheduleReconnect();
       }
-    }, 100);
+    }, 0);
     // ✅ CRITICAL: Removed handleBridgeTelemetry and handleRoverData from dependencies
     // They are now refs and won't cause re-registrations
   }, [clearReconnectTimer, fetchTelemetrySnapshot, resetTelemetry, scheduleReconnect, teardownSocket]);
