@@ -824,22 +824,12 @@ export default function MissionReportScreen({
       getMissionStartEligibility({
         connected: connectionState === "connected",
         loaded: hasUploadedMission,
-        ready: backendMission?.ready === true,
-        acceptedForStart: backendMission?.accepted_for_start,
         state: backendMissionState,
-        mode,
-        joystickActive: telemetry.joystick_active === true,
-        controlOwner: telemetry.control_owner,
       }),
     [
       connectionState,
       hasUploadedMission,
-      backendMission?.ready,
-      backendMission?.accepted_for_start,
       backendMissionState,
-      mode,
-      telemetry.joystick_active,
-      telemetry.control_owner,
     ],
   );
   const canStartMission = startEligibility.canPressStart;
@@ -2624,12 +2614,7 @@ export default function MissionReportScreen({
       const eligibility = getMissionStartEligibility({
         connected: connectionState === "connected",
         loaded: latestMission?.loaded === true,
-        ready: latestMission?.ready === true,
-        acceptedForStart: latestMission?.accepted_for_start,
         state: latestMission?.state,
-        mode,
-        joystickActive: telemetry.joystick_active === true,
-        controlOwner: telemetry.control_owner,
       });
 
       if (!eligibility.canPressStart) {

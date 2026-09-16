@@ -7,36 +7,23 @@ import {
 const base = {
   connected: true,
   loaded: true,
-  ready: true,
   state: "READY",
-  mode: "AUTO",
 };
 
 describe("getMissionStartEligibility", () => {
-  test("READY + loaded + ready allows direct Start", () => {
+  test("connected and loaded allows Start; backend decides the rest", () => {
     expect(getMissionStartEligibility(base)).toEqual({
       canPressStart: true,
-      needsPrepare: false,
+      needsPrepare: true,
       reason: null,
     });
   });
 
-  test("COMPLETED with ready still allows Start without prepare", () => {
+  test("COMPLETED with a loaded mission uses prepare-then-start", () => {
     expect(
       getMissionStartEligibility({
         ...base,
         state: "COMPLETED",
-        ready: true,
-      }),
-    ).toMatchObject({ canPressStart: true, needsPrepare: false });
-  });
-
-  test("COMPLETED with loaded and ready false uses prepare-then-start", () => {
-    expect(
-      getMissionStartEligibility({
-        ...base,
-        state: "COMPLETED",
-        ready: false,
       }),
     ).toEqual({
       canPressStart: true,
@@ -45,55 +32,48 @@ describe("getMissionStartEligibility", () => {
     });
   });
 
-  test("STOPPED with ready false uses prepare-then-start", () => {
+  test("STOPPED with a loaded mission uses prepare-then-start", () => {
     expect(
       getMissionStartEligibility({
         ...base,
         state: "STOPPED",
-        ready: false,
       }),
     ).toMatchObject({ canPressStart: true, needsPrepare: true });
+  });
+
+  test("not connected cannot start", () => {
+    expect(
+      getMissionStartEligibility({ ...base, connected: false }),
+    ).toEqual({
+      canPressStart: false,
+      needsPrepare: false,
+      reason: "Rover is not connected.",
+    });
   });
 
   test("not loaded cannot start", () => {
     expect(
       getMissionStartEligibility({ ...base, loaded: false }),
-    ).toMatchObject({ canPressStart: false, needsPrepare: false });
+    ).toMatchObject({
+      canPressStart: false,
+      needsPrepare: false,
+      reason: "Upload a mission before starting.",
+    });
   });
 
-  test("RUNNING cannot start", () => {
+  test("RUNNING is not pre-blocked; backend rejects if needed", () => {
     expect(
       getMissionStartEligibility({ ...base, state: "RUNNING" }),
-    ).toMatchObject({ canPressStart: false });
+    ).toMatchObject({ canPressStart: true, needsPrepare: false });
   });
 
-  test("joystick blocks Start", () => {
+  test("PREPARING is not pre-blocked; backend rejects if needed", () => {
     expect(
       getMissionStartEligibility({
         ...base,
-        joystickActive: true,
-      }),
-    ).toMatchObject({ canPressStart: false });
-  });
-
-  test("PREPARING cannot start yet", () => {
-    expect(
-      getMissionStartEligibility({
-        ...base,
-        ready: false,
         state: "PREPARING",
       }),
-    ).toMatchObject({ canPressStart: false, needsPrepare: false });
-  });
-
-  test("preview uploaded but not loaded cannot start", () => {
-    expect(
-      getMissionStartEligibility({
-        ...base,
-        ready: true,
-        acceptedForStart: false,
-      }),
-    ).toMatchObject({ canPressStart: false });
+    ).toMatchObject({ canPressStart: true, needsPrepare: false });
   });
 });
 

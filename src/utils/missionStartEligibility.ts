@@ -62,20 +62,9 @@ export function isRerunPrepareState(
 export function getMissionStartEligibility(input: {
   connected: boolean;
   loaded: boolean;
-  ready: boolean;
-  acceptedForStart?: boolean;
   state: string | null | undefined;
-  mode: string | null | undefined;
-  joystickActive?: boolean;
-  controlOwner?: string | null;
 }): MissionStartEligibility {
-  const mode = normalizeMode(input.mode);
   const state = normalizeState(input.state);
-  const joystickOwns =
-    input.joystickActive === true ||
-    String(input.controlOwner ?? "")
-      .trim()
-      .toLowerCase() === "joystick";
 
   if (!input.connected) {
     return {
@@ -89,70 +78,14 @@ export function getMissionStartEligibility(input: {
     return {
       canPressStart: false,
       needsPrepare: false,
-      reason: "Upload and prepare a mission before starting.",
-    };
-  }
-
-  if (input.acceptedForStart === false) {
-    return {
-      canPressStart: false,
-      needsPrepare: false,
-      reason: "Load the mission after reviewing the preview.",
-    };
-  }
-
-  if (mode !== "AUTO" && mode !== "MANUAL") {
-    return {
-      canPressStart: false,
-      needsPrepare: false,
-      reason: "Select AUTO or MANUAL before starting.",
-    };
-  }
-
-  if (joystickOwns) {
-    return {
-      canPressStart: false,
-      needsPrepare: false,
-      reason: "Release manual drive before starting the mission.",
-    };
-  }
-
-  if (isActiveMissionState(state)) {
-    return {
-      canPressStart: false,
-      needsPrepare: false,
-      reason: "Mission is already running.",
-    };
-  }
-
-  if (state === "PREPARING") {
-    return {
-      canPressStart: false,
-      needsPrepare: false,
-      reason: "The mission trajectory is still preparing.",
-    };
-  }
-
-  if (input.ready === true) {
-    return {
-      canPressStart: true,
-      needsPrepare: false,
-      reason: null,
-    };
-  }
-
-  if (isRerunPrepareState(state)) {
-    return {
-      canPressStart: true,
-      needsPrepare: true,
-      reason: null,
+      reason: "Upload a mission before starting.",
     };
   }
 
   return {
-    canPressStart: false,
-    needsPrepare: false,
-    reason: "The mission file is stored, but its trajectory is not ready.",
+    canPressStart: true,
+    needsPrepare: isRerunPrepareState(state),
+    reason: null,
   };
 }
 
