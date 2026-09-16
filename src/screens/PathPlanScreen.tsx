@@ -76,7 +76,10 @@ import PersistentStorage from "../services/PersistentStorage";
 import { useFieldMap } from "../context/FieldMapContext";
 import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
 import { isOfflineMode } from "../config";
-import { TRAJECTORY_COPY } from "../utils/backendTrajectoryPreview";
+import {
+  TRAJECTORY_COPY,
+  canDrawBackendLine,
+} from "../utils/backendTrajectoryPreview";
 import {
   validateWaypoints,
   hasCriticalErrors,
@@ -1554,18 +1557,11 @@ export default function PathPlanScreen({
     }
     const previous = lastTrajectoryPhaseRef.current;
     lastTrajectoryPhaseRef.current = preview.phase;
-    if (
-      (previous === "generating" || previous === "waiting_rtk") &&
-      preview.phase === "ready"
-    ) {
-      showPathPlanToast(
-        "success",
-        "Trajectory Ready",
-        "Rover path is on the map.",
-        4000,
+    if (previous !== "failed" && preview.phase === "failed") {
+      Alert.alert(
+        "Trajectory failed",
+        preview.message || TRAJECTORY_COPY.failed,
       );
-    } else if (previous !== "failed" && preview.phase === "failed") {
-      showPathPlanToast("error", "Trajectory Failed", preview.message, 5000);
     }
   }, [isVisible, preview.phase, preview.message]);
 
@@ -2344,7 +2340,7 @@ export default function PathPlanScreen({
     isUploadingRef.current = true;
 
     setUploadProgress(0);
-    setShowUploadProgress(true);
+    setShowUploadProgress(false);
 
     try {
       const cacheDirectory = FileSystem.cacheDirectory;
@@ -2394,87 +2390,12 @@ export default function PathPlanScreen({
       }
 
       setUploadProgress(100);
-
-      const totalPoints =
-        response.upload?.total_points ?? waypointsToUpload.length;
-
-      const navigationPoints = Number(
-        response.mission?.navigation_point_count ?? 0,
-      );
-
-      const backendState = String(response.mission?.state ?? "PREPARING")
-        .trim()
-        .toUpperCase();
-
-      const missionAlreadyReady =
-        backendState === "READY" &&
-        response.mission?.ready === true &&
-        Number.isFinite(navigationPoints) &&
-        navigationPoints > 0;
-
-      const dummyDistance = response.upload?.dummy_point_distance_m ?? null;
-
-      if (missionAlreadyReady) {
-        showPathPlanToast(
-          "success",
-          "Mission Uploaded",
-          `${totalPoints} marking points uploaded. Waiting for rover path…`,
-          5000,
-        );
-
-        Alert.alert(
-          "Mission Uploaded",
-          [
-            `Marking points: ${totalPoints}`,
-            `Navigation points: ${navigationPoints}`,
-            `Extension: ${extensionMode}`,
-
-            dummyDistance !== null
-              ? `Dummy-point distance: ${dummyDistance} m`
-              : null,
-
-            "",
-            "The map will show the rover-generated path when it is ready.",
-            "Marking dots stay. The phone does not draw a path of its own.",
-          ]
-            .filter((line): line is string => typeof line === "string")
-            .join("\n"),
-        );
-      } else {
-        showPathPlanToast(
-          "success",
-          "Mission Uploaded",
-          `${totalPoints} marking points uploaded. ${TRAJECTORY_COPY.generating}`,
-          5000,
-        );
-
-        Alert.alert(
-          "Mission Uploaded",
-          [
-            `Marking points: ${totalPoints}`,
-            `Extension: ${extensionMode}`,
-
-            dummyDistance !== null
-              ? `Dummy-point distance: ${dummyDistance} m`
-              : null,
-
-            "",
-            TRAJECTORY_COPY.generating,
-            TRAJECTORY_COPY.waitingRtk,
-            "The connecting line appears only from the rover path.",
-          ]
-            .filter((line): line is string => typeof line === "string")
-            .join("\n"),
-        );
-      }
     } catch (error) {
       resumePreviewAfterFailedUpload();
       void refreshNow();
       const message = error instanceof Error ? error.message : String(error);
 
       console.error("[PathPlan] Mission upload failed:", error);
-
-      showPathPlanToast("error", "Mission Upload Failed", message, 5000);
 
       Alert.alert("Mission Upload Failed", message);
     } finally {
@@ -2543,103 +2464,41 @@ export default function PathPlanScreen({
     recordAndApply(sanitized);
 
     if (roverUploadBlockedReason) {
-      showPathPlanToast(
-        "success",
-        "Import Complete",
-        `${sanitized.length} marking points imported. Connect a rover to generate the path.`,
-        5000,
-      );
       return;
     }
 
-    showPathPlanToast(
-      "success",
-      "Import Complete",
-      `Successfully imported ${sanitized.length} marking points.`,
-    );
     askExtensionAndUpload(sanitized);
   }
 
   function handleLoadMissionToController(): void {
     if (roverUploadBlockedReason) {
-      showPathPlanToast(
-        "error",
-        "Connect Rover",
-        roverUploadBlockedReason,
-        5000,
-      );
       Alert.alert("Connect Rover", roverUploadBlockedReason);
       return;
     }
 
     if (waypoints.length < 2) {
-      showPathPlanToast(
-        "error",
-        "Not Enough Points",
-        "Add at least two marking points first.",
-        5000,
-      );
       return;
     }
 
-    const previewReady =
-      preview.phase === "ready" && preview.points.length >= 2;
-
-    if (!previewReady) {
-      Alert.alert(
-        "Preview not ready",
-        preview.phase === "generating" || preview.phase === "waiting_rtk"
-          ? "Wait for the purple rover path, then tap Load Mission."
-          : "Send the current points to the rover to generate the preview first.",
-        preview.phase === "generating" || preview.phase === "waiting_rtk"
-          ? [{ text: "OK" }]
-          : [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Send for preview",
-                onPress: () => {
-                  askExtensionAndUpload(waypoints);
-                },
-              },
-            ],
-      );
+    if (!canDrawBackendLine(preview)) {
       return;
     }
 
-    Alert.alert(
-      "Load Mission",
-      "Confirm this rover preview and enable START? The file will not be sent again.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Load",
-          onPress: () => {
-            void (async () => {
-              try {
-                const response = await loadMission();
-                if (!response.success) {
-                  throw new Error(
-                    response.message || "The rover rejected Load Mission.",
-                  );
-                }
-                showPathPlanToast(
-                  "success",
-                  "Mission Loaded",
-                  "START will enable when the rover is READY.",
-                  5000,
-                );
-                void refreshNow();
-              } catch (error) {
-                const message =
-                  error instanceof Error ? error.message : String(error);
-                showPathPlanToast("error", "Load Failed", message, 5000);
-                Alert.alert("Load Failed", message);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    void (async () => {
+      try {
+        const response = await loadMission();
+        if (!response.success) {
+          throw new Error(
+            response.message || "The rover rejected Load Mission.",
+          );
+        }
+        void refreshNow();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        Alert.alert("Load Failed", message);
+      }
+    })();
   }
 
   const handleRequestUpload = async () => {
@@ -2890,22 +2749,23 @@ export default function PathPlanScreen({
           warnings: warnings.length,
         });
 
-      // Show preview modal instead of immediately replacing waypoints
-      if (DEBUG_LOG)
-        console.log(
-          "[PathPlan] Setting upload preview state and showing modal...",
+      if (criticalErrors.length > 0) {
+        Alert.alert(
+          "Mission Import Failed",
+          `${criticalErrors.length} critical error(s) found:\n\n${formatValidationErrors(validationErrors, 3)}`,
         );
-      setUploadPreviewWaypoints(waypointsWithMark);
-      setUploadPreviewName(name);
-      setUploadPreviewValidationErrors(validationErrors);
+        return;
+      }
 
-      if (DEBUG_LOG)
-        console.log("[PathPlan] About to setShowUploadPreview(true)");
-      setShowUploadPreview(true);
-      if (DEBUG_LOG)
-        console.log(
-          "[PathPlan] setShowUploadPreview(true) called - modal should now be visible",
-        );
+      const sanitized = sanitizeWaypointsForUpload(waypointsWithMark);
+      if (pathAssignmentMode === "manual") {
+        recordAndApply(sanitized);
+        setManualPathConnections([]);
+        setShowManualConnectionCanvas(true);
+        return;
+      }
+
+      applyImportedWaypoints(sanitized);
     } catch (err) {
       console.error("[PathPlan] Import error:", err);
 
@@ -3581,6 +3441,7 @@ export default function PathPlanScreen({
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
                   roverUploadBlockedReason={roverUploadBlockedReason}
+                  loadEnabled={canDrawBackendLine(preview)}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}

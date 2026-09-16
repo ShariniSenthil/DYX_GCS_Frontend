@@ -34,16 +34,13 @@ function lineCoordinates(selected: ReturnType<typeof selectMapLine>) {
 }
 
 describe("backend trajectory display contract", () => {
-  test("after file upload, local waypoints show an authoring preview before Load Mission", () => {
+  test("after file upload, local waypoints do not draw a connecting line", () => {
     const line = selectMapLine({
       localWaypoints: markingDots,
       trajectoryPoints: [],
       backendReady: false,
     });
-    expect(line?.source).toBe("authoring");
-    expect(lineCoordinates(line)).toEqual(
-      markingDots.map((wp) => [wp.lon, wp.lat]),
-    );
+    expect(line).toBeNull();
     expect(
       canDrawBackendLine({ phase: "idle", points: [] }),
     ).toBe(false);
@@ -82,7 +79,7 @@ describe("backend trajectory display contract", () => {
     expect(lines[0].geometry.type).toBe("LineString");
   });
 
-  test("offline → no loaded-path fetch; authoring preview still allowed", () => {
+  test("offline → no loaded-path fetch; no connecting line", () => {
     const offline = reduceTrajectoryPreview(EMPTY_TRAJECTORY_PREVIEW, {
       type: "OFFLINE",
     });
@@ -95,8 +92,8 @@ describe("backend trajectory display contract", () => {
         localWaypoints: markingDots,
         trajectoryPoints: offline.points,
         backendReady: false,
-      })?.source,
-    ).toBe("authoring");
+      }),
+    ).toBeNull();
 
     expect(
       shouldFetchLoadedPath({
@@ -127,8 +124,8 @@ describe("backend trajectory display contract", () => {
         localWaypoints: markingDots,
         trajectoryPoints: state.points,
         backendReady: false,
-      })?.source,
-    ).toBe("authoring");
+      }),
+    ).toBeNull();
 
     state = reduceTrajectoryPreview(state, {
       type: "STATUS",
@@ -229,8 +226,8 @@ describe("backend trajectory display contract", () => {
         localWaypoints: markingDots,
         trajectoryPoints: next.points,
         backendReady: false,
-      })?.source,
-    ).toBe("authoring");
+      }),
+    ).toBeNull();
   });
 
   test("stale preview from a previous upload is ignored", () => {
@@ -249,7 +246,7 @@ describe("backend trajectory display contract", () => {
     expect(next.phase).toBe("generating");
   });
 
-  test("empty backend preview while PREPARING still shows the authoring line", () => {
+  test("empty backend preview while PREPARING draws no connecting line", () => {
     const next = reduceTrajectoryPreview(EMPTY_TRAJECTORY_PREVIEW, {
       type: "STATUS",
       epoch: 1,
@@ -268,8 +265,24 @@ describe("backend trajectory display contract", () => {
         localWaypoints: markingDots,
         trajectoryPoints: next.points,
         backendReady: false,
-      })?.source,
-    ).toBe("authoring");
+      }),
+    ).toBeNull();
+  });
+
+  test("trajectory_ready with an empty loaded-path is a hard failure", () => {
+    const generating = reduceTrajectoryPreview(EMPTY_TRAJECTORY_PREVIEW, {
+      type: "UPLOAD_STARTED",
+      epoch: 1,
+    });
+    const next = reduceTrajectoryPreview(generating, {
+      type: "PREVIEW",
+      epoch: 1,
+      navigationPointCount: 0,
+      points: [],
+    });
+    expect(next.phase).toBe("failed");
+    expect(next.message).toBe(TRAJECTORY_COPY.emptyPath);
+    expect(next.points).toEqual([]);
   });
 
   test("trajectory ERROR surfaces backend copy and still draws no local line", () => {

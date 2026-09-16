@@ -41,6 +41,8 @@ type Props = {
     onClose?: () => void;
     /** When set, Load Mission is blocked (Continue Offline / no rover). */
     roverUploadBlockedReason?: string | null;
+    /** True when the rover purple preview is on the map. */
+    loadEnabled?: boolean;
 };
 
 const MissionOpsPanel = React.memo(({
@@ -62,6 +64,7 @@ const MissionOpsPanel = React.memo(({
     isDraggingActive,
     onClose,
     roverUploadBlockedReason = null,
+    loadEnabled = false,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
     const [showExportDialog, setShowExportDialog] = useState(false);
@@ -208,23 +211,14 @@ const MissionOpsPanel = React.memo(({
 
         if (waypoints.length === 0) {
             console.log('[MissionOpsPanel] ❌ No waypoints to load');
-            Alert.alert('No Data', 'No marking points to load');
             return;
         }
 
-        // Load Mission uploads waypoint data only. Backend execution mode is set
-        // separately through the explicit mode selection flow.
-        console.log('[MissionOpsPanel] Showing load mission confirmation');
-        Alert.alert('Load Mission', `Load mission with ${waypoints.length} marking points?\n\nCurrent selected mode: ${missionMode}\nBackend mode will not be changed by this action.`, [
-            { text: 'Cancel', style: 'cancel', onPress: () => console.log('[MissionOpsPanel] User cancelled load') },
-            {
-                text: 'Load',
-                onPress: () => {
-                    console.log('[MissionOpsPanel] User confirmed load, calling onLoadMission...');
-                    onLoadMission?.();
-                }
-            },
-        ]);
+        if (!loadEnabled) {
+            return;
+        }
+
+        onLoadMission?.();
         return;
 
         /*
@@ -369,10 +363,10 @@ const MissionOpsPanel = React.memo(({
 
             {/* Load Mission Button */}
             <TouchableOpacity
-                style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason ? styles.loadActive : styles.disabledBtn]}
+                style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason && loadEnabled ? styles.loadActive : styles.disabledBtn]}
                 onPress={handleLoadMission}
                 activeOpacity={0.8}
-                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason)}
+                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled}
             >
                 <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
                 <Text style={styles.loadText}>Load Mission</Text>

@@ -21,9 +21,9 @@ import type { LoadedPathPoint } from "../../services/missionApi";
 import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
 import {
-  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_LINE_RENDER,
+  BACKEND_TRAJECTORY_DOT_COLOR,
   BACKEND_TRAJECTORY_LINE_COLOR,
-  buildAuthoringPreviewCollection,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
 } from "../../utils/backendTrajectoryPreview";
@@ -122,16 +122,8 @@ const MissionMapNativeBase: React.FC<Props> = ({
 
   const trajectoryCollection = useMemo(() => {
     if (!canDrawBackendLine(preview)) return null;
-    return buildBackendTrajectoryCollection(preview.points, {
-      sampleDisplayPoints: true,
-      maxSamplePoints: 400,
-    });
+    return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
   }, [preview]);
-
-  const authoringPreviewCollection = useMemo(() => {
-    if (canDrawBackendLine(preview)) return null;
-    return buildAuthoringPreviewCollection(waypoints);
-  }, [preview, waypoints]);
 
   const handleToggleMapStyle = useCallback(() => {
     if (usingFallback) return;
@@ -218,22 +210,6 @@ const MissionMapNativeBase: React.FC<Props> = ({
           defaultSettings={{ centerCoordinate: center, zoomLevel: DEFAULT_ZOOM }}
         />
 
-        {authoringPreviewCollection && (
-          <ShapeSource
-            id="mission-path"
-            shape={authoringPreviewCollection as any}
-          >
-            <LineLayer
-              id="mission-path-layer"
-              style={{
-                lineColor: AUTHORING_PREVIEW_LINE_COLOR,
-                lineWidth: 3,
-                lineOpacity: 0.85,
-              }}
-            />
-          </ShapeSource>
-        )}
-
         {trajectoryCollection && (
           <ShapeSource
             id="generated-trajectory"
@@ -267,7 +243,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
               filter={["==", ["get", "kind"], "point"] as any}
               style={
                 {
-                  circleColor: "#F0ABFC",
+                  circleColor: BACKEND_TRAJECTORY_DOT_COLOR,
                   circleRadius: [
                     "interpolate",
                     ["linear"],

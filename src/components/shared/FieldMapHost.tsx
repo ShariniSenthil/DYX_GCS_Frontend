@@ -27,9 +27,9 @@ import { MapBottomControlsBar } from "./MapBottomControlsBar";
 import type { MapStyleMode } from "./MapBottomControlsBar";
 import { TrajectoryStatusBanner } from "./TrajectoryStatusBanner";
 import {
-  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_LINE_RENDER,
+  BACKEND_TRAJECTORY_DOT_COLOR,
   BACKEND_TRAJECTORY_LINE_COLOR,
-  buildAuthoringPreviewCollection,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
 } from "../../utils/backendTrajectoryPreview";
@@ -175,15 +175,8 @@ const FieldMapHostBase: React.FC = () => {
 
   const trajectoryCollection = useMemo(() => {
     if (!canDrawBackendLine(preview)) return null;
-    return buildBackendTrajectoryCollection(preview.points, {
-      sampleDisplayPoints: false,
-    });
+    return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
   }, [preview]);
-
-  const authoringPreviewCollection = useMemo(() => {
-    if (canDrawBackendLine(preview)) return null;
-    return buildAuthoringPreviewCollection(fallbackSnapshot.waypoints);
-  }, [preview, fallbackSnapshot.waypoints]);
 
   const handleToggleMapStyle = useCallback(() => {
     if (usingFallback) return;
@@ -356,22 +349,6 @@ const FieldMapHostBase: React.FC = () => {
             }}
           />
 
-          {authoringPreviewCollection && (
-            <ShapeSource
-              id="field-path"
-              shape={authoringPreviewCollection as any}
-            >
-              <LineLayer
-                id="field-path-layer"
-                style={{
-                  lineColor: AUTHORING_PREVIEW_LINE_COLOR,
-                  lineWidth: 3,
-                  lineOpacity: 0.85,
-                }}
-              />
-            </ShapeSource>
-          )}
-
           {trajectoryCollection && (
             <ShapeSource
               id="field-trajectory"
@@ -379,11 +356,62 @@ const FieldMapHostBase: React.FC = () => {
             >
               <LineLayer
                 id="field-trajectory-layer"
-                style={{
-                  lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
-                  lineWidth: 3,
-                  lineOpacity: 0.95,
-                }}
+                filter={["==", ["get", "kind"], "line"] as any}
+                style={
+                  {
+                    lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
+                    lineWidth: [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      15,
+                      2,
+                      19,
+                      3,
+                      22,
+                      4,
+                      24,
+                      5,
+                    ],
+                    lineOpacity: 1,
+                  } as any
+                }
+              />
+              <CircleLayer
+                id="field-trajectory-points"
+                filter={["==", ["get", "kind"], "point"] as any}
+                style={
+                  {
+                    circleColor: BACKEND_TRAJECTORY_DOT_COLOR,
+                    circleRadius: [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      15,
+                      0.5,
+                      18,
+                      1,
+                      21,
+                      2,
+                      24,
+                      3,
+                    ],
+                    circleOpacity: [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      15,
+                      0.25,
+                      18,
+                      0.5,
+                      20,
+                      0.85,
+                      22,
+                      1,
+                    ],
+                    circleStrokeWidth: 0,
+                  } as any
+                }
               />
             </ShapeSource>
           )}

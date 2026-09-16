@@ -1,15 +1,18 @@
 /**
  * Map path display.
  *
- * Authoring preview: marking-point order after file import / drawing, before
- * Load Mission. That line is review-only.
- *
- * Backend trajectory: Jetson /nav_path preview after trajectory_ready.
- * Interpolation stays on the rover.
+ * The only connecting line is the rover /nav_path after trajectory_ready.
+ * Marking dots stay. No cyan authoring connector.
  */
 
 export const BACKEND_TRAJECTORY_LINE_COLOR = "#A855F7";
+export const BACKEND_TRAJECTORY_DOT_COLOR = "#F0ABFC";
 export const AUTHORING_PREVIEW_LINE_COLOR = "#38bdf8";
+
+export const BACKEND_LINE_RENDER = {
+  sampleDisplayPoints: true,
+  maxSamplePoints: 400,
+} as const;
 
 export type TrajectoryPreviewPhase =
   | "idle"
@@ -76,6 +79,7 @@ export const TRAJECTORY_COPY = {
   failed: "Trajectory failed",
   truncated: "Preview truncated — rover still has the full path.",
   loadingPreview: "Loading generated path…",
+  emptyPath: "Rover path is empty.",
 } as const;
 
 export const EMPTY_TRAJECTORY_PREVIEW: TrajectoryPreviewState = {
@@ -213,10 +217,7 @@ export interface SelectedMapLine {
 }
 
 /**
- * Map display contract:
- * - After file import / drawing (before Load Mission): authoring preview
- *   from marking-point order so the operator can review, then Load.
- * - After the rover path is ready: backend line only, never both.
+ * Map display contract: backend /nav_path only.
  */
 export function selectMapLine(args: {
   localWaypoints: Array<{ lat?: number; lon?: number }>;
@@ -225,21 +226,17 @@ export function selectMapLine(args: {
 }): SelectedMapLine | null {
   const backendReady =
     args.backendReady === true || args.trajectoryPoints.length >= 2;
-  if (backendReady) {
-    const collection = buildBackendTrajectoryCollection(args.trajectoryPoints, {
-      sampleDisplayPoints: false,
-    });
-    if (collection) {
-      return { source: "backend", collection };
-    }
+  if (!backendReady) {
+    return null;
   }
-
-  const authoring = buildAuthoringPreviewCollection(args.localWaypoints);
-  if (authoring) {
-    return { source: "authoring", collection: authoring };
+  const collection = buildBackendTrajectoryCollection(args.trajectoryPoints, {
+    sampleDisplayPoints: BACKEND_LINE_RENDER.sampleDisplayPoints,
+    maxSamplePoints: BACKEND_LINE_RENDER.maxSamplePoints,
+  });
+  if (!collection) {
+    return null;
   }
-
-  return null;
+  return { source: "backend", collection };
 }
 
 export function buildBackendTrajectoryCollection(
@@ -444,6 +441,22 @@ export function reduceTrajectoryPreview(
       if (points.length < 2) {
         if (canDrawBackendLine(previous)) {
           return previous;
+        }
+        const navCount = Number(event.navigationPointCount ?? 0);
+        if (
+          previous.phase !== "waiting_rtk" &&
+          Number.isFinite(navCount) &&
+          navCount === 0
+        ) {
+          return {
+            ...previous,
+            phase: "failed",
+            points: [],
+            message: TRAJECTORY_COPY.emptyPath,
+            navigationPointCount: 0,
+            previewTruncated: false,
+            epoch: event.epoch,
+          };
         }
         return {
           ...previous,

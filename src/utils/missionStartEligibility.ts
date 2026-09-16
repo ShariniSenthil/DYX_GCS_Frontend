@@ -20,7 +20,6 @@ export const RERUN_PREPARE_STATES = [
   "STOPPED",
   "FAILED",
   "ERROR",
-  "READY",
 ] as const;
 
 export type MissionStartEligibility = {

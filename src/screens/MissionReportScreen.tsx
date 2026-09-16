@@ -123,7 +123,6 @@ import {
   getMissionReport,
   setMissionExecutionMode,
   prepareMission,
-  loadMission,
   startMission,
   pauseMission,
   resumeMission,
@@ -2731,29 +2730,6 @@ export default function MissionReportScreen({
               message,
             };
           }
-        }
-
-        // prepare() always clears accepted_for_start on the backend (a
-        // regenerated trajectory must be re-confirmed before START). Re-load
-        // it here so this rerun path doesn't require a manual trip back to
-        // Path Plan's Load button.
-        logMissionStartTiming(attemptId, "backend_phase", "load");
-
-        const loadResponse = await loadMission();
-        latestMission = loadResponse.mission;
-        setBackendMission(loadResponse.mission);
-
-        if (!loadResponse.success) {
-          const message =
-            loadResponse.mission?.message ||
-            "Failed to load the re-prepared mission.";
-
-          showNotification("error", "Load Failed", message, 4000);
-
-          return {
-            success: false,
-            message,
-          };
         }
       }
 

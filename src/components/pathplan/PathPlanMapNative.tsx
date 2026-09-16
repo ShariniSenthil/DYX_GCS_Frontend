@@ -10,9 +10,9 @@ import {
 import { useMapboxSurface } from '../../hooks/useMapboxSurface';
 import { useBackendTrajectory } from '../../context/BackendTrajectoryContext';
 import {
-  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_LINE_RENDER,
+  BACKEND_TRAJECTORY_DOT_COLOR,
   BACKEND_TRAJECTORY_LINE_COLOR,
-  buildAuthoringPreviewCollection,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
 } from '../../utils/backendTrajectoryPreview';
@@ -63,15 +63,8 @@ export const PathPlanMapNative: React.FC<any> = ({
 
   const trajectoryGeoJSON = useMemo(() => {
     if (!canDrawBackendLine(preview)) return null;
-    return buildBackendTrajectoryCollection(preview.points, {
-      sampleDisplayPoints: false,
-    });
+    return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
   }, [preview]);
-
-  const authoringPreviewGeoJSON = useMemo(() => {
-    if (canDrawBackendLine(preview)) return null;
-    return buildAuthoringPreviewCollection(waypoints);
-  }, [preview, waypoints]);
 
   const waypointGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length === 0) return null;
@@ -135,30 +128,27 @@ export const PathPlanMapNative: React.FC<any> = ({
           defaultSettings={{ centerCoordinate: center, zoomLevel: 18 }}
         />
 
-        {authoringPreviewGeoJSON && (
-          <ShapeSource id="authoring-path-source" shape={authoringPreviewGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
+        {trajectoryGeoJSON && (
+          <ShapeSource id="path-source" shape={trajectoryGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
             <LineLayer
-              id="authoring-path-layer"
+              id="path-layer"
+              filter={['==', ['get', 'kind'], 'line'] as any}
               style={{
-                lineColor: AUTHORING_PREVIEW_LINE_COLOR,
+                lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
                 lineWidth: 4,
                 lineJoin: 'round',
                 lineCap: 'round',
               }}
             />
-          </ShapeSource>
-        )}
-
-        {trajectoryGeoJSON && (
-          <ShapeSource id="path-source" shape={trajectoryGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
-            <LineLayer 
-              id="path-layer" 
-              style={{ 
-                lineColor: BACKEND_TRAJECTORY_LINE_COLOR, 
-                lineWidth: 4,
-                lineJoin: 'round',
-                lineCap: 'round'
-              }} 
+            <CircleLayer
+              id="path-points"
+              filter={['==', ['get', 'kind'], 'point'] as any}
+              style={{
+                circleColor: BACKEND_TRAJECTORY_DOT_COLOR,
+                circleRadius: 2,
+                circleOpacity: 0.85,
+                circleStrokeWidth: 0,
+              }}
             />
           </ShapeSource>
         )}

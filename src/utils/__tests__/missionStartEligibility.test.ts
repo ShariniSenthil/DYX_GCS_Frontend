@@ -14,7 +14,7 @@ describe("getMissionStartEligibility", () => {
   test("connected and loaded allows Start; backend decides the rest", () => {
     expect(getMissionStartEligibility(base)).toEqual({
       canPressStart: true,
-      needsPrepare: true,
+      needsPrepare: false,
       reason: null,
     });
   });
@@ -74,6 +74,21 @@ describe("getMissionStartEligibility", () => {
         state: "PREPARING",
       }),
     ).toMatchObject({ canPressStart: true, needsPrepare: false });
+  });
+
+  test("FAILED and ERROR use prepare-then-start", () => {
+    expect(
+      getMissionStartEligibility({ ...base, state: "FAILED" }),
+    ).toMatchObject({ canPressStart: true, needsPrepare: true });
+    expect(
+      getMissionStartEligibility({ ...base, state: "ERROR" }),
+    ).toMatchObject({ canPressStart: true, needsPrepare: true });
+  });
+
+  test("unknown empty state uses prepare-then-start", () => {
+    expect(
+      getMissionStartEligibility({ ...base, state: "" }),
+    ).toMatchObject({ canPressStart: true, needsPrepare: true });
   });
 });
 
