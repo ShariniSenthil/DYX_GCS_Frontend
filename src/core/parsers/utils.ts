@@ -41,6 +41,57 @@ export function detectDelimiter(line: string): ',' | ';' | '\t' | '|' {
 }
 
 // ============================================================
+// RFC 4180-compliant CSV line splitter
+// ============================================================
+
+/**
+ * Split a single CSV line into cells, respecting RFC 4180 quoting rules.
+ *
+ * Handles:
+ *  - Commas inside double-quoted fields: `"1,3"` → one cell containing `1,3`
+ *  - Escaped double-quotes inside quoted fields: `"say ""hi"""` → `say "hi"`
+ *  - Any delimiter character (comma, semicolon, tab, pipe)
+ *
+ * Unlike `line.split(delimiter)`, this function is safe for CSV files
+ * exported by GPS survey tools (e.g. Reach RS3) that embed commas in cells.
+ *
+ * @param line      - A single CSV row string (no trailing newline)
+ * @param delimiter - The field separator character to split on
+ * @returns Array of trimmed cell values with surrounding quotes removed
+ */
+export function splitCSVLine(line: string, delimiter: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        // Peek ahead: "" inside quotes → literal "
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip second quote
+        } else {
+          inQuotes = false; // closing quote
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true; // opening quote
+    } else if (ch === delimiter) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  values.push(current.trim());
+  return values;
+}
+
+// ============================================================
 // Column name detection
 // ============================================================
 

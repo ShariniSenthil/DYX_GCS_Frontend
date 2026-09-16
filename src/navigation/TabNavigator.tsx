@@ -6,6 +6,7 @@ import MissionReportScreen from "../screens/MissionReportScreen";
 import { AppHeader } from "../components/shared/AppHeader";
 import { FieldMapHost } from "../components/shared/FieldMapHost";
 import { MissionProgressOverlayProvider } from "../context/MissionProgressOverlayContext";
+import { BackendTrajectoryProvider } from "../context/BackendTrajectoryContext";
 import { FieldMapProvider, useFieldMap } from "../context/FieldMapContext";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { colors } from "../theme/colors";
@@ -206,7 +207,9 @@ function TabNavigatorInner() {
 export default function TabNavigator() {
   return (
     <FieldMapProvider>
-      <TabNavigatorInner />
+      <BackendTrajectoryProvider>
+        <TabNavigatorInner />
+      </BackendTrajectoryProvider>
     </FieldMapProvider>
   );
 }

@@ -55,8 +55,11 @@ export const PX4_VEHICLE = {
 // ── Mission ───────────────────────────────────────────────────────────────────
 
 export const PX4_MISSION = {
-  // Multipart CSV upload.
+  // Multipart CSV upload. Saves file and starts preview generation.
   UPLOAD: "/api/mission/upload",
+
+  // Confirm the generated preview so START may be enabled. No file.
+  LOAD: "/api/mission/load",
 
   // Recalculate trajectory from the stored mission.csv.
   PREPARE: "/api/mission/prepare",

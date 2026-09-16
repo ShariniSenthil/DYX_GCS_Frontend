@@ -19,11 +19,20 @@ import {
   MAPBOX_FALLBACK_STYLE_JSON,
   mapboxStyleUrlForMode,
 } from "../../config/mapboxConfig";
+import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
 import { useFieldMap } from "../../context/FieldMapContext";
 import { useTelemetry } from "../../context/TelemetryContext";
 import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { MapBottomControlsBar } from "./MapBottomControlsBar";
 import type { MapStyleMode } from "./MapBottomControlsBar";
+import { TrajectoryStatusBanner } from "./TrajectoryStatusBanner";
+import {
+  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_TRAJECTORY_LINE_COLOR,
+  buildAuthoringPreviewCollection,
+  buildBackendTrajectoryCollection,
+  canDrawBackendLine,
+} from "../../utils/backendTrajectoryPreview";
 
 const DEFAULT_ZOOM = 16;
 const ROVER_THROTTLE_MS = 200;
@@ -43,21 +52,9 @@ function isValidLngLat(lon: unknown, lat: unknown): lon is number {
   );
 }
 
-function asLineCollection(coordinates: [number, number][]) {
-  return {
-    type: "FeatureCollection" as const,
-    features: [
-      {
-        type: "Feature" as const,
-        properties: {},
-        geometry: { type: "LineString" as const, coordinates },
-      },
-    ],
-  };
-}
-
 const FieldMapHostBase: React.FC = () => {
   const { activeSurface, marking, mission, markingPressRef } = useFieldMap();
+  const { preview } = useBackendTrajectory();
   const { telemetry, roverPosition } = useTelemetry();
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const zoomRef = useRef(DEFAULT_ZOOM);
@@ -176,27 +173,17 @@ const FieldMapHostBase: React.FC = () => {
     fallbackSnapshot.activeWaypointIndex,
   ]);
 
-  const pathCollection = useMemo(() => {
-    const coordinates = fallbackSnapshot.waypoints
-      .filter((wp) => isValidLngLat(wp.lon, wp.lat))
-      .map((wp) => [wp.lon, wp.lat] as [number, number]);
-    if (coordinates.length < 2) return null;
-    return asLineCollection(coordinates);
-  }, [fallbackSnapshot.waypoints]);
-
   const trajectoryCollection = useMemo(() => {
-    if (activeSurface !== "mission") return null;
-    const coords = (fallbackSnapshot.trajectoryPoints ?? [])
-      .map((pt) => {
-        const lon = Number(pt.longitude);
-        const lat = Number(pt.latitude);
-        if (!isValidLngLat(lon, lat)) return null;
-        return [lon, lat] as [number, number];
-      })
-      .filter((c): c is [number, number] => c != null);
-    if (coords.length < 2) return null;
-    return asLineCollection(coords);
-  }, [activeSurface, fallbackSnapshot.trajectoryPoints]);
+    if (!canDrawBackendLine(preview)) return null;
+    return buildBackendTrajectoryCollection(preview.points, {
+      sampleDisplayPoints: false,
+    });
+  }, [preview]);
+
+  const authoringPreviewCollection = useMemo(() => {
+    if (canDrawBackendLine(preview)) return null;
+    return buildAuthoringPreviewCollection(fallbackSnapshot.waypoints);
+  }, [preview, fallbackSnapshot.waypoints]);
 
   const handleToggleMapStyle = useCallback(() => {
     if (usingFallback) return;
@@ -208,16 +195,25 @@ const FieldMapHostBase: React.FC = () => {
     const pts = fallbackSnapshot.waypoints.filter((wp) =>
       isValidLngLat(wp.lon, wp.lat),
     );
-    if (pts.length === 0) return;
-    let minLon = pts[0].lon;
-    let minLat = pts[0].lat;
-    let maxLon = pts[0].lon;
-    let maxLat = pts[0].lat;
+    const traj = canDrawBackendLine(preview) ? preview.points : [];
+    if (pts.length === 0 && traj.length === 0) return;
+    const seedLon = pts[0]?.lon ?? traj[0].longitude;
+    const seedLat = pts[0]?.lat ?? traj[0].latitude;
+    let minLon = seedLon;
+    let minLat = seedLat;
+    let maxLon = seedLon;
+    let maxLat = seedLat;
     for (const wp of pts) {
       minLon = Math.min(minLon, wp.lon);
       minLat = Math.min(minLat, wp.lat);
       maxLon = Math.max(maxLon, wp.lon);
       maxLat = Math.max(maxLat, wp.lat);
+    }
+    for (const pt of traj) {
+      minLon = Math.min(minLon, pt.longitude);
+      minLat = Math.min(minLat, pt.latitude);
+      maxLon = Math.max(maxLon, pt.longitude);
+      maxLat = Math.max(maxLat, pt.latitude);
     }
     if (hasRoverPosition) {
       minLon = Math.min(minLon, rover.lon);
@@ -226,7 +222,13 @@ const FieldMapHostBase: React.FC = () => {
       maxLat = Math.max(maxLat, rover.lat);
     }
     cameraRef.current?.fitBounds([maxLon, maxLat], [minLon, minLat], 50, 400);
-  }, [fallbackSnapshot.waypoints, hasRoverPosition, rover.lat, rover.lon]);
+  }, [
+    fallbackSnapshot.waypoints,
+    hasRoverPosition,
+    preview,
+    rover.lat,
+    rover.lon,
+  ]);
 
   useEffect(() => {
     if (didFitRef.current || !mapReady) return;
@@ -354,12 +356,15 @@ const FieldMapHostBase: React.FC = () => {
             }}
           />
 
-          {pathCollection && (
-            <ShapeSource id="field-path" shape={pathCollection as any}>
+          {authoringPreviewCollection && (
+            <ShapeSource
+              id="field-path"
+              shape={authoringPreviewCollection as any}
+            >
               <LineLayer
                 id="field-path-layer"
                 style={{
-                  lineColor: "#38bdf8",
+                  lineColor: AUTHORING_PREVIEW_LINE_COLOR,
                   lineWidth: 3,
                   lineOpacity: 0.85,
                 }}
@@ -374,7 +379,11 @@ const FieldMapHostBase: React.FC = () => {
             >
               <LineLayer
                 id="field-trajectory-layer"
-                style={{ lineColor: "#f59e0b", lineWidth: 2, lineOpacity: 0.9 }}
+                style={{
+                  lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
+                  lineWidth: 3,
+                  lineOpacity: 0.95,
+                }}
               />
             </ShapeSource>
           )}
@@ -424,6 +433,11 @@ const FieldMapHostBase: React.FC = () => {
           </Text>
         </View>
       )}
+
+      <TrajectoryStatusBanner
+        preview={preview}
+        hasAuthoringPoints={fallbackSnapshot.waypoints.length >= 2}
+      />
 
       <MapBottomControlsBar
         mapStyle={mapStyle}

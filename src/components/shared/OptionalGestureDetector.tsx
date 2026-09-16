@@ -10,7 +10,7 @@ export function OptionalGestureDetector({
   gesture,
   children,
 }: {
-  gesture?: object;
+  gesture?: any;
   children: React.ReactElement;
 }): React.ReactElement {
   if (!gesture) {

@@ -78,6 +78,9 @@ export default function RoverDiscoveryScreen({
   );
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  // Offline-mode password gate
+  const [showOfflinePasswordModal, setShowOfflinePasswordModal] = useState(false);
+  const [offlineConnectError, setOfflineConnectError] = useState<string | null>(null);
 
   // Animations
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -387,29 +390,31 @@ export default function RoverDiscoveryScreen({
   };
 
   const handleSkip = () => {
-    Alert.alert(
-      "Continue Offline",
-      "Some features will be limited without a rover connection.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue Offline",
-          onPress: async () => {
-            const offline: JetsonDevice = {
-              id: "offline",
-              name: "Offline Mode",
-              ip: "localhost",
-              port: 8000,
-              url: "http://localhost:8000",
-              responseTime: 0,
-            };
-            await saveBackendURL(offline.url, offline.ip, offline.port);
-            await markSessionSkipped();
-            onRoverSelected(offline);
-          },
-        },
-      ],
-    );
+    // Open the password modal for offline access instead of a plain Alert.
+    setOfflineConnectError(null);
+    setShowOfflinePasswordModal(true);
+  };
+
+  const OFFLINE_PASSWORD = "dyx@2026";
+
+  const handleOfflineConnect = async (_username: string, password: string) => {
+    if (password !== OFFLINE_PASSWORD) {
+      setOfflineConnectError("Incorrect password. Please try again.");
+      return;
+    }
+    setOfflineConnectError(null);
+    setShowOfflinePasswordModal(false);
+    const offline: JetsonDevice = {
+      id: "offline",
+      name: "Offline Mode",
+      ip: "localhost",
+      port: 8000,
+      url: "http://localhost:8000",
+      responseTime: 0,
+    };
+    await saveBackendURL(offline.url, offline.ip, offline.port);
+    await markSessionSkipped();
+    onRoverSelected(offline);
   };
 
   const formatUptime = (seconds: number): string => {
@@ -867,6 +872,22 @@ export default function RoverDiscoveryScreen({
         error={connectError}
         onClose={closePasswordModal}
         onConnect={handleConnect}
+      />
+
+      {/* Offline Mode Password Gate */}
+      <ConnectPasswordModal
+        visible={showOfflinePasswordModal}
+        roverName="Offline Mode"
+        roverId={undefined}
+        host="localhost"
+        accentColor="#f59e0b"
+        isConnecting={false}
+        error={offlineConnectError}
+        onClose={() => {
+          setShowOfflinePasswordModal(false);
+          setOfflineConnectError(null);
+        }}
+        onConnect={handleOfflineConnect}
       />
 
       {/* Manual URL Modal */}

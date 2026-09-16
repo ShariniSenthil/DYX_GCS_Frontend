@@ -18,6 +18,7 @@ import React, {
 import useRoverTelemetry, {
   type RoverServices,
 } from "../hooks/useRoverTelemetry";
+import { usePointMissionEvents } from "../hooks/usePointMissionEvents";
 import type {
   ConnectionState,
   GpsFailsafeMode,
@@ -80,6 +81,8 @@ const DISCONNECTED_TELEMETRY: RoverTelemetry = {
   vrms: 0,
   imu_status: "DISCONNECTED",
   lastMessageTs: null,
+  ageMs: null,
+  stale: false,
   wp_dist_cm: undefined,
   xtrack_cm: undefined,
   wp_brg: undefined,
@@ -145,6 +148,14 @@ const DISCONNECTED_TELEMETRY: RoverTelemetry = {
   rpp_along_position: null,
 };
 
+export interface MissionLifecycleSlice {
+  state?: string;
+  state_lower?: string;
+  start_stage?: string | null;
+  start_failed_stage?: string | null;
+  resume_stage?: string | null;
+}
+
 export interface TelemetryContextValue {
   telemetry: RoverTelemetry;
   roverPosition: { lat: number; lng: number; timestamp: number } | null;
@@ -161,6 +172,9 @@ export interface TelemetryContextValue {
   onFailsafeResume: () => void;
   onFailsafeRestart: () => void;
   reportGpsSafetyAbort: (reason: string) => void;
+  missionLifecycle: MissionLifecycleSlice;
+  setMissionLifecycle: (slice: MissionLifecycleSlice) => void;
+  pointEvents: import("../hooks/usePointMissionEvents").UsePointMissionEventsResult | null;
 }
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
@@ -174,15 +188,26 @@ export function TelemetryProvider({
 }: TelemetryProviderProps): React.ReactElement {
   const rover = useRoverTelemetry();
   const isRoverConnected = rover.connectionState === "connected";
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   /**
    * Even if an older REST request finishes after disconnection, consumers do
    * not receive it until Socket.IO confirms that the rover is connected again.
    */
-  const visibleTelemetry = useMemo<RoverTelemetry>(
-    () => (isRoverConnected ? rover.telemetry : DISCONNECTED_TELEMETRY),
-    [isRoverConnected, rover.telemetry],
-  );
+  const STALE_AFTER_MS = 2500;
+
+  const visibleTelemetry = useMemo<RoverTelemetry>(() => {
+    if (!isRoverConnected) {
+      return DISCONNECTED_TELEMETRY;
+    }
+    const last = rover.telemetry.lastMessageTs;
+    const ageMs = last == null ? null : Math.max(0, nowMs - last);
+    return {
+      ...rover.telemetry,
+      ageMs,
+      stale: ageMs != null && ageMs > STALE_AFTER_MS,
+    };
+  }, [isRoverConnected, rover.telemetry, nowMs]);
 
   const visibleRoverPosition = isRoverConnected ? rover.roverPosition : null;
 
@@ -190,10 +215,18 @@ export function TelemetryProvider({
     useState<GpsFailsafeMode>("disable");
   const [gpsFailsafeStatus, setGpsFailsafeStatus] =
     useState<GpsFailsafeStatus | null>(null);
+  const [missionLifecycle, setMissionLifecycle] =
+    useState<MissionLifecycleSlice>({});
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!isRoverConnected) {
       setGpsFailsafeStatus(null);
+      setMissionLifecycle({});
       return;
     }
 
@@ -250,6 +283,9 @@ export function TelemetryProvider({
       onFailsafeResume,
       onFailsafeRestart,
       reportGpsSafetyAbort,
+      missionLifecycle,
+      setMissionLifecycle,
+      pointEvents: null,
     }),
     [
       visibleTelemetry,
@@ -267,12 +303,38 @@ export function TelemetryProvider({
       onFailsafeResume,
       onFailsafeRestart,
       reportGpsSafetyAbort,
+      missionLifecycle,
     ],
   );
 
   return React.createElement(
     TelemetryContext.Provider,
     { value: contextValue },
+    React.createElement(PointEventsBridge, null, children),
+  );
+}
+
+function PointEventsBridge({
+  children,
+}: {
+  children: ReactNode;
+}): React.ReactElement {
+  const parent = useTelemetry();
+  const pointEvents = usePointMissionEvents(
+    parent.socket,
+    parent.connectionState,
+  );
+  const value = useMemo<TelemetryContextValue>(
+    () => ({
+      ...parent,
+      pointEvents,
+    }),
+    [parent, pointEvents],
+  );
+
+  return React.createElement(
+    TelemetryContext.Provider,
+    { value },
     children,
   );
 }

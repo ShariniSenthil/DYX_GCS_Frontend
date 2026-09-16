@@ -2205,7 +2205,7 @@ if (envelope.within_test_tolerance !== undefined) {
               });
             }
 
-            const statusKey = `${data.state}-${data.rpp_state}-${data.dist_to_goal}`;
+            const statusKey = `${data.state}-${data.rpp_state}-${data.dist_to_goal}-${data.start_stage}-${data.resume_stage}-${data.start_failed_stage}`;
             if (statusKey !== lastMissionStatusRef.current) {
               lastMissionStatusRef.current = statusKey;
               const base = mutableRef.current.telemetry;
@@ -2216,6 +2216,12 @@ if (envelope.within_test_tolerance !== undefined) {
                 dist_to_goal: data.dist_to_goal,
                 speed: data.speed,
                 xtrack: data.xtrack,
+                start_stage: data.start_stage ?? null,
+                start_failed_stage: data.start_failed_stage ?? null,
+                resume_stage: data.resume_stage ?? null,
+                alignment_active: data.alignment_active,
+                spray_controller_state: data.spray_controller_state ?? null,
+                spray_fault_reason: data.spray_fault_reason ?? null,
               });
               const envelope: TelemetryEnvelope = {
                 timestamp: Date.now(),

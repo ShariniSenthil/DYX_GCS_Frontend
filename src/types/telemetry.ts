@@ -51,6 +51,12 @@ export interface TelemetryMission {
   ready?: boolean;
   rpp_state?: number;
   rpp_state_name?: string;
+  start_stage?: string | null;
+  start_failed_stage?: string | null;
+  resume_stage?: string | null;
+  alignment_active?: boolean;
+  spray_controller_state?: string | null;
+  spray_fault_reason?: string | null;
 }
 
 export interface TelemetryAccuracy {
@@ -104,6 +110,10 @@ export interface RoverTelemetry {
   vrms: number;
   imu_status: string;
   lastMessageTs: number | null;
+  /** Milliseconds since the last telemetry envelope. */
+  ageMs?: number | null;
+  /** True when socket is connected but telemetry is older than the stale window. */
+  stale?: boolean;
   attitude?: {
     yaw_deg: number;
   };

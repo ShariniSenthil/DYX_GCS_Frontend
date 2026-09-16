@@ -39,6 +39,8 @@ type Props = {
     /** True while the card is being dragged — injected by DraggableCard */
     isDraggingActive?: boolean;
     onClose?: () => void;
+    /** When set, Load Mission is blocked (Continue Offline / no rover). */
+    roverUploadBlockedReason?: string | null;
 };
 
 const MissionOpsPanel = React.memo(({
@@ -59,6 +61,7 @@ const MissionOpsPanel = React.memo(({
     dragGesture,
     isDraggingActive,
     onClose,
+    roverUploadBlockedReason = null,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
     const [showExportDialog, setShowExportDialog] = useState(false);
@@ -197,6 +200,11 @@ const MissionOpsPanel = React.memo(({
         console.log('[MissionOpsPanel] 🚀 Load Mission button clicked');
         console.log('[MissionOpsPanel] Waypoints count:', waypoints.length);
         console.log('[MissionOpsPanel] Current mission mode:', missionMode);
+
+        if (roverUploadBlockedReason) {
+            Alert.alert('Connect Rover', roverUploadBlockedReason);
+            return;
+        }
 
         if (waypoints.length === 0) {
             console.log('[MissionOpsPanel] ❌ No waypoints to load');
@@ -361,10 +369,10 @@ const MissionOpsPanel = React.memo(({
 
             {/* Load Mission Button */}
             <TouchableOpacity
-                style={[styles.loadButton, waypoints.length ? styles.loadActive : styles.disabledBtn]}
+                style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason ? styles.loadActive : styles.disabledBtn]}
                 onPress={handleLoadMission}
                 activeOpacity={0.8}
-                disabled={waypoints.length === 0}
+                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason)}
             >
                 <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
                 <Text style={styles.loadText}>Load Mission</Text>

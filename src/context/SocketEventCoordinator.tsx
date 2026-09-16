@@ -49,7 +49,7 @@ function isValidGpsSafetyAbort(event: unknown): event is GpsSafetyAbortEvent {
  * to the appropriate context or callback handlers.
  */
 export function SocketEventCoordinator({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { socket, connectionState } = useTelemetry();
+  const { socket, connectionState, setMissionLifecycle } = useTelemetry();
   const { setMissionMode } = useMission();
   const { reportGpsSafetyAbort } = useTelemetry();
 
@@ -59,6 +59,19 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
     if (ROVER_ENABLED) return; // PX4 mode: spray mode comes from API, not socket
 
     const handleMissionModeUpdate = (event: any) => {
+      if (event && typeof event === "object") {
+        setMissionLifecycle({
+          state: event.state,
+          state_lower:
+            event.state_lower ??
+            (typeof event.state === "string"
+              ? event.state.toLowerCase()
+              : undefined),
+          start_stage: event.start_stage ?? null,
+          start_failed_stage: event.start_failed_stage ?? null,
+          resume_stage: event.resume_stage ?? null,
+        });
+      }
       if (event.mission_mode) {
         const backendMode = String(event.mission_mode).trim();
         setMissionMode(backendMode);
@@ -67,7 +80,7 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
 
     socket.on('mission_status', handleMissionModeUpdate);
     return () => { socket?.off('mission_status', handleMissionModeUpdate); };
-  }, [socket, connectionState, setMissionMode]);
+  }, [socket, connectionState, setMissionMode, setMissionLifecycle]);
 
   // ── PX4: Register new socket event listeners ──────────────────────────────
   useEffect(() => {
@@ -101,18 +114,37 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       console.warn('[SocketEventCoordinator] safety_abort', event);
     };
 
+    const handleMissionStatus = (event: any) => {
+      if (!event || typeof event !== "object") {
+        return;
+      }
+      setMissionLifecycle({
+        state: event.state,
+        state_lower:
+          event.state_lower ??
+          (typeof event.state === "string"
+            ? event.state.toLowerCase()
+            : undefined),
+        start_stage: event.start_stage ?? null,
+        start_failed_stage: event.start_failed_stage ?? null,
+        resume_stage: event.resume_stage ?? null,
+      });
+    };
+
     socket.on('gps_safety_abort', handleGpsSafetyAbort);
     socket.on('mission_completed', handleMissionCompleted);
     socket.on('mission_completion_degraded', handleMissionCompletionDegraded);
     socket.on('safety_abort', handleSafetyAbort);
+    socket.on('mission_status', handleMissionStatus);
 
     return () => {
       socket?.off('gps_safety_abort', handleGpsSafetyAbort);
       socket?.off('mission_completed', handleMissionCompleted);
       socket?.off('mission_completion_degraded', handleMissionCompletionDegraded);
       socket?.off('safety_abort', handleSafetyAbort);
+      socket?.off('mission_status', handleMissionStatus);
     };
-  }, [socket, connectionState, reportGpsSafetyAbort]);
+  }, [socket, connectionState, reportGpsSafetyAbort, setMissionLifecycle]);
 
   // This component only coordinates side-effects — just pass through children
   return React.createElement(React.Fragment, null, children);

@@ -871,6 +871,12 @@ export function mergeMissionStatus(
     active_point_index?: number | null;
     active_point_number?: number | null;
     active_point_state?: string | null;
+    start_stage?: string | null;
+    start_failed_stage?: string | null;
+    resume_stage?: string | null;
+    alignment_active?: boolean;
+    spray_controller_state?: string | null;
+    spray_fault_reason?: string | null;
   },
 ): RoverTelemetry {
   const missionPatch: Partial<TelemetryMission> & {
@@ -917,6 +923,24 @@ export function mergeMissionStatus(
   }
   if (status.active_point_state !== undefined) {
     missionPatch.active_point_state = status.active_point_state;
+  }
+  if (status.start_stage !== undefined) {
+    missionPatch.start_stage = status.start_stage;
+  }
+  if (status.start_failed_stage !== undefined) {
+    missionPatch.start_failed_stage = status.start_failed_stage;
+  }
+  if (status.resume_stage !== undefined) {
+    missionPatch.resume_stage = status.resume_stage;
+  }
+  if (typeof status.alignment_active === "boolean") {
+    missionPatch.alignment_active = status.alignment_active;
+  }
+  if (status.spray_controller_state !== undefined) {
+    missionPatch.spray_controller_state = status.spray_controller_state;
+  }
+  if (status.spray_fault_reason !== undefined) {
+    missionPatch.spray_fault_reason = status.spray_fault_reason;
   }
 
   const nextRppStateName =

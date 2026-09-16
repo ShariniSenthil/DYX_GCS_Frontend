@@ -28,6 +28,9 @@ interface MissionCompletionDialogProps {
     remark?: string;
   }>;
   missionMode: string | null;
+  fetchExportData?: () => Promise<
+    MissionCompletionDialogProps["statusMap"] | null
+  >;
 }
 
 export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = ({
@@ -37,7 +40,8 @@ export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = (
   missionStats,
   waypoints,
   statusMap,
-  missionMode
+  missionMode,
+  fetchExportData,
 }) => {
   const { totalWaypoints, completedWaypoints, skippedWaypoints, missionDuration, startTime, endTime } = missionStats;
 
@@ -125,7 +129,8 @@ export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = (
               statusMap={statusMap}
               missionMode={missionMode}
               onExport={onExport}
-              onExportComplete={() => {}} // Can be used if needed
+              onExportComplete={() => {}}
+              fetchExportData={fetchExportData}
             />
           </View>
         </View>

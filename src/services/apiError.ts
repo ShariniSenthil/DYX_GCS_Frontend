@@ -17,6 +17,10 @@
  */
 
 export class ApiError extends Error {
+  readonly outcome?: string;
+  readonly retry_safe?: boolean;
+  readonly mission?: unknown;
+
   constructor(
     message: string,
     public readonly statusCode: number,
@@ -26,11 +30,55 @@ export class ApiError extends Error {
 
     this.name = "ApiError";
 
+    const extra = parseControlDetail(responseBody);
+    this.outcome = extra.outcome;
+    this.retry_safe = extra.retry_safe;
+    this.mission = extra.mission;
+
     Object.setPrototypeOf(
       this,
       new.target.prototype,
     );
   }
+}
+
+function parseControlDetail(body: string | undefined): {
+  outcome?: string;
+  retry_safe?: boolean;
+  mission?: unknown;
+} {
+  const raw = String(body ?? "").trim();
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const detail =
+      parsed?.detail && typeof parsed.detail === "object"
+        ? parsed.detail
+        : parsed;
+
+    if (!detail || typeof detail !== "object") {
+      return {};
+    }
+
+    return {
+      outcome:
+        typeof detail.outcome === "string" ? detail.outcome : undefined,
+      retry_safe:
+        typeof detail.retry_safe === "boolean"
+          ? detail.retry_safe
+          : undefined,
+      mission: detail.mission,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function isUnknownControlOutcome(error: unknown): boolean {
+  return error instanceof ApiError && error.outcome === "UNKNOWN";
 }
 
 

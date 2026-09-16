@@ -9,6 +9,7 @@ import {
   CircleLayer,
 } from "@rnmapbox/maps";
 import { RoverVehicleIcon } from "../shared/RoverVehicleIcon";
+import { TrajectoryStatusBanner } from "../shared/TrajectoryStatusBanner";
 import {
   MAPBOX_FALLBACK_STYLE_JSON,
   mapboxStyleUrlForMode,
@@ -18,6 +19,14 @@ import type { MapStyleMode } from "../shared/MapBottomControlsBar";
 import type { Waypoint } from "./types";
 import type { LoadedPathPoint } from "../../services/missionApi";
 import { useMapboxSurface } from "../../hooks/useMapboxSurface";
+import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
+import {
+  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_TRAJECTORY_LINE_COLOR,
+  buildAuthoringPreviewCollection,
+  buildBackendTrajectoryCollection,
+  canDrawBackendLine,
+} from "../../utils/backendTrajectoryPreview";
 
 interface Props {
   roverLat?: number;
@@ -48,27 +57,10 @@ function isValidLngLat(lon: unknown, lat: unknown): lon is number {
   );
 }
 
-function asLineCollection(coordinates: [number, number][]) {
-  return {
-    type: "FeatureCollection" as const,
-    features: [
-      {
-        type: "Feature" as const,
-        properties: {},
-        geometry: {
-          type: "LineString" as const,
-          coordinates,
-        },
-      },
-    ],
-  };
-}
-
 const MissionMapNativeBase: React.FC<Props> = ({
   roverLat = 0,
   roverLon = 0,
   waypoints = [],
-  trajectoryPoints = [],
   heading = null,
   activeWaypointIndex = null,
   armed = false,
@@ -89,6 +81,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
     onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
+  const { preview } = useBackendTrajectory();
 
   const hasRoverPosition =
     isValidLngLat(roverLon, roverLat) && !(roverLat === 0 && roverLon === 0);
@@ -127,80 +120,18 @@ const MissionMapNativeBase: React.FC<Props> = ({
     };
   }, [waypoints, statusMap, activeWaypointIndex]);
 
-  const pathCollection = useMemo(() => {
-    const coordinates = waypoints
-      .filter((wp) => isValidLngLat(wp.lon, wp.lat))
-      .map((wp) => [wp.lon, wp.lat] as [number, number]);
-    if (coordinates.length < 2) return null;
-    return asLineCollection(coordinates);
-  }, [waypoints]);
-
   const trajectoryCollection = useMemo(() => {
-    /*
-     * Restore c73b200 generated-trajectory display semantics:
-     *
-     * - use only backend-provided latitude/longitude
-     * - keep the complete backend trajectory as one LineString
-     * - add sampled generated trajectory Point features for display
-     * - never reconstruct/reproject the trajectory in the frontend
-     */
-    const coordinates = trajectoryPoints
-      .map((pt) => {
-        const lon = Number(pt.longitude);
-        const lat = Number(pt.latitude);
-        if (!isValidLngLat(lon, lat)) return null;
-        return [lon, lat] as [number, number];
-      })
-      .filter((c): c is [number, number] => c != null);
-
-    if (coordinates.length === 0) return null;
-
-    const features: any[] = [];
-
-    if (coordinates.length >= 2) {
-      features.push({
-        type: "Feature",
-        properties: {
-          kind: "line",
-        },
-        geometry: {
-          type: "LineString",
-          coordinates,
-        },
-      });
-    }
-
-    const visiblePointStep = Math.max(
-      1,
-      Math.ceil(coordinates.length / 400),
-    );
-
-    coordinates.forEach((coordinate, index) => {
-      const isFirstPoint = index === 0;
-      const isLastPoint = index === coordinates.length - 1;
-      const shouldDisplay =
-        isFirstPoint || isLastPoint || index % visiblePointStep === 0;
-
-      if (!shouldDisplay) return;
-
-      features.push({
-        type: "Feature",
-        properties: {
-          kind: "point",
-          index,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: coordinate,
-        },
-      });
+    if (!canDrawBackendLine(preview)) return null;
+    return buildBackendTrajectoryCollection(preview.points, {
+      sampleDisplayPoints: true,
+      maxSamplePoints: 400,
     });
+  }, [preview]);
 
-    return {
-      type: "FeatureCollection" as const,
-      features,
-    };
-  }, [trajectoryPoints]);
+  const authoringPreviewCollection = useMemo(() => {
+    if (canDrawBackendLine(preview)) return null;
+    return buildAuthoringPreviewCollection(waypoints);
+  }, [preview, waypoints]);
 
   const handleToggleMapStyle = useCallback(() => {
     if (usingFallback) return;
@@ -287,11 +218,18 @@ const MissionMapNativeBase: React.FC<Props> = ({
           defaultSettings={{ centerCoordinate: center, zoomLevel: DEFAULT_ZOOM }}
         />
 
-        {pathCollection && (
-          <ShapeSource id="mission-path" shape={pathCollection as any}>
+        {authoringPreviewCollection && (
+          <ShapeSource
+            id="mission-path"
+            shape={authoringPreviewCollection as any}
+          >
             <LineLayer
               id="mission-path-layer"
-              style={{ lineColor: "#38bdf8", lineWidth: 3, lineOpacity: 0.85 }}
+              style={{
+                lineColor: AUTHORING_PREVIEW_LINE_COLOR,
+                lineWidth: 3,
+                lineOpacity: 0.85,
+              }}
             />
           </ShapeSource>
         )}
@@ -306,7 +244,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
               filter={["==", ["get", "kind"], "line"] as any}
               style={
                 {
-                  lineColor: "#A855F7",
+                  lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
                   lineWidth: [
                     "interpolate",
                     ["linear"],
@@ -409,6 +347,11 @@ const MissionMapNativeBase: React.FC<Props> = ({
           </Text>
         </View>
       )}
+
+      <TrajectoryStatusBanner
+        preview={preview}
+        hasAuthoringPoints={waypoints.length >= 2}
+      />
 
       <MapBottomControlsBar
         mapStyle={mapStyle}

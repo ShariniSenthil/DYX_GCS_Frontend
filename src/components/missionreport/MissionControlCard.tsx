@@ -17,6 +17,8 @@ import {
   PATH_PLAN_HEADER,
 } from "../../constants/pathPlanGlass";
 import { useRover } from "../../context/RoverContext";
+import { useTelemetry } from "../../context/TelemetryContext";
+import { isUnknownControlOutcome } from "../../services/apiError";
 import { Waypoint } from "./types";
 import { Toast } from "../shared/Toast";
 import { validateBulkSkip } from "../../utils/bulkSkipValidator";
@@ -113,6 +115,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   onClose,
 }) => {
   const { services, telemetry } = useRover();
+  const { missionLifecycle } = useTelemetry();
   const [isLoadingMission, setIsLoadingMission] = React.useState(false);
 
   const [isStarting, setIsStarting] = React.useState(false);
@@ -156,16 +159,48 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
   const isPaused = isMissionPaused;
 
+  const startStage = String(
+    missionLifecycle.start_stage ??
+      telemetry?.mission?.start_stage ??
+      "",
+  )
+    .trim()
+    .toUpperCase();
+
+  const resumeStage = String(
+    missionLifecycle.resume_stage ??
+      telemetry?.mission?.resume_stage ??
+      "",
+  )
+    .trim()
+    .toUpperCase();
+
   const startPhaseLabel =
     isPreparing
       ? "Preparing..."
-      : missionStatus === "arming"
-        ? "Arming..."
-        : missionStatus === "switching_offboard"
+      : startStage === "PRECHECK"
+        ? "Checking..."
+        : startStage === "ZERO_SETPOINT_SETTLE"
+          ? "Settling..."
+          : startStage === "SWITCHING_OFFBOARD" ||
+              missionStatus === "switching_offboard"
+            ? "Switching offboard..."
+            : startStage === "ARMING" || missionStatus === "arming"
+              ? "Arming..."
+              : startStage === "FINAL_CHECK" || missionStatus === "loading"
+                ? "Starting..."
+                : "Starting...";
+
+  const resumePhaseLabel =
+    resumeStage === "PRECHECK"
+      ? "Checking..."
+      : resumeStage === "ZERO_SETPOINT_SETTLE"
+        ? "Settling..."
+        : resumeStage === "SWITCHING_OFFBOARD"
           ? "Switching offboard..."
-          : missionStatus === "loading"
-            ? "Starting..."
-            : "Starting...";
+          : resumeStage === "ARMING"
+            ? "Arming..."
+            : "Resuming...";
 
   // Debug: log when mission status changes to trace button state issues
   React.useEffect(() => {
@@ -247,7 +282,9 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
       console.error("[MissionControlCard] Start Error:", error);
       showLocalToast(
         "error",
-        (error as any)?.message ?? "Failed to start mission",
+        isUnknownControlOutcome(error)
+          ? "Start result unknown — check mission status before retrying"
+          : (error as any)?.message ?? "Failed to start mission",
       );
     } finally {
       setIsStarting(false);
@@ -346,7 +383,14 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     } catch (error) {
       console.error("[MissionControlCard] Resume Error:", error);
 
-      showLocalToast("error", "Failed to resume mission");
+      showLocalToast(
+        "error",
+        isUnknownControlOutcome(error)
+          ? "Resume result unknown — check mission status before retrying"
+          : error instanceof Error
+            ? error.message
+            : "Failed to resume mission",
+      );
 
       return {
         success: false,
@@ -533,13 +577,15 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             }
           >
             <Text style={styles.buttonText}>
-              {isPaused
-                ? resumeAvailable
-                  ? "RESUME"
-                  : pauseReason === "RTK_LOST"
-                    ? "WAIT RTK"
-                    : "RESUME BLOCKED"
-                : "PAUSE"}
+              {isResuming
+                ? resumePhaseLabel
+                : isPaused
+                  ? resumeAvailable
+                    ? "RESUME"
+                    : pauseReason === "RTK_LOST"
+                      ? "WAIT RTK"
+                      : "RESUME BLOCKED"
+                  : "PAUSE"}
             </Text>
           </TouchableOpacity>
 

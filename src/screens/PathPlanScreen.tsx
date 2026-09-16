@@ -74,6 +74,9 @@ import * as Sharing from "expo-sharing";
 import { downloadFileToDevice } from "../utils/downloadHelper";
 import PersistentStorage from "../services/PersistentStorage";
 import { useFieldMap } from "../context/FieldMapContext";
+import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
+import { isOfflineMode } from "../config";
+import { TRAJECTORY_COPY } from "../utils/backendTrajectoryPreview";
 import {
   validateWaypoints,
   hasCriticalErrors,
@@ -87,11 +90,13 @@ import { CADAlignmentCanvas } from "../components/pathplan/CADAlignmentCanvas";
 import { useCADAlignment } from "../application/hooks/useCADAlignment";
 import { GeoPoint } from "../core/geometry/types";
 import { parseCSVChunked } from "../utils/chunkedParser";
+import { parseCSV as parseCoreCSV } from "../core/parsers/csvParser";
 import { parseKML as coreParseKML } from "../core/parsers/kmlParser";
 import { convertToPathPlanWaypoints } from "../core/parsers/adapter";
 import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
+  loadMission,
   type MissionExtensionMode,
 } from "../services/missionApi";
 import {
@@ -402,6 +407,17 @@ export default function PathPlanScreen({
     setShowManualConnectionCanvas,
   } = useRover();
   const { setMarkingSnapshot, markingPressRef } = useFieldMap();
+  const { connectionState } = useConnection();
+  const {
+    preview,
+    invalidateForUpload,
+    resumePreviewAfterFailedUpload,
+    refreshNow,
+  } = useBackendTrajectory();
+  const roverUploadBlockedReason =
+    isOfflineMode() || connectionState !== "connected"
+      ? TRAJECTORY_COPY.offline
+      : null;
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
 
@@ -1174,14 +1190,8 @@ export default function PathPlanScreen({
       showPathPlanToast(
         "success",
         "Manual Connect Complete",
-        `Connected ${reordered.length} marking points.`,
+        `Connected ${reordered.length} marking points. Tap Load Mission to send the preview.`,
       );
-
-      const uploadTimer = setTimeout(() => {
-        askExtensionAndUpload(reordered);
-      }, 150);
-
-      addTimer(uploadTimer);
     },
     [recordAndApply, setShowManualConnectionCanvas, waypoints],
   );
@@ -1536,6 +1546,29 @@ export default function PathPlanScreen({
     addTimer(timer);
   };
 
+  const lastTrajectoryPhaseRef = useRef(preview.phase);
+  useEffect(() => {
+    if (!isVisible) {
+      lastTrajectoryPhaseRef.current = preview.phase;
+      return;
+    }
+    const previous = lastTrajectoryPhaseRef.current;
+    lastTrajectoryPhaseRef.current = preview.phase;
+    if (
+      (previous === "generating" || previous === "waiting_rtk") &&
+      preview.phase === "ready"
+    ) {
+      showPathPlanToast(
+        "success",
+        "Trajectory Ready",
+        "Rover path is on the map.",
+        4000,
+      );
+    } else if (previous !== "failed" && preview.phase === "failed") {
+      showPathPlanToast("error", "Trajectory Failed", preview.message, 5000);
+    }
+  }, [isVisible, preview.phase, preview.message]);
+
   const dismissPathPlanToast = () => {
     if (pathPlanToastTimerRef.current) {
       clearTimer(pathPlanToastTimerRef.current);
@@ -1731,84 +1764,6 @@ export default function PathPlanScreen({
     return waypoints;
   };
 
-  const parseCSV = (content: string): PathPlanWaypoint[] => {
-    const lines = content
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length < 2) {
-      throw new Error(
-        "CSV file must contain headers and at least one data row.",
-      );
-    }
-
-    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-    const latIndex = headers.findIndex((h) => h === "latitude" || h === "lat");
-    const lonIndex = headers.findIndex(
-      (h) => h === "longitude" || h === "lon" || h === "lng",
-    );
-    const altIndex = headers.findIndex(
-      (h) =>
-        h === "altitude" ||
-        h === "alt" ||
-        h === "elevation" ||
-        h === "ellipsoidal height",
-    );
-
-    // Optional field indices
-    const blockIndex = headers.findIndex((h) => h === "block");
-    const rowIndex = headers.findIndex((h) => h === "row");
-    const pileIndex = headers.findIndex((h) => h === "pile");
-
-    if (latIndex === -1 || lonIndex === -1) {
-      throw new Error(
-        'CSV must contain "latitude" and "longitude" columns in the header.',
-      );
-    }
-
-    const waypoints: PathPlanWaypoint[] = [];
-    const dataLines = lines.slice(1);
-
-    dataLines.forEach((line, idx) => {
-      const values = line.split(",").map((v) => v.trim());
-
-      if (values.length <= Math.max(latIndex, lonIndex)) {
-        throw new Error(`Insufficient columns at row ${idx + 2}.`);
-      }
-
-      const lat = parseFloat(values[latIndex]);
-      const lon = parseFloat(values[lonIndex]);
-      const alt = altIndex !== -1 ? parseFloat(values[altIndex]) : 0;
-
-      const wp = { lat, lon, alt: isNaN(alt) ? 0 : alt };
-      validateWaypoint(wp, idx);
-
-      waypoints.push({
-        id: idx + 1,
-        lat,
-        lon,
-        alt: wp.alt,
-        distance: 0,
-        block:
-          blockIndex !== -1 && values[blockIndex] ? values[blockIndex] : "",
-        row: rowIndex !== -1 && values[rowIndex] ? values[rowIndex] : "",
-        pile:
-          pileIndex !== -1 && values[pileIndex]
-            ? values[pileIndex]
-            : String(idx + 1),
-      });
-    });
-
-    if (DEBUG_LOG)
-      console.log(
-        "[PathPlan] parseCSV -> parsed",
-        waypoints.length,
-        waypoints.slice(0, 6),
-      );
-
-    return waypoints;
-  };
 
   const parseJSON = (content: string): PathPlanWaypoint[] => {
     const data = JSON.parse(content);
@@ -2373,6 +2328,17 @@ export default function PathPlanScreen({
       return;
     }
 
+    if (roverUploadBlockedReason) {
+      showPathPlanToast(
+        "error",
+        "Connect Rover",
+        roverUploadBlockedReason,
+        5000,
+      );
+      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      return;
+    }
+
     let temporaryFileUri: string | null = null;
 
     isUploadingRef.current = true;
@@ -2401,6 +2367,7 @@ export default function PathPlanScreen({
       });
 
       setUploadProgress(25);
+      invalidateForUpload();
 
       const response = await uploadMissionCsv({
         file: {
@@ -2448,19 +2415,15 @@ export default function PathPlanScreen({
       const dummyDistance = response.upload?.dummy_point_distance_m ?? null;
 
       if (missionAlreadyReady) {
-        /*
-         * RTK was already FIXED and the trajectory happened to complete
-         * before the upload response returned.
-         */
         showPathPlanToast(
           "success",
-          "Mission Ready",
-          `${totalPoints} marking points uploaded. ${navigationPoints} navigation points generated.`,
+          "Mission Uploaded",
+          `${totalPoints} marking points uploaded. Waiting for rover path…`,
           5000,
         );
 
         Alert.alert(
-          "Mission Ready",
+          "Mission Uploaded",
           [
             `Marking points: ${totalPoints}`,
             `Navigation points: ${navigationPoints}`,
@@ -2471,20 +2434,17 @@ export default function PathPlanScreen({
               : null,
 
             "",
-            "Trajectory is ready.",
-            "Open Mission Report to review the generated path and START.",
+            "The map will show the rover-generated path when it is ready.",
+            "Marking dots stay. The phone does not draw a path of its own.",
           ]
             .filter((line): line is string => typeof line === "string")
             .join("\n"),
         );
       } else {
-        /*
-         * Normal asynchronous upload behaviour.
-         */
         showPathPlanToast(
           "success",
           "Mission Uploaded",
-          `${totalPoints} marking points uploaded. Generating trajectory...`,
+          `${totalPoints} marking points uploaded. ${TRAJECTORY_COPY.generating}`,
           5000,
         );
 
@@ -2499,16 +2459,17 @@ export default function PathPlanScreen({
               : null,
 
             "",
-            "Trajectory preparation has started.",
-            "RTK FIXED is required.",
-            "Open Mission Report to watch the generated trajectory become READY.",
-            "START will enable automatically when preparation is complete.",
+            TRAJECTORY_COPY.generating,
+            TRAJECTORY_COPY.waitingRtk,
+            "The connecting line appears only from the rover path.",
           ]
             .filter((line): line is string => typeof line === "string")
             .join("\n"),
         );
       }
     } catch (error) {
+      resumePreviewAfterFailedUpload();
+      void refreshNow();
       const message = error instanceof Error ? error.message : String(error);
 
       console.error("[PathPlan] Mission upload failed:", error);
@@ -2578,8 +2539,107 @@ export default function PathPlanScreen({
     );
   }
 
+  function applyImportedWaypoints(sanitized: PathPlanWaypoint[]): void {
+    recordAndApply(sanitized);
+
+    if (roverUploadBlockedReason) {
+      showPathPlanToast(
+        "success",
+        "Import Complete",
+        `${sanitized.length} marking points imported. Connect a rover to generate the path.`,
+        5000,
+      );
+      return;
+    }
+
+    showPathPlanToast(
+      "success",
+      "Import Complete",
+      `Successfully imported ${sanitized.length} marking points.`,
+    );
+    askExtensionAndUpload(sanitized);
+  }
+
   function handleLoadMissionToController(): void {
-    askExtensionAndUpload(waypoints);
+    if (roverUploadBlockedReason) {
+      showPathPlanToast(
+        "error",
+        "Connect Rover",
+        roverUploadBlockedReason,
+        5000,
+      );
+      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      return;
+    }
+
+    if (waypoints.length < 2) {
+      showPathPlanToast(
+        "error",
+        "Not Enough Points",
+        "Add at least two marking points first.",
+        5000,
+      );
+      return;
+    }
+
+    const previewReady =
+      preview.phase === "ready" && preview.points.length >= 2;
+
+    if (!previewReady) {
+      Alert.alert(
+        "Preview not ready",
+        preview.phase === "generating" || preview.phase === "waiting_rtk"
+          ? "Wait for the purple rover path, then tap Load Mission."
+          : "Send the current points to the rover to generate the preview first.",
+        preview.phase === "generating" || preview.phase === "waiting_rtk"
+          ? [{ text: "OK" }]
+          : [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Send for preview",
+                onPress: () => {
+                  askExtensionAndUpload(waypoints);
+                },
+              },
+            ],
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Load Mission",
+      "Confirm this rover preview and enable START? The file will not be sent again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Load",
+          onPress: () => {
+            void (async () => {
+              try {
+                const response = await loadMission();
+                if (!response.success) {
+                  throw new Error(
+                    response.message || "The rover rejected Load Mission.",
+                  );
+                }
+                showPathPlanToast(
+                  "success",
+                  "Mission Loaded",
+                  "START will enable when the rover is READY.",
+                  5000,
+                );
+                void refreshNow();
+              } catch (error) {
+                const message =
+                  error instanceof Error ? error.message : String(error);
+                showPathPlanToast("error", "Load Failed", message, 5000);
+                Alert.alert("Load Failed", message);
+              }
+            })();
+          },
+        },
+      ],
+    );
   }
 
   const handleRequestUpload = async () => {
@@ -2745,9 +2805,10 @@ export default function PathPlanScreen({
           parsed = parseQGCWaypoints(content);
           break;
         case "csv": {
-          // Use chunked parser only for very large files (1000+ rows) to avoid JS thread freeze.
-          // requestIdleCallback adds 800ms-1s overhead per chunk on field tablets;
-          // inline parsing handles 400 rows in ~4ms, so chunking is counterproductive below 1000.
+          // Route ALL CSV files through the robust core parser (RFC 4180-compliant,
+          // handles quoted commas, BOM, UTM, multi-delimiter, column-name variants).
+          // Large files (>1000 rows) still use the chunked async path to avoid
+          // freezing the JS thread on field tablets.
           const csvRows = content.split(/\r?\n/).filter(Boolean).length;
           if (csvRows > 1000) {
             if (DEBUG_LOG)
@@ -2758,7 +2819,16 @@ export default function PathPlanScreen({
               );
             parsed = await parseCSVChunked(content, name);
           } else {
-            parsed = parseCSV(content);
+            const result = parseCoreCSV(content, name);
+            if (result.coordinates.length === 0) {
+              const warnMsg = result.warnings.slice(0, 3).join(' | ');
+              throw new Error(
+                `No valid coordinates found. ${warnMsg}`.trim(),
+              );
+            }
+            if (DEBUG_LOG && result.warnings.length > 0)
+              console.warn('[PathPlan] CSV parse warnings:', result.warnings);
+            parsed = convertToPathPlanWaypoints(result.coordinates);
           }
           break;
         }
@@ -3510,6 +3580,7 @@ export default function PathPlanScreen({
                   }
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
+                  roverUploadBlockedReason={roverUploadBlockedReason}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}
@@ -4078,19 +4149,8 @@ export default function PathPlanScreen({
                                     sanitized.slice(0, 3),
                                   );
                                 requestAnimationFrame(() => {
-                                  recordAndApply(sanitized);
-
-                                  const uploadTimer = setTimeout(() => {
-                                    askExtensionAndUpload(sanitized);
-                                  }, 150);
-
-                                  addTimer(uploadTimer);
+                                  applyImportedWaypoints(sanitized);
                                 });
-                                showPathPlanToast(
-                                  "success",
-                                  "Import Complete",
-                                  `Successfully imported ${sanitized.length} marking points.`,
-                                );
                               }
                             },
                           },
@@ -4134,19 +4194,8 @@ export default function PathPlanScreen({
                             sanitized.slice(0, 3),
                           );
                         requestAnimationFrame(() => {
-                          recordAndApply(sanitized);
-
-                          const uploadTimer = setTimeout(() => {
-                            askExtensionAndUpload(sanitized);
-                          }, 150);
-
-                          addTimer(uploadTimer);
+                          applyImportedWaypoints(sanitized);
                         });
-                        showPathPlanToast(
-                          "success",
-                          "Import Complete",
-                          `Successfully imported ${sanitized.length} marking points.`,
-                        );
                       }
                     }
                   }

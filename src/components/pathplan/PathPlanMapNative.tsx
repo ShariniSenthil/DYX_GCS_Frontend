@@ -2,11 +2,20 @@ import React, { useMemo, useRef } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { MarkerView, MapView, Camera, ShapeSource, LineLayer, CircleLayer } from '@rnmapbox/maps';
 import { RoverVehicleIcon } from '../shared/RoverVehicleIcon';
+import { TrajectoryStatusBanner } from '../shared/TrajectoryStatusBanner';
 import {
   MAPBOX_STYLE_SATELLITE,
   MAPBOX_FALLBACK_STYLE_JSON,
 } from '../../config/mapboxConfig';
 import { useMapboxSurface } from '../../hooks/useMapboxSurface';
+import { useBackendTrajectory } from '../../context/BackendTrajectoryContext';
+import {
+  AUTHORING_PREVIEW_LINE_COLOR,
+  BACKEND_TRAJECTORY_LINE_COLOR,
+  buildAuthoringPreviewCollection,
+  buildBackendTrajectoryCollection,
+  canDrawBackendLine,
+} from '../../utils/backendTrajectoryPreview';
 
 export const PathPlanMapNative: React.FC<any> = ({
   waypoints = [],
@@ -25,6 +34,7 @@ export const PathPlanMapNative: React.FC<any> = ({
     onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
+  const { preview } = useBackendTrajectory();
   const center = useMemo(() => {
     if (roverPosition && roverPosition.lon && roverPosition.lat) {
       return [roverPosition.lon, roverPosition.lat];
@@ -51,26 +61,17 @@ export const PathPlanMapNative: React.FC<any> = ({
     lon <= 180 &&
     !(lat === 0 && lon === 0);
 
-  const lineGeoJSON = useMemo(() => {
-    if (!waypoints || waypoints.length < 2) return null;
-    const coordinates = waypoints
-      .filter((wp: any) => isValidLngLat(wp.lon, wp.lat))
-      .map((wp: any) => [wp.lon, wp.lat] as [number, number]);
-    if (coordinates.length < 2) return null;
-    return {
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates,
-          },
-        },
-      ],
-    };
-  }, [waypoints]);
+  const trajectoryGeoJSON = useMemo(() => {
+    if (!canDrawBackendLine(preview)) return null;
+    return buildBackendTrajectoryCollection(preview.points, {
+      sampleDisplayPoints: false,
+    });
+  }, [preview]);
+
+  const authoringPreviewGeoJSON = useMemo(() => {
+    if (canDrawBackendLine(preview)) return null;
+    return buildAuthoringPreviewCollection(waypoints);
+  }, [preview, waypoints]);
 
   const waypointGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length === 0) return null;
@@ -134,14 +135,36 @@ export const PathPlanMapNative: React.FC<any> = ({
           defaultSettings={{ centerCoordinate: center, zoomLevel: 18 }}
         />
 
-        {lineGeoJSON && (
-          <ShapeSource id="path-source" shape={lineGeoJSON as any}>
-            <LineLayer id="path-layer" style={{ lineColor: '#3b82f6', lineWidth: 4 }} />
+        {authoringPreviewGeoJSON && (
+          <ShapeSource id="authoring-path-source" shape={authoringPreviewGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
+            <LineLayer
+              id="authoring-path-layer"
+              style={{
+                lineColor: AUTHORING_PREVIEW_LINE_COLOR,
+                lineWidth: 4,
+                lineJoin: 'round',
+                lineCap: 'round',
+              }}
+            />
           </ShapeSource>
         )}
 
-        {waypointGeoJSON && (
-          <ShapeSource id="waypoint-source" shape={waypointGeoJSON as any}>
+        {trajectoryGeoJSON && (
+          <ShapeSource id="path-source" shape={trajectoryGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
+            <LineLayer 
+              id="path-layer" 
+              style={{ 
+                lineColor: BACKEND_TRAJECTORY_LINE_COLOR, 
+                lineWidth: 4,
+                lineJoin: 'round',
+                lineCap: 'round'
+              }} 
+            />
+          </ShapeSource>
+        )}
+
+        {waypointGeoJSON && visualization?.waypoints !== false && (
+          <ShapeSource id="waypoint-source" shape={waypointGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
             <CircleLayer
               id="waypoint-layer"
               style={{
@@ -171,10 +194,14 @@ export const PathPlanMapNative: React.FC<any> = ({
       {usingFallback && (
         <View style={styles.fallbackBanner} pointerEvents="none">
           <Text style={styles.fallbackBannerText}>
-            Map tiles unavailable ΓÇö showing rover & path only
+            Map tiles unavailable — showing rover & path only
           </Text>
         </View>
       )}
+      <TrajectoryStatusBanner
+        preview={preview}
+        hasAuthoringPoints={waypoints.length >= 2}
+      />
     </View>
   );
 };

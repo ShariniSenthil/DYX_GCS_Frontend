@@ -408,15 +408,12 @@ const MissionMapBase: React.FC<Props> = ({
     }
 
     function refreshMissionPath() {
-      if (waypoints.length > 1) {
-        const pathCoords = waypoints.map(wp => [wp.lon, wp.lat]);
-        const source = map.getSource('mission-path');
-        if (source) {
-          source.setData({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: pathCoords }
-          });
-        }
+      const source = map.getSource('mission-path');
+      if (source) {
+        source.setData({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [] }
+        });
       }
     }
 

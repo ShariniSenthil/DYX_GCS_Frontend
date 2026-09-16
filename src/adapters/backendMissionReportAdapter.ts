@@ -334,3 +334,54 @@ export function projectBackendMissionReport(
     activeIndex,
   };
 }
+
+export type MissionReportExportStatusMap = Record<
+  number,
+  {
+    reached?: boolean;
+    marked?: boolean;
+    status?: WaypointUiStatus;
+    timestamp?: string;
+    remark?: string;
+    position_error_cm?: number;
+  }
+>;
+
+/**
+ * Map GET /api/mission/report into the export table shape.
+ * overall_accuracy_mm → position_error_cm (÷ 10). No local geometry.
+ */
+export function projectCanonicalReportForExport(
+  report: CanonicalMissionReport | null,
+): MissionReportExportStatusMap {
+  if (!report || !Array.isArray(report.points)) {
+    return {};
+  }
+
+  const statusMap: MissionReportExportStatusMap = {};
+
+  for (const point of report.points) {
+    const sequence = Number(point.sequence);
+    if (!Number.isInteger(sequence) || sequence <= 0) {
+      continue;
+    }
+
+    const status = mapStatus(point.status);
+    const overallMm = point.accuracy?.overall_accuracy_mm;
+    const positionErrorCm =
+      typeof overallMm === "number" && Number.isFinite(overallMm)
+        ? overallMm / 10
+        : undefined;
+
+    statusMap[sequence] = {
+      reached: status === "completed" || status === "failed",
+      marked: status === "completed",
+      status,
+      timestamp: point.updated_at ?? point.accuracy?.captured_at ?? undefined,
+      remark: buildRemark(point.accuracy),
+      position_error_cm: positionErrorCm,
+    };
+  }
+
+  return statusMap;
+}

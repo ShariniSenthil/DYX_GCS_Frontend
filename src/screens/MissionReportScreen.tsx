@@ -46,6 +46,7 @@ import {
 import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
 import { useTelemetry } from "../context/TelemetryContext";
 import { useFieldMap } from "../context/FieldMapContext";
+import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
 import { useConnection } from "../context/ConnectionContext";
 import { useMission } from "../context/MissionContext";
 import { AutoAssignDialog } from "../components/missionreport/AutoAssignDialog";
@@ -73,7 +74,19 @@ import {
   isRobotStatusDebugEnabled,
   patchRobotStatusDebug,
 } from "../utils/robotStatusDebug";
-import usePointMissionEvents from "../hooks/usePointMissionEvents";
+import type { UsePointMissionEventsResult } from "../hooks/usePointMissionEvents";
+
+const EMPTY_POINT_EVENTS: UsePointMissionEventsResult = {
+  statusMap: {},
+  waitingForContinue: false,
+  currentPointIndex: null,
+  lastEventId: null,
+  expectedGeneration: null,
+  missionTerminal: null,
+  resetStatusMap: () => undefined,
+  acknowledgeContinueSuccess: () => undefined,
+  clearMissionTerminal: () => undefined,
+};
 import {
   POINT_MISSION_ENABLED,
   JOYSTICK_OFFLINE_UI_PREVIEW_BYPASS,
@@ -108,7 +121,6 @@ import {
 import {
   getMissionStatus,
   getMissionReport,
-  getLoadedMissionPath,
   setMissionExecutionMode,
   prepareMission,
   startMission,
@@ -117,7 +129,6 @@ import {
   nextMissionPoint,
   skipMissionPoint,
   stopMission,
-  type LoadedPathPoint,
   type MissionRuntimeState,
   type CanonicalMissionReport,
   type RawGnssSurveySnapshot,
@@ -125,6 +136,7 @@ import {
 
 import {
   projectBackendMissionReport,
+  projectCanonicalReportForExport,
   reconcileMissionReportRow,
 } from "../adapters/backendMissionReportAdapter";
 
@@ -202,8 +214,14 @@ export default function MissionReportScreen({
     if (normalized === "dash") return "DASH";
     return null;
   };
-  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport } = useTelemetry();
+  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport, pointEvents } = useTelemetry();
   const { setMissionSnapshot } = useFieldMap();
+  const {
+    preview,
+    invalidateForUpload,
+    resumePreviewAfterFailedUpload,
+    refreshNow,
+  } = useBackendTrajectory();
   const { services, connectionState } = useConnection();
 
   // 4WD verified mission hooks
@@ -235,7 +253,7 @@ export default function MissionReportScreen({
     missionTerminal: px4MissionTerminal,
     resetStatusMap: resetPointStatusMap,
     clearMissionTerminal,
-  } = usePointMissionEvents(socket, connectionState);
+  } = pointEvents ?? EMPTY_POINT_EVENTS;
   const {
     missionWaypoints,
     setMissionWaypoints,
@@ -299,10 +317,6 @@ export default function MissionReportScreen({
         {},
       );
     }, []);
-
-  const [trajectoryPoints, setTrajectoryPoints] = useState<LoadedPathPoint[]>(
-    [],
-  );
 
   // STATUS DOWNGRADE GUARD: Defines priority order — higher index = more "final"
   // Once a waypoint reaches 'completed' or 'skipped', backend events cannot regress it
@@ -810,6 +824,7 @@ export default function MissionReportScreen({
         connected: connectionState === "connected",
         loaded: hasUploadedMission,
         ready: backendMission?.ready === true,
+        acceptedForStart: backendMission?.accepted_for_start,
         state: backendMissionState,
         mode,
         joystickActive: telemetry.joystick_active === true,
@@ -819,6 +834,7 @@ export default function MissionReportScreen({
       connectionState,
       hasUploadedMission,
       backendMission?.ready,
+      backendMission?.accepted_for_start,
       backendMissionState,
       mode,
       telemetry.joystick_active,
@@ -972,7 +988,7 @@ export default function MissionReportScreen({
         pickBestRawGnssSurvey(
           extractRawGnssSurvey(runtimeSurveyCandidate),
           extractRawGnssSurvey(reportSurveyCandidate),
-          extractRawGnssSurvey(runtimeRow?.survey),
+          extractRawGnssSurvey((runtimeRow as any)?.survey),
           extractRawGnssSurvey(runtimeAccuracy),
           surveyFromRadialMm(
             typeof runtimeRow?.position_error_cm === "number"
@@ -1355,92 +1371,6 @@ export default function MissionReportScreen({
     }
   }, []);
 
-  const refreshTrajectoryPreview = useCallback(async (): Promise<boolean> => {
-    if (isOfflineMode()) {
-      return false;
-    }
-
-    try {
-      const response = await getLoadedMissionPath();
-
-      if (!response?.success) {
-        return false;
-      }
-
-      /**
-       * Map display uses only authoritative geographic coordinates produced
-       * by rover_backend from PX4 gp_origin. Local ENU x/y remain backend
-       * diagnostics and are never reprojected by the frontend.
-       */
-      const validPoints = Array.isArray(response.points)
-        ? response.points.filter(
-            (
-              point,
-            ): point is LoadedPathPoint & {
-              latitude: number;
-              longitude: number;
-            } =>
-              typeof point.latitude === "number" &&
-              Number.isFinite(point.latitude) &&
-              point.latitude >= -90 &&
-              point.latitude <= 90 &&
-              typeof point.longitude === "number" &&
-              Number.isFinite(point.longitude) &&
-              point.longitude >= -180 &&
-              point.longitude <= 180,
-          )
-        : [];
-
-      /**
-       * Do not erase an existing fixed path because one preview read is early.
-       * The lifecycle effect retries until the already-generated backend path
-       * contains at least two geographic points.
-       */
-      if (
-        Number(response.navigation_point_count ?? 0) < 2 ||
-        validPoints.length < 2
-      ) {
-        console.warn(
-          "[MissionReportScreen] Fixed trajectory preview not ready yet:",
-          {
-            navigationPoints: response.navigation_point_count,
-            projectedPoints: validPoints.length,
-            frameId: response.frame_id,
-          },
-        );
-        return false;
-      }
-
-      setTrajectoryPoints(validPoints);
-
-      const firstPoint = validPoints[0];
-      const lastPoint = validPoints[validPoints.length - 1];
-
-      console.log("[MissionReportScreen] Fixed P1->Pn trajectory displayed:", {
-        frameId: response.frame_id,
-        displayedPoints: validPoints.length,
-        totalPoints: response.navigation_point_count,
-        previewTruncated: response.preview_truncated,
-        firstGps: {
-          latitude: firstPoint.latitude,
-          longitude: firstPoint.longitude,
-        },
-        lastGps: {
-          latitude: lastPoint.latitude,
-          longitude: lastPoint.longitude,
-        },
-      });
-
-      return true;
-    } catch (error) {
-      console.warn(
-        "[MissionReportScreen] Generated trajectory unavailable; will retry:",
-        error instanceof Error ? error.message : String(error),
-      );
-      return false;
-    }
-  }, []);
-
   /*
    * ============================================================
    * MISSION STATUS SYNCHRONIZATION
@@ -1608,108 +1538,6 @@ export default function MissionReportScreen({
       `lat=${lat.toFixed(7)} lon=${lon.toFixed(7)}`,
     );
   }, [roverPosition?.lat, roverPosition?.lng, isMissionActive]);
-
-  /*
-   * ============================================================
-   * FIXED GENERATED TRAJECTORY DISPLAY
-   * ============================================================
-   *
-   * LOAD owns the fixed surveyed P1->Pn trajectory.
-   *
-   * trajectory_ready is the DISPLAY gate.
-   * mission-manager READY remains the START gate.
-   *
-   * RPP's temporary current C->P1 runtime entry path is intentionally
-   * separate and must never replace or re-anchor this displayed path.
-   */
-  useEffect(() => {
-    if (
-      !isVisible ||
-      connectionState !== "connected" ||
-      isOfflineMode()
-    ) {
-      return;
-    }
-
-    const navigationPointCount = Number(
-      backendMission?.navigation_point_count ?? 0,
-    );
-
-    /*
-     * No stored mission means there is no fixed trajectory to display.
-     */
-    if (backendMission?.loaded !== true) {
-      setTrajectoryPoints([]);
-      return;
-    }
-
-    /*
-     * While a new mission is being generated, trajectory_ready is false.
-     * The Jetson lifecycle patch will explicitly reset it at each LOAD.
-     */
-    if (backendMission?.trajectory_ready !== true) {
-      setTrajectoryPoints([]);
-      return;
-    }
-
-    if (
-      !Number.isFinite(navigationPointCount) ||
-      navigationPointCount < 2
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    let requestInFlight = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const loadFixedTrajectory = async (): Promise<void> => {
-      if (cancelled || requestInFlight) {
-        return;
-      }
-
-      requestInFlight = true;
-      let displayed = false;
-
-      try {
-        displayed = await refreshTrajectoryPreview();
-      } finally {
-        requestInFlight = false;
-      }
-
-      if (cancelled || displayed) {
-        return;
-      }
-
-      /*
-       * Retry only the REST preview read.
-       * This NEVER regenerates or changes P1->Pn geometry.
-       */
-      retryTimer = setTimeout(() => {
-        void loadFixedTrajectory();
-      }, 500);
-    };
-
-    void loadFixedTrajectory();
-
-    return () => {
-      cancelled = true;
-
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-      }
-    };
-  }, [
-    isVisible,
-    connectionState,
-
-    backendMission?.mission_id,
-    backendMission?.loaded,
-    backendMission?.trajectory_ready,
-    backendMission?.navigation_point_count,
-
-    refreshTrajectoryPreview,
-  ]);
 
   const refreshQuickNtripStatus = useCallback(async () => {
     if (connectionState !== "connected") {
@@ -1935,6 +1763,7 @@ export default function MissionReportScreen({
   const handleConfirmUpload = async () => {
     setShowWaypointPreviewDialog(false);
     setIsUploadingMission(true);
+    invalidateForUpload();
 
     try {
       console.log("[MissionReportScreen] Uploading verified mission...");
@@ -1976,8 +1805,10 @@ export default function MissionReportScreen({
         );
 
         await refreshBackendMission();
-        await refreshTrajectoryPreview();
+        await refreshNow();
       } else {
+        resumePreviewAfterFailedUpload();
+        void refreshNow();
         console.error("[MissionReportScreen] Upload failed:", result.message);
         showNotification(
           "error",
@@ -1986,6 +1817,8 @@ export default function MissionReportScreen({
         );
       }
     } catch (error) {
+      resumePreviewAfterFailedUpload();
+      void refreshNow();
       console.error("[MissionReportScreen] Upload Error:", error);
       showNotification("error", "Error", "Failed to upload mission");
     } finally {
@@ -2596,13 +2429,13 @@ export default function MissionReportScreen({
       })),
       statusMap,
       activeWaypointIndex: effectiveCurrentIndex,
-      trajectoryPoints,
+      trajectoryPoints: preview.points,
     });
   }, [
     displayData.waypoints,
     displayData.statusMap,
     effectiveCurrentIndex,
-    trajectoryPoints,
+    preview.points,
     setMissionSnapshot,
   ]);
 
@@ -2791,6 +2624,7 @@ export default function MissionReportScreen({
         connected: connectionState === "connected",
         loaded: latestMission?.loaded === true,
         ready: latestMission?.ready === true,
+        acceptedForStart: latestMission?.accepted_for_start,
         state: latestMission?.state,
         mode,
         joystickActive: telemetry.joystick_active === true,
@@ -3287,6 +3121,14 @@ export default function MissionReportScreen({
   const handleExport = () => {
     console.log("[MissionReportScreen] Export report triggered");
   };
+
+  const fetchCanonicalExportData = useCallback(async () => {
+    const response = await getMissionReport();
+    if (!response?.success || response.available !== true || !response.report) {
+      return null;
+    }
+    return projectCanonicalReportForExport(response.report);
+  }, []);
 
   // Handle export completion - prompt user to clear logs or keep for review
   const handleExportComplete = () => {
@@ -4795,7 +4637,6 @@ export default function MissionReportScreen({
         {embedMap && (
         <MissionMap
           waypoints={displayData.waypoints}
-          trajectoryPoints={trajectoryPoints}
           roverLat={mapProps.roverLat}
           roverLon={mapProps.roverLon}
           heading={mapProps.heading}
@@ -4986,6 +4827,7 @@ export default function MissionReportScreen({
                   missionMode: displayData.missionMode,
                   onExport: handleExport,
                   onExportComplete: handleExportComplete,
+                  fetchExportData: fetchCanonicalExportData,
                 }}
               />
             }
@@ -5105,6 +4947,7 @@ export default function MissionReportScreen({
         waypoints={displayData.waypoints}
         statusMap={displayData.statusMap}
         missionMode={displayData.missionMode}
+        fetchExportData={fetchCanonicalExportData}
       />
 
       {/* Clear Logs After Export Dialog */}

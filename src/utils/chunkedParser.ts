@@ -14,6 +14,7 @@
  */
 
 import { PathPlanWaypoint } from '../types/pathplan';
+import { splitCSVLine } from '../core/parsers/utils';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,37 +69,7 @@ function sanitizeContent(raw: string): string {
   return s;
 }
 
-/** Split a CSV line respecting RFC 4180 quoted fields ("3,4" stays as one value) */
-function splitCSVLine(line: string, delimiter: string): string[] {
-  const values: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === delimiter) {
-      values.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  values.push(current.trim());
-  return values;
-}
+// (splitCSVLine is imported from ../core/parsers/utils — see top of file)
 
 /** Auto-detect delimiter — picks whichever of , \t ; produces the most columns */
 function detectDelimiter(headerLine: string): string {

@@ -127,6 +127,11 @@ export interface MissionRuntimeState {
    */
   trajectory_ready?: boolean;
 
+  /**
+   * True after POST /api/mission/load. START stays off until this is true.
+   */
+  accepted_for_start?: boolean;
+
   message?: string;
   error?: string | null;
 
@@ -217,6 +222,7 @@ export interface MissionControlResponse {
 
   operation:
     | "prepare"
+    | "load"
     | "start"
     | "pause"
     | "resume"
@@ -225,6 +231,8 @@ export interface MissionControlResponse {
     | "stop"
     | "clear"
     | string;
+
+  message?: string;
 
   mission:
     MissionRuntimeState;
@@ -568,6 +576,14 @@ export async function uploadMissionCsv(
   );
 }
 
+export async function loadMission(): Promise<MissionControlResponse> {
+  return apiPost<MissionControlResponse>(
+    PX4_MISSION.LOAD,
+    undefined,
+    { timeoutMs: 15_000 },
+  );
+}
+
 // ── Mission information ───────────────────────────────────────────────────────
 
 export async function getMissionStatus():
@@ -713,6 +729,7 @@ Promise<DeleteMissionResponse> {
 
 export default {
   uploadMissionCsv,
+  loadMission,
 
   getMissionStatus,
   getMissionReport,

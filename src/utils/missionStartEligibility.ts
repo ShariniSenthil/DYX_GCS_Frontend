@@ -63,6 +63,7 @@ export function getMissionStartEligibility(input: {
   connected: boolean;
   loaded: boolean;
   ready: boolean;
+  acceptedForStart?: boolean;
   state: string | null | undefined;
   mode: string | null | undefined;
   joystickActive?: boolean;
@@ -89,6 +90,14 @@ export function getMissionStartEligibility(input: {
       canPressStart: false,
       needsPrepare: false,
       reason: "Upload and prepare a mission before starting.",
+    };
+  }
+
+  if (input.acceptedForStart === false) {
+    return {
+      canPressStart: false,
+      needsPrepare: false,
+      reason: "Load the mission after reviewing the preview.",
     };
   }
 

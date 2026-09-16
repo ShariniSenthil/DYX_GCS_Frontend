@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
 import { useRoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
+import { useTelemetry } from '../../context/TelemetryContext';
 import type { RoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
 import type { RtkUiState } from '../../adapters/px4RtkUiStateAdapter';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -91,8 +92,34 @@ export const SystemStatusPanel: React.FC<Props> = ({
   onClose,
 }) => {
   const indicators = useRoverStatusIndicators();
+  const { telemetry, missionLifecycle } = useTelemetry();
 
   const icons = useMemo(() => deriveVisuals(indicators), [indicators]);
+
+  const extraRows = useMemo(() => {
+    const mission = telemetry.mission;
+    const rppOn = telemetry.rpp_debug_available === true;
+    const spray = mission.spray_controller_state ?? "—";
+    const sprayFault = mission.spray_fault_reason;
+    const align = mission.alignment_active === true;
+    const start =
+      missionLifecycle.start_stage ?? mission.start_stage ?? "IDLE";
+    const resume =
+      missionLifecycle.resume_stage ?? mission.resume_stage ?? "IDLE";
+    const stale = telemetry.stale === true;
+    const age =
+      typeof telemetry.ageMs === "number"
+        ? `${Math.round(telemetry.ageMs / 100) / 10}s`
+        : "—";
+    return [
+      { label: "RPP", value: rppOn ? "debug on" : "—" },
+      { label: "Spray", value: sprayFault ? String(sprayFault) : String(spray) },
+      { label: "Align", value: align ? "active" : "idle" },
+      { label: "Start", value: String(start) },
+      { label: "Resume", value: String(resume) },
+      { label: "Link", value: stale ? `stale ${age}` : `ok ${age}` },
+    ];
+  }, [telemetry, missionLifecycle]);
 
   return (
     <View style={styles.container}>
@@ -124,6 +151,16 @@ export const SystemStatusPanel: React.FC<Props> = ({
                 <Ionicons name={v.icon as any} size={18} color={v.color} />
               </View>
               <Text style={[styles.iconLabel, { color: v.color }]}>{v.label}</Text>
+            </View>
+          ))}
+        </View>
+        <View style={styles.extraGrid}>
+          {extraRows.map((row) => (
+            <View key={row.label} style={styles.extraRow}>
+              <Text style={styles.extraLabel}>{row.label}</Text>
+              <Text style={styles.extraValue} numberOfLines={1}>
+                {row.value}
+              </Text>
             </View>
           ))}
         </View>
@@ -191,6 +228,27 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
     borderColor: PATH_PLAN_GLASS.borderSubtle,
+  },
+  extraGrid: {
+    marginTop: 8,
+    gap: 4,
+  },
+  extraRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  extraLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  extraValue: {
+    color: '#E2E8F0',
+    fontSize: 10,
+    fontWeight: '600',
+    maxWidth: '70%',
+    textAlign: 'right',
   },
   iconLabel: {
     fontSize: 8,

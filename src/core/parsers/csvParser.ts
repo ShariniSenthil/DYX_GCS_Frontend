@@ -17,6 +17,7 @@ import {
   stripBOM,
   cleanCell,
   detectDelimiter,
+  splitCSVLine,
   detectCoordinateColumns,
   buildCoordinate,
   safeFloat,
@@ -63,8 +64,8 @@ export function parseCSV(
   // Detect delimiter from header line
   const delim = detectDelimiter(lines[0]);
 
-  // Parse header
-  const headers = lines[0].split(delim).map(cleanCell);
+  // Parse header using RFC 4180-compliant splitter (handles quoted commas)
+  const headers = splitCSVLine(lines[0], delim).map(cleanCell);
   const cols = detectCoordinateColumns(headers);
 
   if (cols.latCol === -1 && cols.lonCol === -1 && cols.eastCol === -1 && cols.northCol === -1) {
@@ -116,7 +117,8 @@ export function parseCSV(
 
   for (let i = 0; i < dataLines.length; i++) {
     const line = dataLines[i];
-    const cells = line.split(delim).map(cleanCell);
+    // Use RFC 4180-compliant splitter so quoted commas don't shift column indices
+    const cells = splitCSVLine(line, delim).map(cleanCell);
 
     // Skip rows that don't have enough columns
     const maxNeeded = Math.max(

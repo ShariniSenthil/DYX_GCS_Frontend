@@ -53,6 +53,8 @@ export type MissionReportExportProps = {
   missionMode?: string | null;
   onExport: () => void;
   onExportComplete?: () => void;
+  /** Fetch the canonical backend report before opening the export modal. */
+  fetchExportData?: () => Promise<MissionReportExportProps['statusMap'] | null>;
   /** `glass` — compact HUD toolbar; `default` — legacy filled button */
   variant?: 'default' | 'glass';
 };
@@ -63,36 +65,60 @@ const MissionReportExport: React.FC<MissionReportExportProps> = ({
   missionMode,
   onExport,
   onExportComplete,
+  fetchExportData,
   variant = 'default',
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isFetchingReport, setIsFetchingReport] = useState(false);
+  const [canonicalStatusMap, setCanonicalStatusMap] = useState<
+    MissionReportExportProps['statusMap'] | null
+  >(null);
   const [exportFormat, setExportFormat] = useState<'excel' | 'pdf'>('excel');
   const [exportMethod, setExportMethod] = useState<'share' | 'save'>('save');
   const [isDownloading, setIsDownloading] = useState(false);
   const [showFilenameDialog, setShowFilenameDialog] = useState(false);
   const [exportFilename, setExportFilename] = useState('mission_report');
 
+  const exportStatusMap = canonicalStatusMap ?? statusMap;
+
+  const openExportModal = async () => {
+    if (fetchExportData) {
+      setIsFetchingReport(true);
+      try {
+        const next = await fetchExportData();
+        if (next && Object.keys(next).length > 0) {
+          setCanonicalStatusMap(next);
+        }
+      } catch (error) {
+        console.warn('[MissionReportExport] Canonical report fetch failed:', error);
+      } finally {
+        setIsFetchingReport(false);
+      }
+    }
+    setIsModalOpen(true);
+  };
+
   // Calculate mission statistics
   const totalPoints = waypoints.length;
-  const completedPoints = Object.values(statusMap).filter(
+  const completedPoints = Object.values(exportStatusMap).filter(
     s => s.status === 'completed', // Only count actually completed waypoints
   ).length;
-  const pendingPoints = Object.values(statusMap).filter(
+  const pendingPoints = Object.values(exportStatusMap).filter(
     s => !s.status || s.status === 'pending', // genuinely pending only
   ).length;
   // Operator-requested skips (distinct from failures).
-  const skippedPoints = Object.values(statusMap).filter(
+  const skippedPoints = Object.values(exportStatusMap).filter(
     s => s.status === 'skipped',
   ).length;
   // Unsuccessful/interrupted terminal outcomes: failed + aborted + stopped.
-  const errorPoints = Object.values(statusMap).filter(
+  const errorPoints = Object.values(exportStatusMap).filter(
     s => isErrorWaypointStatus(s.status),
   ).length;
   const successRate =
     totalPoints > 0 ? ((completedPoints / totalPoints) * 100).toFixed(1) : '0.0';
 
   // Calculate mission timing
-  const timestamps = Object.values(statusMap)
+  const timestamps = Object.values(exportStatusMap)
     .map(s => s.timestamp)
     .filter(t => t && t !== '-');
 
@@ -153,7 +179,7 @@ const MissionReportExport: React.FC<MissionReportExportProps> = ({
     try {
       // Prepare export data
       const data: ExportData[] = waypoints.map((waypoint, idx) => {
-        const wpStatus = statusMap[waypoint.sn];
+        const wpStatus = exportStatusMap[waypoint.sn];
         const row = waypoint.row || wpStatus?.rowNo || '-';
         const block = waypoint.block || '-';
         const pile = waypoint.pile || wpStatus?.pile || '-';
@@ -193,7 +219,7 @@ const MissionReportExport: React.FC<MissionReportExportProps> = ({
       // labelled distinctly. Operator skips are listed separately below.
       const errorLocations: string[] = [];
       waypoints.forEach((wp, idx) => {
-        const wpStatus = statusMap[wp.sn];
+        const wpStatus = exportStatusMap[wp.sn];
         const s = wpStatus?.status;
         if (s && (isErrorWaypointStatus(s) || s === 'skipped')) {
           const row = wp.row || wpStatus?.rowNo || '-';
@@ -393,7 +419,10 @@ const MissionReportExport: React.FC<MissionReportExportProps> = ({
       {/* Export Button */}
       <TouchableOpacity
         style={variant === 'glass' ? styles.exportButtonGlass : styles.exportButton}
-        onPress={() => setIsModalOpen(true)}
+        onPress={() => {
+          void openExportModal();
+        }}
+        disabled={isFetchingReport}
         activeOpacity={0.7}
         accessibilityLabel="Export mission report"
       >

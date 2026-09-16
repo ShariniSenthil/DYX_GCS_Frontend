@@ -85,6 +85,16 @@ describe("getMissionStartEligibility", () => {
       }),
     ).toMatchObject({ canPressStart: false, needsPrepare: false });
   });
+
+  test("preview uploaded but not loaded cannot start", () => {
+    expect(
+      getMissionStartEligibility({
+        ...base,
+        ready: true,
+        acceptedForStart: false,
+      }),
+    ).toMatchObject({ canPressStart: false });
+  });
 });
 
 describe("start HTTP skips", () => {

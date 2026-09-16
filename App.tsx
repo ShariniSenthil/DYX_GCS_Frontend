@@ -69,6 +69,7 @@ type SessionValidationState = "checking" | "valid" | "invalid";
 function AuthGate({
   children,
   onBackToDiscovery,
+  isOfflineMode = false,
 }: {
   children: React.ReactNode;
   /**
@@ -77,11 +78,18 @@ function AuthGate({
    * is used as a forced re-authentication overlay.
    */
   onBackToDiscovery?: () => void;
+  /**
+   * When true, the operator has entered offline mode (no rover backend).
+   * Skip the token validation and login screen entirely.
+   */
+  isOfflineMode?: boolean;
 }): React.ReactElement {
   const { isAuthenticated, isLoading, session, invalidateSession } = useAuth();
   const [sessionValidation, setSessionValidation] =
-    useState<SessionValidationState>(AUTH_ENABLED ? "checking" : "valid");
-  const validatedOnceRef = useRef(!AUTH_ENABLED);
+    useState<SessionValidationState>(
+      AUTH_ENABLED && !isOfflineMode ? "checking" : "valid",
+    );
+  const validatedOnceRef = useRef(!AUTH_ENABLED || isOfflineMode);
 
   /**
    * Validate the saved token against the selected rover.
@@ -92,7 +100,7 @@ function AuthGate({
    * or Jetson startup failures never force logout and are retried later.
    */
   useEffect(() => {
-    if (!AUTH_ENABLED) {
+    if (!AUTH_ENABLED || isOfflineMode) {
       setSessionValidation("valid");
       validatedOnceRef.current = true;
       return;
@@ -177,7 +185,7 @@ function AuthGate({
     };
   }, [isLoading, session?.token, invalidateSession]);
 
-  if (!AUTH_ENABLED) {
+  if (!AUTH_ENABLED || isOfflineMode) {
     return <>{children}</>;
   }
 
@@ -222,6 +230,9 @@ function AppContent(): React.ReactElement {
 
   const [backendConfigured, setBackendConfigured] = useState(false);
   const [gcsMounted, setGcsMounted] = useState(false);
+  // True when the operator has chosen "Continue Offline" — suppresses the
+  // AuthGate login screen since there is no backend to authenticate against.
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   /**
    * Restore the previously selected rover.
@@ -282,6 +293,8 @@ function AppContent(): React.ReactElement {
    * Called after the operator selects and connects to a rover.
    */
   const handleRoverSelected = async (device: JetsonDevice): Promise<void> => {
+    const isOffline = device.id === "offline";
+    setIsOfflineMode(isOffline);
     setBackendURL(device.url);
 
     await saveBackendURL(device.url, device.ip, device.port);
@@ -346,7 +359,7 @@ function AppContent(): React.ReactElement {
           pointerEvents={showDiscovery ? "none" : "auto"}
           collapsable={false}
         >
-          <AuthGate onBackToDiscovery={handleBackToDiscovery}>
+          <AuthGate onBackToDiscovery={handleBackToDiscovery} isOfflineMode={isOfflineMode}>
             <WaypointProvider>
               <VerifiedMissionProvider>
                 <MissionStagingProvider>
