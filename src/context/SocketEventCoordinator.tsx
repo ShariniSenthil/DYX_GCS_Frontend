@@ -28,6 +28,7 @@
 import React, { useEffect } from 'react';
 import { useTelemetry } from './TelemetryContext';
 import { useMission } from './MissionContext';
+import { useMissionStaging } from './MissionStagingContext';
 import { ROVER_ENABLED } from '../config/featureFlags';
 import type { GpsSafetyAbortEvent } from '../types/px4/mission';
 
@@ -52,6 +53,15 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
   const { socket, connectionState, setMissionLifecycle } = useTelemetry();
   const { setMissionMode } = useMission();
   const { reportGpsSafetyAbort } = useTelemetry();
+  const { refreshLoadedPath } = useMissionStaging();
+
+  // Tracks the last-seen state_lower so we only push on a genuine
+  // transition into "ready", not on every mission_status tick while
+  // already ready. Push-vs-poll: the 10s background poll in
+  // MissionStagingContext stays as a fallback safety net, but this is
+  // what actually notices readiness — previously the frontend only found
+  // out a path was ready on the next poll tick, up to ~10s later.
+  const previousStateLowerRef = React.useRef<string | undefined>(undefined);
 
   // ── Legacy: Forward mission mode updates → MissionContext ─────────────────
   useEffect(() => {
@@ -60,17 +70,20 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
 
     const handleMissionModeUpdate = (event: any) => {
       if (event && typeof event === "object") {
+        const nextStateLower =
+          event.state_lower ??
+          (typeof event.state === "string" ? event.state.toLowerCase() : undefined);
         setMissionLifecycle({
           state: event.state,
-          state_lower:
-            event.state_lower ??
-            (typeof event.state === "string"
-              ? event.state.toLowerCase()
-              : undefined),
+          state_lower: nextStateLower,
           start_stage: event.start_stage ?? null,
           start_failed_stage: event.start_failed_stage ?? null,
           resume_stage: event.resume_stage ?? null,
         });
+        if (nextStateLower === 'ready' && previousStateLowerRef.current !== 'ready') {
+          void refreshLoadedPath();
+        }
+        previousStateLowerRef.current = nextStateLower;
       }
       if (event.mission_mode) {
         const backendMode = String(event.mission_mode).trim();
@@ -80,7 +93,7 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
 
     socket.on('mission_status', handleMissionModeUpdate);
     return () => { socket?.off('mission_status', handleMissionModeUpdate); };
-  }, [socket, connectionState, setMissionMode, setMissionLifecycle]);
+  }, [socket, connectionState, setMissionMode, setMissionLifecycle, refreshLoadedPath]);
 
   // ── PX4: Register new socket event listeners ──────────────────────────────
   useEffect(() => {
@@ -118,17 +131,20 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       if (!event || typeof event !== "object") {
         return;
       }
+      const nextStateLower =
+        event.state_lower ??
+        (typeof event.state === "string" ? event.state.toLowerCase() : undefined);
       setMissionLifecycle({
         state: event.state,
-        state_lower:
-          event.state_lower ??
-          (typeof event.state === "string"
-            ? event.state.toLowerCase()
-            : undefined),
+        state_lower: nextStateLower,
         start_stage: event.start_stage ?? null,
         start_failed_stage: event.start_failed_stage ?? null,
         resume_stage: event.resume_stage ?? null,
       });
+      if (nextStateLower === 'ready' && previousStateLowerRef.current !== 'ready') {
+        void refreshLoadedPath();
+      }
+      previousStateLowerRef.current = nextStateLower;
     };
 
     socket.on('gps_safety_abort', handleGpsSafetyAbort);
@@ -144,7 +160,7 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       socket?.off('safety_abort', handleSafetyAbort);
       socket?.off('mission_status', handleMissionStatus);
     };
-  }, [socket, connectionState, reportGpsSafetyAbort, setMissionLifecycle]);
+  }, [socket, connectionState, reportGpsSafetyAbort, setMissionLifecycle, refreshLoadedPath]);
 
   // This component only coordinates side-effects — just pass through children
   return React.createElement(React.Fragment, null, children);
