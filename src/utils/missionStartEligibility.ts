@@ -20,6 +20,8 @@ export const RERUN_PREPARE_STATES = [
   "STOPPED",
   "FAILED",
   "ERROR",
+  "LOADED",
+  "EMPTY",
 ] as const;
 
 export type MissionStartEligibility = {
@@ -55,6 +57,49 @@ export function isRerunPrepareState(
   return (
     normalized === "" ||
     (RERUN_PREPARE_STATES as readonly string[]).includes(normalized)
+  );
+}
+
+function hasStoredMissionIdentity(mission: {
+  mission_id?: string | null;
+  filename?: string | null;
+}): boolean {
+  return (
+    (typeof mission.mission_id === "string" &&
+      mission.mission_id.trim() !== "") ||
+    (typeof mission.filename === "string" && mission.filename.trim() !== "")
+  );
+}
+
+/**
+ * After COMPLETED the rover auto-stop may report EMPTY / loaded=false
+ * even though mission.csv is still on disk. Do not force another upload.
+ */
+export function isMissionStoredOnRover(mission: {
+  loaded?: boolean;
+  accepted_for_start?: boolean;
+  state?: string | null;
+  mission_id?: string | null;
+  filename?: string | null;
+} | null | undefined): boolean {
+  if (!mission) {
+    return false;
+  }
+
+  if (mission.loaded === true || mission.accepted_for_start === true) {
+    return true;
+  }
+
+  if (!hasStoredMissionIdentity(mission)) {
+    return false;
+  }
+
+  const state = normalizeState(mission.state);
+  return (
+    isRerunPrepareState(state) ||
+    state === "READY" ||
+    state === "PREPARING" ||
+    isActiveMissionState(state)
   );
 }
 

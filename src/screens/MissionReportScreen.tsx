@@ -105,6 +105,7 @@ import { clearVerifiedMission } from "../services/verifiedMissionService";
 import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStartEligibility,
+  isMissionStoredOnRover,
   shouldAutoResumeAfterStart,
   shouldSkipExecutionModePost,
 } from "../utils/missionStartEligibility";
@@ -805,7 +806,7 @@ export default function MissionReportScreen({
    * Controls whether the main button displays
    * NO MISSION or START.
    */
-  const hasUploadedMission = backendMission?.loaded === true;
+  const hasUploadedMission = isMissionStoredOnRover(backendMission);
 
   /**
    * AUTO and MANUAL are both autonomous OFFBOARD
@@ -2598,7 +2599,7 @@ export default function MissionReportScreen({
 
       const eligibility = getMissionStartEligibility({
         connected: connectionState === "connected",
-        loaded: latestMission?.loaded === true,
+        loaded: isMissionStoredOnRover(latestMission),
         state: latestMission?.state,
       });
 

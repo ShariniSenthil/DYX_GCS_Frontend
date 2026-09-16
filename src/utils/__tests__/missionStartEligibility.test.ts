@@ -1,5 +1,6 @@
 import {
   getMissionStartEligibility,
+  isMissionStoredOnRover,
   shouldAutoResumeAfterStart,
   shouldSkipExecutionModePost,
 } from "../missionStartEligibility";
@@ -89,6 +90,56 @@ describe("getMissionStartEligibility", () => {
     expect(
       getMissionStartEligibility({ ...base, state: "" }),
     ).toMatchObject({ canPressStart: true, needsPrepare: true });
+  });
+
+  test("EMPTY after finish still prepare-then-starts when treated as loaded", () => {
+    expect(
+      getMissionStartEligibility({
+        ...base,
+        state: "EMPTY",
+      }),
+    ).toEqual({
+      canPressStart: true,
+      needsPrepare: true,
+      reason: null,
+    });
+  });
+});
+
+describe("isMissionStoredOnRover", () => {
+  test("loaded true is stored", () => {
+    expect(isMissionStoredOnRover({ loaded: true, state: "READY" })).toBe(
+      true,
+    );
+  });
+
+  test("EMPTY with mission id is still stored after auto-stop", () => {
+    expect(
+      isMissionStoredOnRover({
+        loaded: false,
+        state: "EMPTY",
+        mission_id: "m1",
+      }),
+    ).toBe(true);
+  });
+
+  test("EMPTY without identity is not stored", () => {
+    expect(
+      isMissionStoredOnRover({
+        loaded: false,
+        state: "EMPTY",
+      }),
+    ).toBe(false);
+  });
+
+  test("COMPLETED with filename is stored even if loaded is false", () => {
+    expect(
+      isMissionStoredOnRover({
+        loaded: false,
+        state: "COMPLETED",
+        filename: "mission.csv",
+      }),
+    ).toBe(true);
   });
 });
 

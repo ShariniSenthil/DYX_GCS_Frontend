@@ -79,7 +79,7 @@ import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
 import { isOfflineMode } from "../config";
 import {
   TRAJECTORY_COPY,
-  canDrawBackendLine,
+  canLoadBackendPreview,
 } from "../utils/backendTrajectoryPreview";
 import {
   validateWaypoints,
@@ -2478,7 +2478,7 @@ export default function PathPlanScreen({
       return;
     }
 
-    if (!canDrawBackendLine(preview)) {
+    if (!canLoadBackendPreview(preview)) {
       return;
     }
 
@@ -3438,7 +3438,7 @@ export default function PathPlanScreen({
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
                   roverUploadBlockedReason={roverUploadBlockedReason}
-                  loadEnabled={canDrawBackendLine(preview)}
+                  loadEnabled={canLoadBackendPreview(preview)}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}

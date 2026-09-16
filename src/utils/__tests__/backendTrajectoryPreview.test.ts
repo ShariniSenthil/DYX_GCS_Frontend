@@ -3,6 +3,7 @@ import {
   TRAJECTORY_COPY,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
+  canLoadBackendPreview,
   filterLoadedPathPoints,
   reduceTrajectoryPreview,
   selectMapLine,
@@ -197,6 +198,80 @@ describe("backend trajectory display contract", () => {
       [80.2003, 13.1004],
       [80.2008, 13.1009],
     ]);
+  });
+
+  test("finished run keeps the last path even when loaded drops", () => {
+    const ready: TrajectoryPreviewState = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      phase: "ready",
+      points: backendPoints,
+      missionId: "m1",
+      epoch: 1,
+      liveLoaded: true,
+      liveTrajectoryReady: true,
+    };
+
+    const completed = reduceTrajectoryPreview(ready, {
+      type: "STATUS",
+      epoch: 1,
+      mission: {
+        loaded: false,
+        trajectory_ready: false,
+        state: "COMPLETED",
+        mission_id: "m1",
+      },
+    });
+
+    expect(completed.points).toEqual(backendPoints);
+    expect(completed.phase).toBe("ready");
+    expect(canDrawBackendLine(completed)).toBe(true);
+    expect(canLoadBackendPreview(completed)).toBe(false);
+
+    const emptied = reduceTrajectoryPreview(completed, {
+      type: "STATUS",
+      epoch: 1,
+      mission: {
+        loaded: false,
+        trajectory_ready: false,
+        state: "EMPTY",
+        mission_id: "m1",
+      },
+    });
+
+    expect(emptied.points).toEqual(backendPoints);
+    expect(canDrawBackendLine(emptied)).toBe(true);
+    expect(canLoadBackendPreview(emptied)).toBe(false);
+    expect(
+      selectMapLine({
+        localWaypoints: markingDots,
+        trajectoryPoints: emptied.points,
+        backendReady: true,
+      })?.source,
+    ).toBe("backend");
+  });
+
+  test("real clear with EMPTY and no mission id removes the path", () => {
+    const ready: TrajectoryPreviewState = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      phase: "ready",
+      points: backendPoints,
+      missionId: "m1",
+      epoch: 1,
+    };
+
+    const next = reduceTrajectoryPreview(ready, {
+      type: "STATUS",
+      epoch: 2,
+      mission: {
+        loaded: false,
+        trajectory_ready: false,
+        state: "EMPTY",
+      },
+    });
+
+    expect(next.points).toEqual([]);
+    expect(next.phase).toBe("idle");
+    expect(canDrawBackendLine(next)).toBe(false);
   });
 
   test("new LOAD clears the previous line immediately", () => {

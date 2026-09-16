@@ -38,6 +38,10 @@ export interface TrajectoryPreviewState {
   navigationPointCount: number;
   previewTruncated: boolean;
   epoch: number;
+  /** Last STATUS `loaded` flag. Load Mission uses this, not the retained line. */
+  liveLoaded: boolean;
+  /** Last STATUS `trajectory_ready` flag. */
+  liveTrajectoryReady: boolean;
 }
 
 export interface MissionTrajectorySnapshot {
@@ -90,6 +94,8 @@ export const EMPTY_TRAJECTORY_PREVIEW: TrajectoryPreviewState = {
   navigationPointCount: 0,
   previewTruncated: false,
   epoch: 0,
+  liveLoaded: false,
+  liveTrajectoryReady: false,
 };
 
 export type LineFeatureCollection = {
@@ -181,6 +187,75 @@ export function canDrawBackendLine(
   state: Pick<TrajectoryPreviewState, "phase" | "points">,
 ): boolean {
   return state.phase === "ready" && state.points.length >= 2;
+}
+
+/**
+ * Load Mission confirms a live rover preview. A line kept after a finished
+ * run is display-only and must not re-enable Load.
+ */
+export function canLoadBackendPreview(
+  state: Pick<
+    TrajectoryPreviewState,
+    "phase" | "points" | "liveLoaded" | "liveTrajectoryReady"
+  >,
+): boolean {
+  return (
+    canDrawBackendLine(state) &&
+    state.liveLoaded === true &&
+    state.liveTrajectoryReady === true
+  );
+}
+
+function isFinishedMissionState(state: string): boolean {
+  return (
+    state === "COMPLETED" ||
+    state === "STOPPED" ||
+    state === "LOADED" ||
+    state === "EMPTY"
+  );
+}
+
+/**
+ * After a run finishes the rover may drop `loaded` / `trajectory_ready`
+ * and even report EMPTY. Keep the last purple path until a new upload
+ * or a different mission id. A real Clear/Delete has EMPTY and no id.
+ */
+export function shouldRetainReadyPath(
+  previous: Pick<TrajectoryPreviewState, "phase" | "points" | "missionId">,
+  mission: MissionTrajectorySnapshot,
+): boolean {
+  if (!canDrawBackendLine(previous)) {
+    return false;
+  }
+
+  const state = String(mission.state ?? "").trim().toUpperCase();
+  if (state === "ERROR") {
+    return false;
+  }
+
+  const nextId = missionIdOf(mission, null);
+  if (
+    nextId != null &&
+    previous.missionId != null &&
+    nextId !== previous.missionId
+  ) {
+    return false;
+  }
+
+  if (state === "EMPTY" && mission.loaded !== true && nextId == null) {
+    return false;
+  }
+
+  if (mission.trajectory_ready === true && mission.loaded === true) {
+    return true;
+  }
+
+  return (
+    isFinishedMissionState(state) ||
+    state === "READY" ||
+    state === "IDLE" ||
+    state === "PREPARING"
+  );
 }
 
 export function buildAuthoringPreviewCollection(
@@ -371,15 +446,10 @@ export function reduceTrajectoryPreview(
       const trajectoryReady = mission.trajectory_ready === true;
       const navCount = Number(mission.navigation_point_count ?? 0);
       const safeNavCount = Number.isFinite(navCount) ? Math.max(0, navCount) : 0;
-
-      if (!loaded) {
-        return {
-          ...EMPTY_TRAJECTORY_PREVIEW,
-          phase: "idle",
-          epoch: event.epoch,
-          missionId,
-        };
-      }
+      const liveFlags = {
+        liveLoaded: loaded,
+        liveTrajectoryReady: trajectoryReady,
+      };
 
       if (state === "ERROR" || (typeof mission.error === "string" && mission.error.trim())) {
         return {
@@ -388,6 +458,29 @@ export function reduceTrajectoryPreview(
           message: failedMessage(mission),
           epoch: event.epoch,
           missionId,
+          ...liveFlags,
+        };
+      }
+
+      if (shouldRetainReadyPath(previous, mission)) {
+        return {
+          ...previous,
+          phase: "ready",
+          epoch: event.epoch,
+          missionId: missionId ?? previous.missionId,
+          navigationPointCount:
+            safeNavCount > 0 ? safeNavCount : previous.navigationPointCount,
+          ...liveFlags,
+        };
+      }
+
+      if (!loaded) {
+        return {
+          ...EMPTY_TRAJECTORY_PREVIEW,
+          phase: "idle",
+          epoch: event.epoch,
+          missionId,
+          ...liveFlags,
         };
       }
 
@@ -403,6 +496,7 @@ export function reduceTrajectoryPreview(
           epoch: event.epoch,
           missionId,
           navigationPointCount: safeNavCount,
+          ...liveFlags,
         };
       }
 
@@ -419,6 +513,7 @@ export function reduceTrajectoryPreview(
           missionId,
           navigationPointCount:
             safeNavCount > 0 ? safeNavCount : previous.navigationPointCount,
+          ...liveFlags,
         };
       }
 
@@ -429,6 +524,7 @@ export function reduceTrajectoryPreview(
         epoch: event.epoch,
         missionId,
         navigationPointCount: safeNavCount,
+        ...liveFlags,
       };
     }
 

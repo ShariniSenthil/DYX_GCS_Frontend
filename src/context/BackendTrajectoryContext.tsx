@@ -113,8 +113,23 @@ export function BackendTrajectoryProvider({
 
       const mission = response.mission;
       const trajectoryReady = mission.trajectory_ready === true;
+      const missionState = String(mission.state ?? "")
+        .trim()
+        .toUpperCase();
+      const finishedRun =
+        missionState === "COMPLETED" ||
+        missionState === "STOPPED" ||
+        missionState === "EMPTY" ||
+        missionState === "LOADED";
 
-      if (lastReadyRef.current && trajectoryReady !== true) {
+      // A finished run often drops trajectory_ready. That is not a new
+      // upload — keep the preview epoch so the last path stays drawn.
+      // New uploads already bump epoch via invalidateForUpload.
+      if (
+        lastReadyRef.current &&
+        trajectoryReady !== true &&
+        !finishedRun
+      ) {
         epochRef.current += 1;
       }
       lastReadyRef.current = trajectoryReady;
