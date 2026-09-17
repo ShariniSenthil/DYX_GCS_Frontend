@@ -32,6 +32,7 @@ import {
   BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
+  limitMapPoints,
 } from "../../utils/backendTrajectoryPreview";
 
 const DEFAULT_ZOOM = 16;
@@ -143,7 +144,7 @@ const FieldMapHostBase: React.FC = () => {
   const waypointCollection = useMemo(() => {
     return {
       type: "FeatureCollection" as const,
-      features: fallbackSnapshot.waypoints
+      features: limitMapPoints(fallbackSnapshot.waypoints)
         .map((wp, index) => {
           if (!isValidLngLat(wp.lon, wp.lat)) return null;
           const sn = typeof wp.sn === "number" ? wp.sn : index + 1;

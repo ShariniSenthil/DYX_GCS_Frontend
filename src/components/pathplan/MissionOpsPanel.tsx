@@ -13,7 +13,8 @@ type Props = {
     /** optional rover position supplied by the parent screen */
     roverPosition?: { lat: number; lon: number; alt?: number } | null;
     onUpdateWaypoints?: (waypoints: PathPlanWaypoint[]) => void;
-    onLoadMission?: () => void;
+    onLoadMission?: () => void | Promise<void>;
+    onRestoreLatestMission?: () => void | Promise<void>;
     isFullScreen?: boolean;
     onToggleFullScreen?: () => void;
     isDeleteMode?: boolean;
@@ -50,6 +51,7 @@ const MissionOpsPanel = React.memo(({
     roverPosition = null,
     onUpdateWaypoints,
     onLoadMission,
+    onRestoreLatestMission,
     isFullScreen,
     onToggleFullScreen,
     isDeleteMode = false,
@@ -67,6 +69,7 @@ const MissionOpsPanel = React.memo(({
     loadEnabled = false,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
+    const [isLoadingMission, setIsLoadingMission] = useState(false);
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [selectedExportFormat, setSelectedExportFormat] = useState<'qgc' | 'csv' | 'dxf'>('qgc');
     const [showFilenameDialog, setShowFilenameDialog] = useState(false);
@@ -218,7 +221,12 @@ const MissionOpsPanel = React.memo(({
             return;
         }
 
-        onLoadMission?.();
+        setIsLoadingMission(true);
+        try {
+            await onLoadMission?.();
+        } finally {
+            setIsLoadingMission(false);
+        }
         return;
 
         /*
@@ -366,14 +374,26 @@ const MissionOpsPanel = React.memo(({
                 style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason && loadEnabled ? styles.loadActive : styles.disabledBtn]}
                 onPress={handleLoadMission}
                 activeOpacity={0.8}
-                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled}
+                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled || isLoadingMission}
             >
                 <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
-                <Text style={styles.loadText}>Load Mission</Text>
+                <Text style={styles.loadText}>{isLoadingMission ? "Loading..." : "Load Mission"}</Text>
                 <View style={styles.loadCountBadge}>
                     <Text style={styles.loadCountText}>{waypoints.length}</Text>
                 </View>
             </TouchableOpacity>
+
+            {onRestoreLatestMission && (
+                <TouchableOpacity
+                    style={[styles.restoreButton, waypoints.length > 0 && styles.restoreButtonCompact]}
+                    onPress={() => { void onRestoreLatestMission(); }}
+                    activeOpacity={0.8}
+                    disabled={Boolean(roverUploadBlockedReason) || isLoadingMission}
+                >
+                    <MaterialCommunityIcons name="history" size={18} color="#c084fc" />
+                    <Text style={styles.restoreText}>Restore last mission</Text>
+                </TouchableOpacity>
+            )}
 
             {/* Dash Mode Config Dialog */}
             <DashConfigDialog
@@ -580,6 +600,26 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
         fontVariant: ['tabular-nums'] as any,
+    },
+    restoreButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        height: 46,
+        marginTop: 8,
+        borderColor: 'rgba(192, 132, 252, 0.35)',
+        backgroundColor: 'rgba(88, 28, 135, 0.18)',
+    },
+    restoreButtonCompact: {
+        opacity: 0.8,
+    },
+    restoreText: {
+        color: '#c084fc',
+        fontWeight: '700',
+        fontSize: 12,
     },
 
     // ── MODALS ──

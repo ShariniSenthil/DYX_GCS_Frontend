@@ -15,6 +15,7 @@ import {
   BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
+  limitMapPoints,
 } from '../../utils/backendTrajectoryPreview';
 
 export const PathPlanMapNative: React.FC<any> = ({
@@ -68,7 +69,7 @@ export const PathPlanMapNative: React.FC<any> = ({
 
   const waypointGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length === 0) return null;
-    const features = waypoints
+    const features = limitMapPoints(waypoints)
       .map((wp: any, i: number) => {
         if (!isValidLngLat(wp.lon, wp.lat)) return null;
         return {

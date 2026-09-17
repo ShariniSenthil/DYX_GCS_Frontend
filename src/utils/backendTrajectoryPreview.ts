@@ -12,7 +12,27 @@ export const AUTHORING_PREVIEW_LINE_COLOR = "#38bdf8";
 export const BACKEND_LINE_RENDER = {
   sampleDisplayPoints: true,
   maxSamplePoints: 400,
+  // Mapbox can reject very large GeoJSON geometries on mobile. Keep the
+  // rendered line bounded while the backend count remains authoritative.
+  maxLinePoints: 1500,
 } as const;
+
+export const MAX_MAP_WAYPOINTS = 2500;
+
+/** Bound point-marker GeoJSON while retaining both mission endpoints. */
+export function limitMapPoints<T>(
+  points: T[],
+  maxPoints: number = MAX_MAP_WAYPOINTS,
+): T[] {
+  if (points.length <= maxPoints) return points;
+  const count = Math.max(2, Math.floor(maxPoints));
+  return Array.from({ length: count }, (_, index) => {
+    const sourceIndex = Math.round(
+      (index * (points.length - 1)) / (count - 1),
+    );
+    return points[sourceIndex];
+  });
+}
 
 export type TrajectoryPreviewPhase =
   | "idle"
@@ -54,6 +74,7 @@ export interface MissionTrajectorySnapshot {
   rtk_reason?: string | null;
   mission_id?: string | null;
   navigation_point_count?: number | null;
+  terminal_cleanup_status?: string | null;
 }
 
 export type TrajectoryPreviewEvent =
@@ -215,10 +236,23 @@ function isFinishedMissionState(state: string): boolean {
   );
 }
 
+function isActiveMissionState(state: string): boolean {
+  return (
+    state === "RUNNING" ||
+    state === "PAUSED" ||
+    state === "WAITING_FOR_NEXT" ||
+    state === "ARMING" ||
+    state === "SWITCHING_OFFBOARD" ||
+    state === "LOADING"
+  );
+}
+
 /**
- * After a run finishes the rover may drop `loaded` / `trajectory_ready`
- * and even report EMPTY. Keep the last purple path until a new upload
- * or a different mission id. A real Clear/Delete has EMPTY and no id.
+ * The rover can briefly drop `trajectory_ready` while starting or while a
+ * mission is active. Keep the last path for the same mission during those
+ * transitions. After a run finishes the rover may also report EMPTY; keep
+ * that display-only path until a real Clear/Delete (EMPTY with no id) or a
+ * new upload/different mission id.
  */
 export function shouldRetainReadyPath(
   previous: Pick<TrajectoryPreviewState, "phase" | "points" | "missionId">,
@@ -243,7 +277,7 @@ export function shouldRetainReadyPath(
   }
 
   if (state === "EMPTY" && mission.loaded !== true && nextId == null) {
-    return false;
+    return String(mission.terminal_cleanup_status ?? "").trim().toUpperCase() === "ARCHIVED";
   }
 
   if (mission.trajectory_ready === true && mission.loaded === true) {
@@ -252,6 +286,7 @@ export function shouldRetainReadyPath(
 
   return (
     isFinishedMissionState(state) ||
+    isActiveMissionState(state) ||
     state === "READY" ||
     state === "IDLE" ||
     state === "PREPARING"
@@ -307,6 +342,7 @@ export function selectMapLine(args: {
   const collection = buildBackendTrajectoryCollection(args.trajectoryPoints, {
     sampleDisplayPoints: BACKEND_LINE_RENDER.sampleDisplayPoints,
     maxSamplePoints: BACKEND_LINE_RENDER.maxSamplePoints,
+    maxLinePoints: BACKEND_LINE_RENDER.maxLinePoints,
   });
   if (!collection) {
     return null;
@@ -316,9 +352,13 @@ export function selectMapLine(args: {
 
 export function buildBackendTrajectoryCollection(
   points: TrajectoryPreviewPoint[],
-  options?: { sampleDisplayPoints?: boolean; maxSamplePoints?: number },
+  options?: {
+    sampleDisplayPoints?: boolean;
+    maxSamplePoints?: number;
+    maxLinePoints?: number;
+  },
 ): LineFeatureCollection | null {
-  const coordinates = points
+  const allCoordinates = points
     .filter((point) =>
       isDisplayableLatLon(point.latitude, point.longitude),
     )
@@ -327,9 +367,19 @@ export function buildBackendTrajectoryCollection(
         [point.longitude, point.latitude] as [number, number],
     );
 
-  if (coordinates.length < 2) {
+  if (allCoordinates.length < 2) {
     return null;
   }
+
+  const maxLinePoints = Math.max(2, options?.maxLinePoints ?? 1500);
+  const coordinates = allCoordinates.length <= maxLinePoints
+    ? allCoordinates
+    : Array.from({ length: maxLinePoints }, (_, index) => {
+        const sourceIndex = Math.round(
+          (index * (allCoordinates.length - 1)) / (maxLinePoints - 1),
+        );
+        return allCoordinates[sourceIndex];
+      });
 
   const features: LineFeatureCollection["features"] = [
     {

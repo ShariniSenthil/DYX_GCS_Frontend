@@ -2,9 +2,9 @@
  * VerifiedMissionContext — Lightweight state for the loaded 4-wheel mission.
  *
  * Owns:
- *   missionId    — server-assigned ID from uploadVerifiedMission
+ *   missionId    — server-assigned ID from the canonical mission upload
  *   missionName  — display name
- *   totalTargets — confirmed count from getVerifiedMission
+ *   totalTargets — confirmed count from canonical mission status/history
  *   isLoaded     — true only after BOTH upload AND backend confirmation succeed
  *   reconfirmState — 'idle' | 'reconfirming' | 'error' (hydration status)
  *
@@ -16,14 +16,10 @@
  *
  * Persistence / hydration:
  *   missionId is written to AsyncStorage so it survives cold restarts and tab
- *   switches. On mount, getVerifiedMission(id) re-confirms the mission still
- *   exists on the server.
+ *   switches. On mount, canonical mission status/history re-confirms it.
  *
- *   The persisted id is cleared ONLY on a confirmed backend 404 (NotFoundError).
  *   Transient failures (network unavailable, timeout, auth-not-ready, temporary
- *   5xx) PRESERVE the stored mission and surface reconfirmState='error' so the
- *   operator can retry — they never silently drop a valid mission. isLoaded is
- *   never set true until a GET confirmation actually succeeds.
+ *   5xx) preserve the stored mission and surface reconfirmState='error'.
  */
 
 import React, {
@@ -36,8 +32,7 @@ import React, {
   ReactNode,
 } from 'react';
 import PersistentStorage from '../services/PersistentStorage';
-import { getVerifiedMission } from '../services/verifiedMissionService';
-import { NotFoundError } from '../services/apiError';
+import { getMissionHistory, getMissionStatus } from '../services/missionApi';
 
 // ── Context shape ─────────────────────────────────────────────────────────────
 
@@ -103,38 +98,45 @@ export function VerifiedMissionProvider({
       if (!cancelled && mountedRef.current) setReconfirmState('reconfirming');
 
       try {
-        const confirmed = await getVerifiedMission(savedId);
+        const status = await getMissionStatus();
         if (cancelled || !mountedRef.current) return;
 
-        setMissionId(confirmed.mission_id);
-        setMissionName(confirmed.mission_name ?? savedName ?? null);
-        setTotalTargets(confirmed.total_targets);
-        setIsLoaded(true);
-        setReconfirmState('idle');
-        console.log('[VerifiedMissionContext] Re-confirmed mission:', confirmed.mission_id);
-      } catch (err) {
-        if (cancelled || !mountedRef.current) return;
+        const active = status?.mission;
+        if (active?.loaded === true && active.mission_id === savedId) {
+          setMissionId(savedId);
+          setMissionName(savedName ?? null);
+          setTotalTargets(Number(active.total_points ?? 0));
+          setIsLoaded(true);
+          setReconfirmState('idle');
+          return;
+        }
 
-        if (err instanceof NotFoundError) {
-          // Confirmed gone on the server — clear the stale id.
-          console.log('[VerifiedMissionContext] Mission 404 — clearing stale mission:', savedId);
-          await PersistentStorage.clearVerifiedMissionState();
-          if (cancelled || !mountedRef.current) return;
-          setMissionId(null);
-          setMissionName(null);
-          setTotalTargets(null);
+        const history = await getMissionHistory();
+        const archived = history.missions?.find((entry) => entry.mission_id === savedId);
+        if (archived) {
+          // The completed mission is still available for Restore by ID, but it
+          // is not active until the operator restores it from Path Plan.
+          setMissionId(savedId);
+          setMissionName(archived.original_filename ?? savedName ?? null);
+          setTotalTargets(Number(archived.total_points ?? 0));
           setIsLoaded(false);
           setReconfirmState('idle');
-        } else {
-          // Transient failure (network / timeout / auth-not-ready / 5xx).
-          // PRESERVE the stored mission; do NOT set isLoaded. Surface error.
-          console.warn(
-            '[VerifiedMissionContext] Re-confirm failed (transient); preserving stored mission:',
-            err,
-          );
-          setIsLoaded(false);
-          setReconfirmState('error');
+          return;
         }
+
+        await PersistentStorage.clearVerifiedMissionState();
+        setMissionId(null);
+        setMissionName(null);
+        setTotalTargets(null);
+        setIsLoaded(false);
+        setReconfirmState('idle');
+      } catch (err) {
+        if (cancelled || !mountedRef.current) return;
+        // Transient failure (network / timeout / auth-not-ready / 5xx).
+        // PRESERVE the stored mission; do NOT set isLoaded. Surface error.
+        console.warn('[VerifiedMissionContext] Re-confirm failed; preserving stored mission:', err);
+        setIsLoaded(false);
+        setReconfirmState('error');
       }
     };
 

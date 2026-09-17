@@ -101,7 +101,10 @@ import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
   loadMission,
+  getMissionHistory,
+  restoreMission,
   type MissionExtensionMode,
+  type MissionControlResponse,
 } from "../services/missionApi";
 import {
   importDXFAsEntities,
@@ -378,7 +381,15 @@ interface PathPlanScreenProps {
   setIsStatisticsVisible?: (val: boolean) => void;
   isBottomTableVisible?: boolean;
   setIsBottomTableVisible?: (val: boolean) => void;
+  /** Called after the backend confirms Load Mission successfully. */
+  onLoadMissionSuccess?: () => void;
 }
+
+type MissionControlResponseWithRestore = MissionControlResponse & {
+  restore?: {
+    points?: Array<Record<string, unknown>>;
+  };
+};
 
 export default function PathPlanScreen({
   isVisible = true,
@@ -391,6 +402,7 @@ export default function PathPlanScreen({
   setIsStatisticsVisible: propSetIsStatisticsVisible,
   isBottomTableVisible: propIsBottomTableVisible,
   setIsBottomTableVisible: propSetIsBottomTableVisible,
+  onLoadMissionSuccess,
 }: PathPlanScreenProps) {
   const {
     telemetry,
@@ -429,6 +441,7 @@ export default function PathPlanScreen({
   const mountedRef = useRef(true);
   // Guard to prevent re-entrant upload handling causing recursive state updates
   const isUploadingRef = useRef(false);
+  const isRestoringMissionRef = useRef(false);
   // Track ongoing async operations for proper cleanup
   const pendingOperationsRef = useRef<Set<Promise<any>>>(new Set());
   // Ref to track export operations
@@ -2468,7 +2481,7 @@ export default function PathPlanScreen({
     askExtensionAndUpload(sanitized);
   }
 
-  function handleLoadMissionToController(): void {
+  async function handleLoadMissionToController(): Promise<void> {
     if (roverUploadBlockedReason) {
       Alert.alert("Connect Rover", roverUploadBlockedReason);
       return;
@@ -2482,21 +2495,60 @@ export default function PathPlanScreen({
       return;
     }
 
-    void (async () => {
-      try {
-        const response = await loadMission();
-        if (!response.success) {
-          throw new Error(
-            response.message || "The rover rejected Load Mission.",
-          );
-        }
-        void refreshNow();
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        Alert.alert("Load Failed", message);
+    try {
+      const response = await loadMission();
+      if (!response.success) {
+        throw new Error(response.message || "The rover rejected Load Mission.");
       }
-    })();
+      onLoadMissionSuccess?.();
+      // Navigation is tied to the successful Load response. A status refresh
+      // is best-effort and must not make a confirmed load look like a failure.
+      void refreshNow().catch((refreshError) =>
+        console.warn("[PathPlan] Mission status refresh after Load failed:", refreshError),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      Alert.alert("Load Failed", message);
+    }
+  }
+
+  async function handleRestoreLatestMission(): Promise<void> {
+    if (isRestoringMissionRef.current) return;
+    isRestoringMissionRef.current = true;
+    if (roverUploadBlockedReason) {
+      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      isRestoringMissionRef.current = false;
+      return;
+    }
+    try {
+      const history = await getMissionHistory();
+      const latest = history.missions?.[0];
+      if (!latest?.mission_id) {
+        Alert.alert("No Completed Mission", "There is no archived mission to restore.");
+        return;
+      }
+      invalidateForUpload();
+      const response = await restoreMission(latest.mission_id);
+      const restorePayload = (response as MissionControlResponseWithRestore).restore;
+      const restoredPoints = restorePayload?.points;
+      if (Array.isArray(restoredPoints) && restoredPoints.length >= 2) {
+        updateWaypoints(
+          restoredPoints.map((point: any, index: number) => ({
+            id: Number(point.point_index ?? index) + 1,
+            lat: Number(point.latitude),
+            lon: Number(point.longitude),
+            alt: 0,
+            pile: String(index + 1),
+          })),
+        );
+      }
+      await refreshNow();
+      Alert.alert("Mission Restored", "Review the generated path, then tap Load Mission and Start.");
+    } catch (error) {
+      Alert.alert("Restore Failed", error instanceof Error ? error.message : String(error));
+    } finally {
+      isRestoringMissionRef.current = false;
+    }
   }
 
   const handleRequestUpload = async () => {
@@ -3437,6 +3489,7 @@ export default function PathPlanScreen({
                   }
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
+                  onRestoreLatestMission={handleRestoreLatestMission}
                   roverUploadBlockedReason={roverUploadBlockedReason}
                   loadEnabled={canLoadBackendPreview(preview)}
                   onManualControlOpen={handleOpenManualControl}

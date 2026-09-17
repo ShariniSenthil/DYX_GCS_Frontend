@@ -12,6 +12,7 @@ import {
 import { MapBottomControlsBar } from "../shared/MapBottomControlsBar";
 import type { Waypoint } from "./types";
 import type { LoadedPathPoint } from "../../services/missionApi";
+import { limitMapPoints } from "../../utils/backendTrajectoryPreview";
 
 interface Props {
   roverLat?: number;
@@ -638,7 +639,7 @@ const MissionMapBase: React.FC<Props> = ({
    * path and rover navigation share the same projection authority.
    */
   const generatedTrajectoryGeoJson = useMemo(() => {
-    const coordinates = trajectoryPoints
+    const validPoints = trajectoryPoints
       .filter(
         (
           point,
@@ -655,7 +656,7 @@ const MissionMapBase: React.FC<Props> = ({
           point.longitude >= -180 &&
           point.longitude <= 180,
       )
-      .map(
+    const coordinates = limitMapPoints(validPoints, 1500).map(
         (point) =>
           [point.longitude, point.latitude] as [number, number],
       );
@@ -738,7 +739,8 @@ const MissionMapBase: React.FC<Props> = ({
       return;
     }
 
-    const waypointsArray = waypoints.map((wp, idx) => {
+    const displayedWaypoints = limitMapPoints(waypoints);
+    const waypointsArray = displayedWaypoints.map((wp, idx) => {
       const wpStatus = statusMap?.[wp.sn];
       const isCompleted =
         wpStatus?.status === "completed" || wpStatus?.status === "skipped";
@@ -752,7 +754,7 @@ const MissionMapBase: React.FC<Props> = ({
         pile: wp.pile,
         isActive: idx === activeWaypointIndexRef.current,
         isStart: idx === 0,
-        isEnd: idx === waypoints.length - 1,
+        isEnd: idx === displayedWaypoints.length - 1,
         isCompleted,
       };
     });
@@ -767,7 +769,7 @@ const MissionMapBase: React.FC<Props> = ({
       })();
       true;
     `);
-    console.log(`[MissionMap] Injected ${waypoints.length} waypoints`);
+    console.log(`[MissionMap] Injected ${displayedWaypoints.length} waypoints`);
   }, [mapReady, waypoints]); // activeWaypointIndex handled by the dedicated setActiveWaypoint effect below
 
   // Pause/resume Mapbox rendering when visibility changes

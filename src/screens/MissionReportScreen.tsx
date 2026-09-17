@@ -97,11 +97,9 @@ import {
   mergeLegacyStatusMap,
   pointIndexToSn,
 } from "../adapters/px4PointStatusBridge";
-import { useVerifiedMissionUpload } from "../hooks/useVerifiedMissionUpload";
 import { useVerifiedMissionContext } from "../context/VerifiedMissionContext";
 import { useVerifiedMissionProgress } from "../hooks/useVerifiedMissionProgress";
 import { verifiedProgressToLegacy } from "../adapters/verifiedTargetBridge";
-import { clearVerifiedMission } from "../services/verifiedMissionService";
 import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStartEligibility,
@@ -122,6 +120,7 @@ import {
 import {
   getMissionStatus,
   getMissionReport,
+  uploadMissionCsv,
   setMissionExecutionMode,
   prepareMission,
   startMission,
@@ -130,10 +129,12 @@ import {
   nextMissionPoint,
   skipMissionPoint,
   stopMission,
+  clearMission,
   type MissionRuntimeState,
   type CanonicalMissionReport,
   type RawGnssSurveySnapshot,
 } from "../services/missionApi";
+import * as FileSystem from "expo-file-system/legacy";
 
 import {
   projectBackendMissionReport,
@@ -227,7 +228,6 @@ export default function MissionReportScreen({
 
   // 4WD verified mission hooks
   const verifiedCtx = useVerifiedMissionContext();
-  const { upload: uploadVerifiedWaypoints } = useVerifiedMissionUpload();
   const {
     verifiedProgressMap,
 
@@ -1744,35 +1744,46 @@ export default function MissionReportScreen({
     setShowWaypointPreviewDialog(true);
   };
 
-  // Confirm and upload mission to controller (verified 4WD flow)
+  // Confirm and upload through the canonical backend mission flow.
   const handleConfirmUpload = async () => {
     setShowWaypointPreviewDialog(false);
     setIsUploadingMission(true);
     invalidateForUpload();
 
     try {
-      console.log("[MissionReportScreen] Uploading verified mission...");
-
-      // Map Waypoint[] → PathPlanWaypoint[] for the verified upload hook.
-      const pathPlanWps = waypoints.map((wp) => ({
-        id: wp.sn,
-        lat: wp.lat,
-        lon: wp.lon,
-        alt: wp.alt,
-        row: wp.row,
-        block: wp.block,
-        pile: wp.pile,
-        distance: wp.distance,
-        mark: wp.mark,
-      }));
-
-      const result = await uploadVerifiedWaypoints(pathPlanWps, {
-        requireMark: true, // confirmed: 4WD_SERVER requires mark on every waypoint
+      console.log("[MissionReportScreen] Uploading mission through the canonical CSV endpoint...");
+      const csvEscape = (value: unknown) => {
+        const text = String(value ?? "");
+        return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const csv = [
+        "latitude,longitude,alt,block,row,pile",
+        ...waypoints.map((wp) =>
+          [wp.lat, wp.lon, wp.alt, wp.block, wp.row, wp.pile]
+            .map(csvEscape)
+            .join(","),
+        ),
+        "",
+      ].join("\n");
+      const cacheDirectory = FileSystem.cacheDirectory;
+      if (!cacheDirectory) throw new Error("Temporary storage is unavailable.");
+      const temporaryFileUri = `${cacheDirectory}mission-progress-${Date.now()}.csv`;
+      await FileSystem.writeAsStringAsync(temporaryFileUri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
       });
+      let result: Awaited<ReturnType<typeof uploadMissionCsv>>;
+      try {
+        result = await uploadMissionCsv({
+          file: { uri: temporaryFileUri, name: "mission.csv", mimeType: "text/csv", lastModified: Date.now() },
+          extensionMode: "DISABLE",
+        });
+      } finally {
+        await FileSystem.deleteAsync(temporaryFileUri, { idempotent: true }).catch(() => undefined);
+      }
 
       if (result.success) {
         console.log("[MissionReportScreen] Mission uploaded successfully");
-        // PersistentStorage clearing is handled inside useVerifiedMissionUpload.
+        // The canonical mission is now owned by MissionContext/backend status.
         setIsMissionActive(false);
         setStatusMap({});
         setMissionStartTime(null);
@@ -2354,11 +2365,14 @@ export default function MissionReportScreen({
   // Get mission data for display (current or previous) — memoized to avoid
   // creating new object references on every telemetry-driven re-render
   const displayData = useMemo(() => {
-    // If we have a completed previous mission and no current mission activity, show previous
+    // If there is no current mission data, keep the completed mission available
+    // for report/export review. Once new waypoints are loaded, they are the
+    // authoritative mission and must replace the previous display immediately.
     if (
       previousMissionData &&
       !isMissionActive &&
-      Object.keys(statusMap).length === 0
+      Object.keys(statusMap).length === 0 &&
+      waypoints.length === 0
     ) {
       return {
         waypoints: previousMissionData.waypoints,
@@ -2756,7 +2770,7 @@ export default function MissionReportScreen({
       }
 
       logMissionStartTiming(attemptId, "start_post_sent");
-      const response = await startMission();
+      const response = await startMission(latestMission?.mission_id);
       logMissionStartTiming(
         attemptId,
         "start_post_returned",
@@ -3082,8 +3096,8 @@ export default function MissionReportScreen({
 
   const handleClearMission = async () => {
     try {
-      console.log("[MissionReportScreen] Clearing verified mission...");
-      await clearVerifiedMission();
+      console.log("[MissionReportScreen] Clearing mission...");
+      await clearMission();
       verifiedCtx.clearLoadedMission();
       resetVerifiedProgress();
       showNotification("success", "Cleared", "Mission cleared from controller");

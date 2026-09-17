@@ -2,6 +2,7 @@ import {
   EMPTY_TRAJECTORY_PREVIEW,
   TRAJECTORY_COPY,
   buildBackendTrajectoryCollection,
+  limitMapPoints,
   canDrawBackendLine,
   canLoadBackendPreview,
   filterLoadedPathPoints,
@@ -250,6 +251,53 @@ describe("backend trajectory display contract", () => {
     ).toBe("backend");
   });
 
+  test("large backend previews are bounded for mobile map rendering and keep endpoints", () => {
+    const manyPoints = Array.from({ length: 5000 }, (_, index) => ({
+      latitude: 13 + index * 0.000001,
+      longitude: 80 + index * 0.000001,
+    }));
+    const collection = buildBackendTrajectoryCollection(manyPoints, {
+      sampleDisplayPoints: true,
+      maxSamplePoints: 40,
+      maxLinePoints: 120,
+    });
+    const line = collection?.features.find((feature) => feature.properties.kind === "line");
+    expect(line?.geometry.type).toBe("LineString");
+    if (line?.geometry.type === "LineString") {
+      expect(line.geometry.coordinates).toHaveLength(120);
+      expect(line.geometry.coordinates[0]).toEqual([80, 13]);
+      expect(line.geometry.coordinates[119]).toEqual([80.004999, 13.004999]);
+    }
+    expect(limitMapPoints(Array.from({ length: 5000 }, (_, index) => index), 100)).toHaveLength(100);
+  });
+
+  test("starting the same mission keeps the last path during RUNNING transition", () => {
+    const ready: TrajectoryPreviewState = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      phase: "ready",
+      points: backendPoints,
+      missionId: "m1",
+      epoch: 1,
+      liveLoaded: true,
+      liveTrajectoryReady: true,
+    };
+
+    const running = reduceTrajectoryPreview(ready, {
+      type: "STATUS",
+      epoch: 2,
+      mission: {
+        loaded: true,
+        trajectory_ready: false,
+        state: "RUNNING",
+        mission_id: "m1",
+      },
+    });
+
+    expect(running.points).toEqual(backendPoints);
+    expect(running.phase).toBe("ready");
+    expect(canDrawBackendLine(running)).toBe(true);
+  });
+
   test("real clear with EMPTY and no mission id removes the path", () => {
     const ready: TrajectoryPreviewState = {
       ...EMPTY_TRAJECTORY_PREVIEW,
@@ -272,6 +320,28 @@ describe("backend trajectory display contract", () => {
     expect(next.points).toEqual([]);
     expect(next.phase).toBe("idle");
     expect(canDrawBackendLine(next)).toBe(false);
+  });
+
+  test("archived completion keeps the final display path after active cleanup", () => {
+    const ready: TrajectoryPreviewState = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      phase: "ready",
+      points: backendPoints,
+      missionId: "m1",
+      epoch: 1,
+    };
+    const archived = reduceTrajectoryPreview(ready, {
+      type: "STATUS",
+      epoch: 1,
+      mission: {
+        loaded: false,
+        trajectory_ready: false,
+        state: "EMPTY",
+        terminal_cleanup_status: "ARCHIVED",
+      },
+    });
+    expect(archived.points).toEqual(backendPoints);
+    expect(archived.phase).toBe("ready");
   });
 
   test("new LOAD clears the previous line immediately", () => {

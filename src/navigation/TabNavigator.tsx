@@ -173,6 +173,7 @@ function TabNavigatorInner() {
                   setIsStatisticsVisible={setIsStatisticsVisible}
                   isBottomTableVisible={isBottomTableVisible}
                   setIsBottomTableVisible={setIsBottomTableVisible}
+                  onLoadMissionSuccess={() => handleTabChange("Mission Progress")}
                 />
               </ErrorBoundary>
             </View>

@@ -134,6 +134,8 @@ export interface MissionRuntimeState {
 
   message?: string;
   error?: string | null;
+  terminal_cleanup_status?: string | null;
+  terminal_cleanup_error?: string | null;
 
   pause_reason?: string | null;
 resume_available?: boolean;
@@ -230,6 +232,7 @@ export interface MissionControlResponse {
     | "skip-point"
     | "stop"
     | "clear"
+    | "restore"
     | string;
 
   message?: string;
@@ -241,6 +244,23 @@ export interface MissionControlResponse {
 export interface MissionStatusResponse {
   success: boolean;
   mission: MissionRuntimeState;
+}
+
+export interface MissionHistoryEntry {
+  mission_id: string;
+  original_filename?: string;
+  coordinate_mode?: string;
+  extension_mode?: MissionExtensionMode | string;
+  dummy_point_distance_m?: number | null;
+  total_points?: number;
+  uploaded_at?: string | null;
+  archived_at?: string | null;
+  checksum_sha256?: string;
+}
+
+export interface MissionHistoryResponse {
+  success: boolean;
+  missions: MissionHistoryEntry[];
 }
 
 // ── Canonical Mission Report ──────────────────────────────────────────────────
@@ -576,12 +596,18 @@ export async function uploadMissionCsv(
   );
 }
 
-export async function loadMission(): Promise<MissionControlResponse> {
+export async function loadMission(missionId?: string): Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.LOAD,
-    undefined,
+    missionId ? { mission_id: missionId } : undefined,
     { timeoutMs: 15_000 },
   );
+}
+
+export async function restoreMission(missionId: string): Promise<MissionControlResponse> {
+  const id = missionId.trim();
+  if (!id) throw new Error("A mission ID is required to restore a mission.");
+  return apiPost<MissionControlResponse>(PX4_MISSION.RESTORE, { mission_id: id }, { timeoutMs: 60_000 });
 }
 
 // ── Mission information ───────────────────────────────────────────────────────
@@ -591,6 +617,10 @@ Promise<MissionStatusResponse> {
   return apiGet<MissionStatusResponse>(
     PX4_MISSION.STATUS,
   );
+}
+
+export async function getMissionHistory(): Promise<MissionHistoryResponse> {
+  return apiGet<MissionHistoryResponse>(PX4_MISSION.HISTORY);
 }
 /**
  * Canonical Mission Report.
@@ -628,10 +658,11 @@ export function getMissionDownloadUrl(
 
 // ── Mission controls ──────────────────────────────────────────────────────────
 
-export async function prepareMission():
+export async function prepareMission(missionId?: string):
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.PREPARE,
+    missionId ? { mission_id: missionId } : undefined,
   );
 }
 
@@ -655,11 +686,11 @@ export async function setMissionExecutionMode(
   );
 }
 
-export async function startMission():
+export async function startMission(missionId?: string):
 Promise<MissionControlResponse> {
   return apiPost<MissionControlResponse>(
     PX4_MISSION.START,
-    undefined,
+    missionId ? { mission_id: missionId } : undefined,
     { timeoutMs: 35_000 },
   );
 }
@@ -730,8 +761,10 @@ Promise<DeleteMissionResponse> {
 export default {
   uploadMissionCsv,
   loadMission,
+  restoreMission,
 
   getMissionStatus,
+  getMissionHistory,
   getMissionReport,
   getLoadedMissionPath,
   getMissionDownloadUrl,

@@ -61,11 +61,15 @@ export const PX4_MISSION = {
   // Confirm the generated preview so START may be enabled. No file.
   LOAD: "/api/mission/load",
 
+  // Restore a completed mission from the backend archive.
+  RESTORE: "/api/mission/restore",
+
   // Recalculate trajectory from the stored mission.csv.
   PREPARE: "/api/mission/prepare",
 
   // Mission information.
   STATUS: "/api/mission/status",
+  HISTORY: "/api/mission/history",
   REPORT: "/api/mission/report",
   REPORT_DOWNLOAD: "/api/mission/report/download",
   LOADED_PATH: "/api/mission/loaded-path",

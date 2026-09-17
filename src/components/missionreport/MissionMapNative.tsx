@@ -26,6 +26,7 @@ import {
   BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
+  limitMapPoints,
 } from "../../utils/backendTrajectoryPreview";
 
 interface Props {
@@ -97,7 +98,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
   const waypointCollection = useMemo(() => {
     return {
       type: "FeatureCollection" as const,
-      features: waypoints
+      features: limitMapPoints(waypoints)
         .map((wp, index) => {
           if (!isValidLngLat(wp.lon, wp.lat)) return null;
           const status = statusMap?.[wp.sn]?.status;
