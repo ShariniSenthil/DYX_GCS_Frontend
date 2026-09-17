@@ -267,7 +267,7 @@ const MissionMapBase: React.FC<Props> = ({
 
       // Waypoint points — native GL circle layer with data-driven color.
             // Generated backend trajectory.
-      // Purple line and purple dots are drawn below original marking points.
+      // The generated purple line is drawn below the original marking points.
       if (!map.getSource('generated-trajectory')) {
         map.addSource('generated-trajectory', {
           type: 'geojson',
@@ -304,60 +304,11 @@ const MissionMapBase: React.FC<Props> = ({
             24,
             5
           ],
-          'line-opacity': 1
+          'line-opacity': 0.96,
+          'line-blur': 0.15
         }
         });
       }
-
-      if (!map.getLayer('generated-trajectory-points')) {
-  map.addLayer({
-    id: 'generated-trajectory-points',
-    type: 'circle',
-    source: 'generated-trajectory',
-    filter: [
-      '==',
-      ['get', 'kind'],
-      'point'
-    ],
-    paint: {
-      'circle-color': '#F0ABFC',
-
-      /**
-       * At low zoom, generated points are extremely close together.
-       * Keep the dots small so they do not form a wavy bead chain.
-       */
-      'circle-radius': [
-        'interpolate',
-        ['linear'],
-        ['zoom'],
-        15,
-        0.5,
-        18,
-        1,
-        21,
-        2,
-        24,
-        3
-      ],
-
-      'circle-opacity': [
-        'interpolate',
-        ['linear'],
-        ['zoom'],
-        15,
-        0.25,
-        18,
-        0.5,
-        20,
-        0.85,
-        22,
-        1
-      ],
-
-      'circle-stroke-width': 0
-    }
-  });
-}
 
       // completed (feature-state) > active (feature-state) > start > end > normal.
       if (!map.getSource('mission-points')) {
@@ -675,45 +626,6 @@ const MissionMapBase: React.FC<Props> = ({
         },
       });
     }
-
-    /**
-     * Add every generated interpolation point as a purple dot.
-     * Backend preview is already limited, so this remains GPU-rendered
-     * through one GeoJSON source instead of thousands of React markers.
-     */
-    /**
-     * Keep the full LineString, but do not draw a large circle
-     * for every 50 mm interpolation point.
-     *
-     * Maximum visible dots: approximately 400.
-     * This changes only the display, not the rover trajectory.
-     */
-    const visiblePointStep = Math.max(1, Math.ceil(coordinates.length / 400));
-
-    coordinates.forEach((coordinate, index) => {
-      const isFirstPoint = index === 0;
-
-      const isLastPoint = index === coordinates.length - 1;
-
-      const shouldDisplay =
-        isFirstPoint || isLastPoint || index % visiblePointStep === 0;
-
-      if (!shouldDisplay) {
-        return;
-      }
-
-      features.push({
-        type: "Feature",
-        properties: {
-          kind: "point",
-          index,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: coordinate,
-        },
-      });
-    });
 
     return {
       type: "FeatureCollection" as const,

@@ -22,7 +22,6 @@ import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
 import {
   BACKEND_LINE_RENDER,
-  BACKEND_TRAJECTORY_DOT_COLOR,
   BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
@@ -235,43 +234,10 @@ const MissionMapNativeBase: React.FC<Props> = ({
                     24,
                     5,
                   ],
-                  lineOpacity: 1,
-                } as any
-              }
-            />
-            <CircleLayer
-              id="generated-trajectory-points"
-              filter={["==", ["get", "kind"], "point"] as any}
-              style={
-                {
-                  circleColor: BACKEND_TRAJECTORY_DOT_COLOR,
-                  circleRadius: [
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0.5,
-                    18,
-                    1,
-                    21,
-                    2,
-                    24,
-                    3,
-                  ],
-                  circleOpacity: [
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    0.25,
-                    18,
-                    0.5,
-                    20,
-                    0.85,
-                    22,
-                    1,
-                  ],
-                  circleStrokeWidth: 0,
+                  lineOpacity: 0.96,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  lineBlur: 0.15,
                 } as any
               }
             />

@@ -14,7 +14,6 @@ type Props = {
     roverPosition?: { lat: number; lon: number; alt?: number } | null;
     onUpdateWaypoints?: (waypoints: PathPlanWaypoint[]) => void;
     onLoadMission?: () => void | Promise<void>;
-    onRestoreLatestMission?: () => void | Promise<void>;
     isFullScreen?: boolean;
     onToggleFullScreen?: () => void;
     isDeleteMode?: boolean;
@@ -51,7 +50,6 @@ const MissionOpsPanel = React.memo(({
     roverPosition = null,
     onUpdateWaypoints,
     onLoadMission,
-    onRestoreLatestMission,
     isFullScreen,
     onToggleFullScreen,
     isDeleteMode = false,
@@ -383,18 +381,6 @@ const MissionOpsPanel = React.memo(({
                 </View>
             </TouchableOpacity>
 
-            {onRestoreLatestMission && (
-                <TouchableOpacity
-                    style={[styles.restoreButton, waypoints.length > 0 && styles.restoreButtonCompact]}
-                    onPress={() => { void onRestoreLatestMission(); }}
-                    activeOpacity={0.8}
-                    disabled={Boolean(roverUploadBlockedReason) || isLoadingMission}
-                >
-                    <MaterialCommunityIcons name="history" size={18} color="#c084fc" />
-                    <Text style={styles.restoreText}>Restore last mission</Text>
-                </TouchableOpacity>
-            )}
-
             {/* Dash Mode Config Dialog */}
             <DashConfigDialog
                 visible={showDashConfigDialog}
@@ -600,26 +586,6 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
         fontVariant: ['tabular-nums'] as any,
-    },
-    restoreButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        borderRadius: 8,
-        borderWidth: 1,
-        height: 46,
-        marginTop: 8,
-        borderColor: 'rgba(192, 132, 252, 0.35)',
-        backgroundColor: 'rgba(88, 28, 135, 0.18)',
-    },
-    restoreButtonCompact: {
-        opacity: 0.8,
-    },
-    restoreText: {
-        color: '#c084fc',
-        fontWeight: '700',
-        fontSize: 12,
     },
 
     // ── MODALS ──

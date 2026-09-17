@@ -2,6 +2,7 @@ import {
   EMPTY_TRAJECTORY_PREVIEW,
   TRAJECTORY_COPY,
   buildBackendTrajectoryCollection,
+  BACKEND_LINE_RENDER,
   limitMapPoints,
   canDrawBackendLine,
   canLoadBackendPreview,
@@ -249,6 +250,16 @@ describe("backend trajectory display contract", () => {
         backendReady: true,
       })?.source,
     ).toBe("backend");
+  });
+
+  test("default map rendering omits interpolation point markers", () => {
+    const collection = buildBackendTrajectoryCollection(
+      backendPoints,
+      BACKEND_LINE_RENDER,
+    );
+    expect(collection?.features.map((feature) => feature.properties.kind)).toEqual([
+      "line",
+    ]);
   });
 
   test("large backend previews are bounded for mobile map rendering and keep endpoints", () => {

@@ -24,6 +24,8 @@ const TTS_LANGUAGE_STORAGE_KEY = 'tts_language';
 export interface WaypointContextValue {
   // Waypoint state
   missionWaypoints: Waypoint[];
+  /** True after persisted waypoint state has been read (or failed safely). */
+  isHydrated: boolean;
   setMissionWaypoints: (waypoints: Waypoint[]) => void;
   clearMissionWaypoints: () => void;
 
@@ -50,6 +52,7 @@ interface WaypointProviderProps {
 
 export function WaypointProvider({ children }: WaypointProviderProps): React.ReactElement {
   const [missionWaypoints, setMissionWaypointsState] = useState<Waypoint[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [missionMode, setMissionModeState] = useState<string>('DGPS Mark');
   const [ttsLanguage, setTTSLanguageState] = useState<string>('en');
   const [showUploadPreview, setShowUploadPreviewState] = useState<boolean>(false);
@@ -61,6 +64,7 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
 
   // Load persisted data on mount — including waypoints
   useEffect(() => {
+    let cancelled = false;
     const loadPersistedData = async () => {
       try {
         // Load waypoints (was saved but never loaded back)
@@ -70,26 +74,31 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
           savedWaypoints &&
           savedWaypoints.length > 0
         ) {
-          setMissionWaypointsState(savedWaypoints);
+          if (!cancelled) setMissionWaypointsState(savedWaypoints);
           console.log(`[WaypointContext] Loaded ${savedWaypoints.length} waypoints from storage`);
         }
         waypointsLoadedRef.current = true;
 
         const savedLanguage = await AsyncStorage.getItem(TTS_LANGUAGE_STORAGE_KEY);
         if (savedLanguage) {
-          setTTSLanguageState(savedLanguage);
+          if (!cancelled) setTTSLanguageState(savedLanguage);
         }
 
         const savedMissionMode = await PersistentStorage.loadMissionMode();
         if (savedMissionMode) {
-          setMissionModeState(savedMissionMode);
+          if (!cancelled) setMissionModeState(savedMissionMode);
         }
       } catch (error) {
         console.error('[WaypointContext] Failed to load persisted data:', error);
+      } finally {
         waypointsLoadedRef.current = true;
+        if (!cancelled) setIsHydrated(true);
       }
     };
     loadPersistedData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Flush pending waypoint save on unmount (tab switch) and app backgrounding
@@ -156,6 +165,7 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
 
   const contextValue = React.useMemo<WaypointContextValue>(() => ({
     missionWaypoints,
+    isHydrated,
     setMissionWaypoints,
     clearMissionWaypoints,
     missionMode,
@@ -168,6 +178,7 @@ export function WaypointProvider({ children }: WaypointProviderProps): React.Rea
     setShowManualConnectionCanvas,
   }), [
     missionWaypoints,
+    isHydrated,
     setMissionWaypoints,
     clearMissionWaypoints,
     missionMode,

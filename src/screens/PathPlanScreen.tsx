@@ -101,6 +101,7 @@ import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
   loadMission,
+  getMissionStatus,
   getMissionHistory,
   restoreMission,
   type MissionExtensionMode,
@@ -422,6 +423,7 @@ export default function PathPlanScreen({
     showManualConnectionCanvas,
     setShowManualConnectionCanvas,
   } = useRover();
+  const { isHydrated: missionStateHydrated } = useMission();
   const { setMarkingSnapshot, markingPressRef } = useFieldMap();
   const { connectionState } = useConnection();
   const {
@@ -442,6 +444,9 @@ export default function PathPlanScreen({
   // Guard to prevent re-entrant upload handling causing recursive state updates
   const isUploadingRef = useRef(false);
   const isRestoringMissionRef = useRef(false);
+  const autoRestoreAttemptedRef = useRef(false);
+  const userEditedWaypointsRef = useRef(false);
+  const waypointsRef = useRef<PathPlanWaypoint[]>([]);
   // Track ongoing async operations for proper cleanup
   const pendingOperationsRef = useRef<Set<Promise<any>>>(new Set());
   // Ref to track export operations
@@ -581,9 +586,16 @@ export default function PathPlanScreen({
     [missionWaypoints],
   );
 
+  useEffect(() => {
+    waypointsRef.current = waypoints;
+  }, [waypoints]);
+
   // Update waypoints in context
   const updateWaypoints = React.useCallback(
     (newWaypoints: PathPlanWaypoint[]) => {
+      if (!isRestoringMissionRef.current) {
+        userEditedWaypointsRef.current = true;
+      }
       setMissionWaypoints(
         newWaypoints.map((wp, idx) => ({
           sn: wp.id,
@@ -2512,46 +2524,168 @@ export default function PathPlanScreen({
     }
   }
 
-  async function handleRestoreLatestMission(): Promise<void> {
-    if (isRestoringMissionRef.current) return;
+  const restoreLatestMission = useCallback(
+    async ({
+      silent = false,
+      allowPersistedReplacement = false,
+    }: { silent?: boolean; allowPersistedReplacement?: boolean } = {}): Promise<boolean> => {
+    if (isRestoringMissionRef.current) return false;
     isRestoringMissionRef.current = true;
     if (roverUploadBlockedReason) {
-      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      if (!silent) Alert.alert("Connect Rover", roverUploadBlockedReason);
       isRestoringMissionRef.current = false;
-      return;
+      return false;
     }
     try {
+      const status = await getMissionStatus();
+      if (!status?.success || !status.mission) {
+        return false;
+      }
+      const currentMissionId = String(status.mission.mission_id ?? "").trim();
+      const currentState = String(status.mission.state ?? "").trim().toUpperCase();
+      const terminalStates = new Set(["EMPTY", "COMPLETED", "STOPPED"]);
+      if (currentMissionId && !terminalStates.has(currentState)) {
+        // A staged, loaded, running, or paused mission belongs to the
+        // operator. Never replace it with an archived mission automatically.
+        return false;
+      }
       const history = await getMissionHistory();
       const latest = history.missions?.[0];
       if (!latest?.mission_id) {
-        Alert.alert("No Completed Mission", "There is no archived mission to restore.");
-        return;
+        if (!silent) {
+          Alert.alert("No Completed Mission", "There is no archived mission to restore.");
+        }
+        return false;
+      }
+      if (!mountedRef.current || isUploadingRef.current || userEditedWaypointsRef.current) {
+        return false;
+      }
+      if (waypointsRef.current.length > 0 && !allowPersistedReplacement) {
+        return false;
+      }
+      if (waypointsRef.current.length > 0 && allowPersistedReplacement) {
+        // Persisted waypoints may be from a completed run. Replace them only
+        // when the rover no longer owns a live mission; never overwrite a
+        // mission that is currently loaded or running.
+        if (currentMissionId && !terminalStates.has(currentState)) return false;
       }
       invalidateForUpload();
       const response = await restoreMission(latest.mission_id);
+      if (!response?.success) {
+        throw new Error(response?.message || "The rover rejected mission restore.");
+      }
       const restorePayload = (response as MissionControlResponseWithRestore).restore;
       const restoredPoints = restorePayload?.points;
-      if (Array.isArray(restoredPoints) && restoredPoints.length >= 2) {
-        updateWaypoints(
-          restoredPoints.map((point: any, index: number) => ({
-            id: Number(point.point_index ?? index) + 1,
-            lat: Number(point.latitude),
-            lon: Number(point.longitude),
-            alt: 0,
-            pile: String(index + 1),
-          })),
-        );
+      if (!Array.isArray(restoredPoints)) {
+        throw new Error("The restored mission did not contain waypoint data.");
       }
+      const restoredWaypoints = restoredPoints
+        .map((point: Record<string, unknown>, index: number): PathPlanWaypoint | null => {
+          const lat = Number(point.latitude ?? point.lat);
+          const lon = Number(point.longitude ?? point.lon ?? point.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+          const pointIndex = Number(point.point_index ?? index);
+          return {
+            id: Number.isFinite(pointIndex) ? pointIndex + 1 : index + 1,
+            lat,
+            lon,
+            alt: Number.isFinite(Number(point.altitude ?? point.alt))
+              ? Number(point.altitude ?? point.alt)
+              : 0,
+            block: String(point.block ?? ""),
+            row: String(point.row ?? ""),
+            pile: String(point.pile ?? index + 1),
+            mark: typeof point.mark === "boolean" ? point.mark : undefined,
+          };
+        })
+        .filter((point): point is PathPlanWaypoint => point !== null);
+      if (restoredWaypoints.length < 2) {
+        throw new Error("The restored mission did not contain at least two valid waypoints.");
+      }
+      if (
+        !mountedRef.current ||
+        isUploadingRef.current ||
+        userEditedWaypointsRef.current ||
+        (waypointsRef.current.length > 0 && !allowPersistedReplacement)
+      ) {
+        return false;
+      }
+      updateWaypoints(restoredWaypoints);
       await refreshNow();
-      Alert.alert("Mission Restored", "Review the generated path, then tap Load Mission and Start.");
+      if (!silent) {
+        Alert.alert("Mission Ready", "The last mission is loaded. You can press Load Mission.");
+      }
+      return true;
     } catch (error) {
-      Alert.alert("Restore Failed", error instanceof Error ? error.message : String(error));
+      // Restore uses the same preview epoch guard as a new upload. Release it
+      // when the request fails so a previous valid path is not left hidden.
+      resumePreviewAfterFailedUpload();
+      console.error("[PathPlan] Automatic mission restore failed:", error);
+      if (!silent) {
+        Alert.alert("Restore Failed", error instanceof Error ? error.message : String(error));
+      }
+      return false;
     } finally {
       isRestoringMissionRef.current = false;
     }
-  }
+    },
+    [
+      invalidateForUpload,
+      refreshNow,
+      resumePreviewAfterFailedUpload,
+      roverUploadBlockedReason,
+      getMissionStatus,
+      updateWaypoints,
+    ],
+  );
+
+  // Hydrate the latest archived mission once when Marking Plan becomes visible.
+  // Persisted waypoints are retained when the rover still owns a live mission;
+  // after terminal cleanup they are refreshed from the verified archive. User
+  // edits always win and can never be overwritten by this background operation.
+  useEffect(() => {
+    if (
+      !isVisible ||
+      !missionStateHydrated ||
+      connectionState !== "connected" ||
+      roverUploadBlockedReason ||
+      autoRestoreAttemptedRef.current ||
+      userEditedWaypointsRef.current
+    ) {
+      return undefined;
+    }
+
+    autoRestoreAttemptedRef.current = true;
+    const timer = setTimeout(() => {
+      if (
+        !mountedRef.current ||
+        isUploadingRef.current ||
+        userEditedWaypointsRef.current
+      ) {
+        return;
+      }
+      void restoreLatestMission({ silent: true, allowPersistedReplacement: true });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [
+    connectionState,
+    isVisible,
+    missionStateHydrated,
+    restoreLatestMission,
+    roverUploadBlockedReason,
+    waypoints.length,
+  ]);
 
   const handleRequestUpload = async () => {
+    if (isRestoringMissionRef.current) {
+      showPathPlanToast(
+        "info",
+        "Preparing Mission",
+        "Please wait for the previous mission to finish loading.",
+        3000,
+      );
+      return;
+    }
     if (isUploadingRef.current) {
       // Prevent re-entrant calls that can cause stack overflows
       if (DEBUG_LOG)
@@ -3489,7 +3623,6 @@ export default function PathPlanScreen({
                   }
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
-                  onRestoreLatestMission={handleRestoreLatestMission}
                   roverUploadBlockedReason={roverUploadBlockedReason}
                   loadEnabled={canLoadBackendPreview(preview)}
                   onManualControlOpen={handleOpenManualControl}

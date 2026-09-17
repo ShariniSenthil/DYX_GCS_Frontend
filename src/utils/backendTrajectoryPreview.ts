@@ -2,7 +2,7 @@
  * Map path display.
  *
  * The only connecting line is the rover /nav_path after trajectory_ready.
- * Marking dots stay. No cyan authoring connector.
+ * Marking waypoints remain separate; interpolation samples are not rendered.
  */
 
 export const BACKEND_TRAJECTORY_LINE_COLOR = "#A855F7";
@@ -10,8 +10,10 @@ export const BACKEND_TRAJECTORY_DOT_COLOR = "#F0ABFC";
 export const AUTHORING_PREVIEW_LINE_COLOR = "#38bdf8";
 
 export const BACKEND_LINE_RENDER = {
-  sampleDisplayPoints: true,
-  maxSamplePoints: 400,
+  // Backend points are interpolation samples, not marking points. Render a
+  // single smooth line so dense missions do not look like a bead chain.
+  sampleDisplayPoints: false,
+  maxSamplePoints: 0,
   // Mapbox can reject very large GeoJSON geometries on mobile. Keep the
   // rendered line bounded while the backend count remains authoritative.
   maxLinePoints: 1500,

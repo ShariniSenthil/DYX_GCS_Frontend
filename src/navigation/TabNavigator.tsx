@@ -161,7 +161,11 @@ function TabNavigatorInner() {
               pointerEvents={isMarkingPlanVisible ? "box-none" : "none"}
               collapsable={false}
             >
-              <ErrorBoundary componentName="Marking Plan Screen">
+              <ErrorBoundary
+                componentName="Marking Plan Screen"
+                autoResetMs={500}
+                maxAutoResets={2}
+              >
                 <MemoPathPlanScreen
                   embedMap={false}
                   isVisible={isMarkingPlanVisible}

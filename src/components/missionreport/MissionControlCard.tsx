@@ -499,6 +499,36 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             <Text style={styles.panelHeaderTitle}>MISSION CONTROLS</Text>
           </View>
           <View style={styles.panelHeaderRight}>
+            <View
+              style={[
+                styles.missionStateBadge,
+                isMissionLoaded
+                  ? styles.missionLoadedBadge
+                  : styles.missionEmptyBadge,
+              ]}
+              accessibilityLabel={
+                isMissionLoaded ? "Mission loaded" : "No mission loaded"
+              }
+            >
+              <View
+                style={[
+                  styles.missionStateDot,
+                  {
+                    backgroundColor: isMissionLoaded
+                      ? "#34D399"
+                      : "rgba(255,255,255,0.35)",
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.missionStateText,
+                  !isMissionLoaded && styles.missionEmptyStateText,
+                ]}
+              >
+                {isMissionLoaded ? "MISSION LOADED" : "NO MISSION"}
+              </Text>
+            </View>
             {onClose && (
               <TouchableOpacity
                 style={styles.panelHeaderCloseBtn}
@@ -1290,6 +1320,37 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  missionStateBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 5,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  missionLoadedBadge: {
+    backgroundColor: "rgba(52, 211, 153, 0.10)",
+    borderColor: "rgba(52, 211, 153, 0.28)",
+  },
+  missionEmptyBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderColor: "rgba(255, 255, 255, 0.10)",
+  },
+  missionStateDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  missionStateText: {
+    color: "#A7F3D0",
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  missionEmptyStateText: {
+    color: "#94A3B8",
   },
   panelHeaderCloseBtn: PATH_PLAN_HEADER.closeBtn,
   panelHeaderIconWrap: PATH_PLAN_HEADER.iconWrap,

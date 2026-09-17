@@ -121,6 +121,8 @@ import {
   getMissionStatus,
   getMissionReport,
   uploadMissionCsv,
+  loadMission,
+  restoreMission,
   setMissionExecutionMode,
   prepareMission,
   startMission,
@@ -266,8 +268,60 @@ export default function MissionReportScreen({
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [statusMap, setStatusMap] = useState<Record<number, WpStatus>>({});
 
-  const [backendMission, setBackendMission] =
+  const [backendMission, setBackendMissionState] =
     useState<MissionRuntimeState | null>(null);
+
+  /**
+   * The backend intentionally archives the active CSV after COMPLETED and
+   * clears the active slot. Keep the last confirmed mission identity in the
+   * screen so terminal status polling cannot turn a loaded mission into
+   * "NO MISSION" while its report/path is still being displayed.
+   */
+  const [retainedMission, setRetainedMission] =
+    useState<MissionRuntimeState | null>(null);
+  const retainedMissionRef = useRef<MissionRuntimeState | null>(null);
+
+  const rememberMission = useCallback((mission: MissionRuntimeState | null | undefined) => {
+    if (!mission) return;
+
+    const missionId = String(mission.mission_id ?? "").trim();
+    const filename = String(mission.filename ?? "").trim();
+    if (!missionId && !filename) return;
+
+    // Only retain a mission that the rover has accepted/stored. This avoids
+    // treating arbitrary status payloads as a loaded mission.
+    if (!isMissionStoredOnRover(mission)) return;
+
+    const previous = retainedMissionRef.current;
+    const previousId = String(previous?.mission_id ?? "").trim();
+    const previousFilename = String(previous?.filename ?? "").trim();
+    const sameMission =
+      (missionId && previousId && missionId === previousId) ||
+      (!missionId && filename && previousFilename && filename === previousFilename);
+
+    // The status endpoint is polled frequently. Once the identity is known,
+    // do not replace the snapshot on every telemetry/status tick.
+    if (sameMission) return;
+
+    const next = mission;
+
+    retainedMissionRef.current = next;
+    setRetainedMission(next);
+  }, []);
+
+  const setBackendMission = useCallback(
+    (mission: MissionRuntimeState | null | undefined) => {
+      const next = mission ?? null;
+      setBackendMissionState(next);
+      rememberMission(next);
+    },
+    [rememberMission],
+  );
+
+  const clearRetainedMission = useCallback(() => {
+    retainedMissionRef.current = null;
+    setRetainedMission(null);
+  }, []);
 
   const [canonicalMissionReport, setCanonicalMissionReport] =
     useState<CanonicalMissionReport | null>(null);
@@ -806,7 +860,17 @@ export default function MissionReportScreen({
    * Controls whether the main button displays
    * NO MISSION or START.
    */
-  const hasUploadedMission = isMissionStoredOnRover(backendMission);
+  const backendMissionStored = isMissionStoredOnRover(backendMission);
+  // BackendTrajectoryContext retains the last ready path (and its mission ID)
+  // through terminal cleanup. Use that shared identity as a fallback when the
+  // progress screen was not visible during the short RUNNING/COMPLETED window.
+  const previewMissionId = String(preview.missionId ?? "").trim();
+  const hasRetainedPreviewMission =
+    previewMissionId.length > 0 && preview.points.length >= 2;
+  const hasUploadedMission =
+    backendMissionStored ||
+    retainedMission !== null ||
+    hasRetainedPreviewMission;
 
   /**
    * AUTO and MANUAL are both autonomous OFFBOARD
@@ -824,12 +888,18 @@ export default function MissionReportScreen({
       getMissionStartEligibility({
         connected: connectionState === "connected",
         loaded: hasUploadedMission,
-        state: backendMissionState,
+        state: backendMissionStored
+          ? backendMissionState
+          : retainedMission?.state ?? backendMissionState,
       }),
     [
       connectionState,
       hasUploadedMission,
       backendMissionState,
+      backendMissionStored,
+      retainedMission?.state,
+      hasRetainedPreviewMission,
+      previewMissionId,
     ],
   );
   const canStartMission = startEligibility.canPressStart;
@@ -1317,7 +1387,7 @@ export default function MissionReportScreen({
         error instanceof Error ? error.message : String(error),
       );
     }
-  }, []);
+  }, [setBackendMission]);
 
   const refreshCanonicalMissionReport = useCallback(async (): Promise<void> => {
     if (isOfflineMode()) {
@@ -2544,6 +2614,83 @@ export default function MissionReportScreen({
     // trailPointsRef.current = [];
   };
 
+  /**
+   * A completed mission may be archived by the rover and leave the active
+   * mission status as EMPTY. Rehydrate that same mission transparently before
+   * Start so the operator does not have to upload or press Restore again.
+   */
+  const restoreRetainedMissionForStart = useCallback(async (): Promise<MissionRuntimeState> => {
+    const retained = retainedMissionRef.current;
+    const missionId = String(retained?.mission_id ?? "").trim();
+    if (!missionId) {
+      throw new Error("The completed mission identity is unavailable. Upload the mission again.");
+    }
+
+    const restoredResponse = await restoreMission(missionId);
+    if (!restoredResponse?.success || !restoredResponse.mission) {
+      throw new Error(
+        restoredResponse?.message || "The rover could not restore the completed mission.",
+      );
+    }
+
+    let restoredMission = restoredResponse.mission;
+    setBackendMission(restoredMission);
+
+    // restore starts trajectory preparation asynchronously. Wait for the
+    // canonical status instead of racing immediately into Load/Start.
+    const deadline = Date.now() + 30_000;
+    while (
+      Date.now() < deadline &&
+      mountedRef.current &&
+      !(restoredMission.loaded === true && restoredMission.trajectory_ready === true)
+    ) {
+      const status = await getMissionStatus();
+      if (status?.success && status.mission) {
+        restoredMission = status.mission;
+        setBackendMission(restoredMission);
+        const state = String(restoredMission.state ?? "")
+          .trim()
+          .toUpperCase();
+        if (state === "ERROR") {
+          throw new Error(
+            restoredMission.error ||
+              restoredMission.message ||
+              "The rover failed to prepare the completed mission.",
+          );
+        }
+      }
+
+      if (
+        restoredMission.loaded === true &&
+        restoredMission.trajectory_ready === true
+      ) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    if (
+      restoredMission.loaded !== true ||
+      restoredMission.trajectory_ready !== true
+    ) {
+      throw new Error("The restored mission path is still preparing. Please try Start again shortly.");
+    }
+
+    // Restore intentionally leaves accepted_for_start false. Confirm the
+    // already restored preview in the same hidden step the user previously
+    // performed with Load Mission.
+    const loadResponse = await loadMission(missionId);
+    if (!loadResponse?.success || !loadResponse.mission) {
+      throw new Error(
+        loadResponse?.message || "The rover could not load the restored mission.",
+      );
+    }
+
+    setBackendMission(loadResponse.mission);
+    return loadResponse.mission;
+  }, [setBackendMission]);
+
   const handleSetExecutionMode = async (newMode: "AUTO" | "MANUAL") => {
     try {
       console.log("[MissionReportScreen] Setting execution mode:", newMode);
@@ -2609,11 +2756,50 @@ export default function MissionReportScreen({
     try {
       console.log("[MissionReportScreen] Requesting mission start...");
 
-      let latestMission = backendMission;
+      // Use the last confirmed mission when a terminal status briefly omits
+      // its identity. If terminal cleanup archived the active slot, restore
+      // and confirm that same mission automatically before evaluating Start.
+      let latestMission = backendMission ?? retainedMissionRef.current;
+      const backendState = String(backendMission?.state ?? "")
+        .trim()
+        .toUpperCase();
+      const terminalStates = new Set([
+        "EMPTY",
+        "COMPLETED",
+        "STOPPED",
+        "FAILED",
+        "ERROR",
+      ]);
+      const retainedMissionId = String(
+        retainedMissionRef.current?.mission_id ?? previewMissionId,
+      ).trim();
+
+      // If Mission Progress was mounted only after the run completed, the
+      // shared retained preview is still enough to recover the mission ID.
+      // Seed the same snapshot used by the normal status path before restore.
+      if (!retainedMissionRef.current && previewMissionId) {
+        rememberMission({
+          mission_id: previewMissionId,
+          loaded: true,
+          state: backendState || "EMPTY",
+        });
+      }
+
+      if (
+        !backendMissionStored &&
+        retainedMissionId &&
+        terminalStates.has(backendState)
+      ) {
+        setIsPreparingMission(true);
+        logMissionStartTiming(attemptId, "backend_phase", "restore");
+        latestMission = await restoreRetainedMissionForStart();
+      }
 
       const eligibility = getMissionStartEligibility({
         connected: connectionState === "connected",
-        loaded: isMissionStoredOnRover(latestMission),
+        loaded:
+          isMissionStoredOnRover(latestMission) ||
+          Boolean(retainedMissionRef.current),
         state: latestMission?.state,
       });
 
@@ -3098,6 +3284,8 @@ export default function MissionReportScreen({
     try {
       console.log("[MissionReportScreen] Clearing mission...");
       await clearMission();
+      clearRetainedMission();
+      setBackendMission(null);
       verifiedCtx.clearLoadedMission();
       resetVerifiedProgress();
       showNotification("success", "Cleared", "Mission cleared from controller");
@@ -3183,6 +3371,8 @@ export default function MissionReportScreen({
 
               // Clear local state
               clearMissionWaypoints();
+              clearRetainedMission();
+              setBackendMission(null);
               setStatusMap({});
               setMissionStartTime(null);
               setMissionEndTime(null);

@@ -16,6 +16,7 @@ import { Waypoint } from '../components/missionreport/types';
 export interface MissionContextValue {
   // Waypoint state (delegated to WaypointContext internally)
   missionWaypoints: Waypoint[];
+  isHydrated: boolean;
   setMissionWaypoints: (waypoints: Waypoint[]) => void;
   clearMissionWaypoints: () => void;
 
@@ -45,6 +46,7 @@ export function MissionProvider({ children }: MissionProviderProps): React.React
 
   const contextValue = React.useMemo<MissionContextValue>(() => ({
     missionWaypoints: waypointCtx.missionWaypoints,
+    isHydrated: waypointCtx.isHydrated,
     setMissionWaypoints: waypointCtx.setMissionWaypoints,
     clearMissionWaypoints: waypointCtx.clearMissionWaypoints,
     missionMode: waypointCtx.missionMode,
@@ -57,6 +59,7 @@ export function MissionProvider({ children }: MissionProviderProps): React.React
     setShowManualConnectionCanvas: waypointCtx.setShowManualConnectionCanvas,
   }), [
     waypointCtx.missionWaypoints,
+    waypointCtx.isHydrated,
     waypointCtx.setMissionWaypoints,
     waypointCtx.clearMissionWaypoints,
     waypointCtx.missionMode,

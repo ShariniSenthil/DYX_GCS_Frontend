@@ -26,6 +26,8 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  /** Changes whenever the operator retries so native children remount cleanly. */
+  resetToken: number;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -38,6 +40,7 @@ export class ErrorBoundary extends Component<Props, State> {
       hasError: false,
       error: null,
       errorInfo: null,
+      resetToken: 0,
     };
   }
 
@@ -47,7 +50,9 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(
+    error: Error,
+  ): Pick<State, "hasError" | "error" | "errorInfo"> {
     // Update state so the next render will show the fallback UI
     return {
       hasError: true,
@@ -93,11 +98,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReset = () => {
-    this.setState({
+    // A state-only reset can reuse a crashed native Mapbox/gesture child.
+    // Changing the keyed Fragment forces React to dispose and recreate it.
+    this.setState((previous) => ({
       hasError: false,
       error: null,
       errorInfo: null,
-    });
+      resetToken: previous.resetToken + 1,
+    }));
   };
 
   render() {
@@ -145,7 +153,11 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return children;
+    return (
+      <React.Fragment key={this.state.resetToken}>
+        {children}
+      </React.Fragment>
+    );
   }
 }
 

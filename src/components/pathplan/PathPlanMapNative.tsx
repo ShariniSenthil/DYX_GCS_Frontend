@@ -11,7 +11,6 @@ import { useMapboxSurface } from '../../hooks/useMapboxSurface';
 import { useBackendTrajectory } from '../../context/BackendTrajectoryContext';
 import {
   BACKEND_LINE_RENDER,
-  BACKEND_TRAJECTORY_DOT_COLOR,
   BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
@@ -139,16 +138,8 @@ export const PathPlanMapNative: React.FC<any> = ({
                 lineWidth: 4,
                 lineJoin: 'round',
                 lineCap: 'round',
-              }}
-            />
-            <CircleLayer
-              id="path-points"
-              filter={['==', ['get', 'kind'], 'point'] as any}
-              style={{
-                circleColor: BACKEND_TRAJECTORY_DOT_COLOR,
-                circleRadius: 2,
-                circleOpacity: 0.85,
-                circleStrokeWidth: 0,
+                lineOpacity: 0.96,
+                lineBlur: 0.15,
               }}
             />
           </ShapeSource>
