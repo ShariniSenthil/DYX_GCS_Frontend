@@ -79,6 +79,7 @@ import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
 import { isOfflineMode } from "../config";
 import {
   TRAJECTORY_COPY,
+  canDrawBackendLine,
   canLoadBackendPreview,
 } from "../utils/backendTrajectoryPreview";
 import {
@@ -382,7 +383,7 @@ interface PathPlanScreenProps {
   setIsStatisticsVisible?: (val: boolean) => void;
   isBottomTableVisible?: boolean;
   setIsBottomTableVisible?: (val: boolean) => void;
-  /** Called after the backend confirms Load Mission successfully. */
+  /** Moves to Mission Progress after a confirmed Load. */
   onLoadMissionSuccess?: () => void;
 }
 
@@ -430,6 +431,7 @@ export default function PathPlanScreen({
     preview,
     invalidateForUpload,
     resumePreviewAfterFailedUpload,
+    markLoadAccepted,
     refreshNow,
   } = useBackendTrajectory();
   const roverUploadBlockedReason =
@@ -438,6 +440,13 @@ export default function PathPlanScreen({
       : null;
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
+  const [isReloadPreparing, setIsReloadPreparing] = useState(false);
+
+  useEffect(() => {
+    if (canLoadBackendPreview(preview)) {
+      setIsReloadPreparing(false);
+    }
+  }, [preview]);
 
   // Component mounted flag to prevent state updates after unmount
   const mountedRef = useRef(true);
@@ -2503,22 +2512,35 @@ export default function PathPlanScreen({
       return;
     }
 
-    if (!canLoadBackendPreview(preview)) {
-      return;
-    }
-
     try {
-      const response = await loadMission();
+      if (!canLoadBackendPreview(preview)) {
+        if (!preview.acceptedForStart || !preview.missionId) return;
+        setIsReloadPreparing(true);
+        const restored = await restoreMission(preview.missionId);
+        if (!restored?.success) {
+          throw new Error(restored?.message || "The rover rejected Load Again.");
+        }
+        await refreshNow();
+        Alert.alert(
+          "Mission Restored",
+          "The same mission is preparing its preview. Load Again will be ready as soon as the preview is available.",
+        );
+        return;
+      }
+
+      const response = await loadMission(preview.missionId ?? undefined);
       if (!response.success) {
         throw new Error(response.message || "The rover rejected Load Mission.");
       }
+      markLoadAccepted();
       onLoadMissionSuccess?.();
-      // Navigation is tied to the successful Load response. A status refresh
-      // is best-effort and must not make a confirmed load look like a failure.
+      // Keep the status synchronized, but never turn a confirmed load into
+      // an error merely because the following refresh is unavailable.
       void refreshNow().catch((refreshError) =>
         console.warn("[PathPlan] Mission status refresh after Load failed:", refreshError),
       );
     } catch (error) {
+      setIsReloadPreparing(false);
       const message = error instanceof Error ? error.message : String(error);
       Alert.alert("Load Failed", message);
     }
@@ -3624,7 +3646,13 @@ export default function PathPlanScreen({
                   onRequestUpload={handleRequestUpload}
                   onLoadMission={handleLoadMissionToController}
                   roverUploadBlockedReason={roverUploadBlockedReason}
-                  loadEnabled={canLoadBackendPreview(preview)}
+                  loadEnabled={
+                    canLoadBackendPreview(preview) ||
+                    (preview.acceptedForStart && preview.missionId !== null)
+                  }
+                  loadVisible={canDrawBackendLine(preview) && preview.missionId !== null}
+                  loadAgain={preview.acceptedForStart}
+                  loadPreparing={isReloadPreparing}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}

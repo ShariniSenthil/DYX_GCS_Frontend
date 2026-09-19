@@ -1,14 +1,12 @@
-import React, { useMemo, useRef, useState, useCallback } from "react";
+import React, { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import { View, StyleSheet, Text } from "react-native";
 import {
   MarkerView,
   MapView,
   Camera,
-  ShapeSource,
-  LineLayer,
-  CircleLayer,
 } from "@rnmapbox/maps";
 import { RoverVehicleIcon } from "../shared/RoverVehicleIcon";
+import { NativeTrajectoryLayer, NativeWaypointLayer } from "../shared/NativeMapLayers";
 import { TrajectoryStatusBanner } from "../shared/TrajectoryStatusBanner";
 import {
   MAPBOX_FALLBACK_STYLE_JSON,
@@ -20,9 +18,9 @@ import type { Waypoint } from "./types";
 import type { LoadedPathPoint } from "../../services/missionApi";
 import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
+import { useFieldMap } from "../../context/FieldMapContext";
 import {
   BACKEND_LINE_RENDER,
-  BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
   limitMapPoints,
@@ -82,6 +80,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
     onMapError,
   } = useMapboxSurface();
   const { preview } = useBackendTrajectory();
+  const { sharedCamera, setSharedCamera } = useFieldMap();
 
   const hasRoverPosition =
     isValidLngLat(roverLon, roverLat) && !(roverLat === 0 && roverLon === 0);
@@ -120,16 +119,53 @@ const MissionMapNativeBase: React.FC<Props> = ({
     };
   }, [waypoints, statusMap, activeWaypointIndex]);
 
+  const showTrajectory = canDrawBackendLine(preview);
   const trajectoryCollection = useMemo(() => {
-    if (!canDrawBackendLine(preview)) return null;
+    if (!showTrajectory) return null;
     return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
-  }, [preview]);
+  }, [showTrajectory, preview.points]);
 
   const handleToggleMapStyle = useCallback(() => {
     if (usingFallback) return;
     const order: MapStyleMode[] = ["satellite", "streets", "dark"];
     setMapStyle(order[(order.indexOf(mapStyle) + 1) % order.length]);
   }, [mapStyle, usingFallback]);
+
+  const handleCameraChanged = useCallback(
+    (event: any) => {
+      const payload =
+        typeof event?.payload === "string"
+          ? (() => {
+              try {
+                return JSON.parse(event.payload);
+              } catch {
+                return null;
+              }
+            })()
+          : event?.payload ?? event;
+      const cameraCenter = payload?.properties?.center;
+      const zoom = payload?.properties?.zoom;
+      if (!Array.isArray(cameraCenter) || !isValidLngLat(cameraCenter[0], cameraCenter[1])) return;
+      if (typeof zoom !== "number" || !Number.isFinite(zoom)) return;
+      zoomRef.current = zoom;
+      setSharedCamera(
+        { centerCoordinate: [cameraCenter[0], cameraCenter[1]], zoomLevel: zoom },
+        "mission",
+      );
+    },
+    [setSharedCamera],
+  );
+
+  useEffect(() => {
+    if (!mapReady || !sharedCamera || sharedCamera.source === "mission") return;
+    zoomRef.current = sharedCamera.zoomLevel;
+    cameraRef.current?.setCamera({
+      centerCoordinate: sharedCamera.centerCoordinate,
+      zoomLevel: sharedCamera.zoomLevel,
+      animationDuration: 0,
+      animationMode: "none",
+    });
+  }, [mapReady, sharedCamera]);
 
   const handleFitMission = useCallback(() => {
     const pts = waypoints.filter((wp) => isValidLngLat(wp.lon, wp.lat));
@@ -204,6 +240,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
         onDidFinishRenderingMap={onMapReady}
         onMapLoadingError={onMapError}
         onDidFailLoadingMap={onMapError}
+        onMapIdle={handleCameraChanged}
       >
         <Camera
           ref={cameraRef}
@@ -211,63 +248,19 @@ const MissionMapNativeBase: React.FC<Props> = ({
         />
 
         {trajectoryCollection && (
-          <ShapeSource
-            id="generated-trajectory"
+          <NativeTrajectoryLayer
+            sourceId="generated-trajectory"
+            layerId="generated-trajectory-line"
             shape={trajectoryCollection as any}
-          >
-            <LineLayer
-              id="generated-trajectory-line"
-              filter={["==", ["get", "kind"], "line"] as any}
-              style={
-                {
-                  lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
-                  lineWidth: [
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    15,
-                    2,
-                    19,
-                    3,
-                    22,
-                    4,
-                    24,
-                    5,
-                  ],
-                  lineOpacity: 0.96,
-                  lineCap: "round",
-                  lineJoin: "round",
-                  lineBlur: 0.15,
-                } as any
-              }
-            />
-          </ShapeSource>
+          />
         )}
 
         {waypointCollection.features.length > 0 && (
-          <ShapeSource id="mission-points" shape={waypointCollection as any}>
-            <CircleLayer
-              id="mission-points-layer"
-              style={{
-                circleRadius: [
-                  "case",
-                  ["==", ["get", "active"], 1],
-                  8,
-                  5,
-                ],
-                circleColor: [
-                  "case",
-                  ["==", ["get", "completed"], 1],
-                  "#22c55e",
-                  ["==", ["get", "active"], 1],
-                  "#fbbf24",
-                  "#ef4444",
-                ],
-                circleStrokeColor: "#ffffff",
-                circleStrokeWidth: 2,
-              } as any}
-            />
-          </ShapeSource>
+          <NativeWaypointLayer
+            sourceId="mission-points"
+            layerId="mission-points-layer"
+            shape={waypointCollection as any}
+          />
         )}
 
         {hasRoverPosition && (

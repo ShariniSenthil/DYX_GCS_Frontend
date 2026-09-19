@@ -115,16 +115,6 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
     [crossTrackMm],
   );
 
-  const alongSideText = useMemo(
-    () => formatMillimetres(isMissionActive ? validAlongSide : null),
-    [isMissionActive, validAlongSide],
-  );
-
-  const crossTrackText = useMemo(
-    () => formatMillimetres(isMissionActive ? validCrossTrack : null),
-    [isMissionActive, validCrossTrack],
-  );
-
   const alongSideStatus = useMemo(() => {
     if (!isMissionActive) {
       return "MISSION NOT ACTIVE";
@@ -152,6 +142,18 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
   const alongSideLive = isMissionActive && validAlongSide !== null;
 
   const crossTrackLive = isMissionActive && validCrossTrack !== null;
+
+  // These are the latest WebSocket values. Memoization avoids extra string
+  // formatting only; it does not delay or interpolate telemetry.
+  const alongSideText = useMemo(
+    () => formatMillimetres(isMissionActive ? validAlongSide : null),
+    [isMissionActive, validAlongSide],
+  );
+
+  const crossTrackText = useMemo(
+    () => formatMillimetres(isMissionActive ? validCrossTrack : null),
+    [isMissionActive, validCrossTrack],
+  );
 
   const actualSpeedText = useMemo(() => formatSpeed(isMissionActive && actualSpeedMps !== undefined ? actualSpeedMps : null), [isMissionActive, actualSpeedMps]);
   const targetHeadingText = useMemo(() => formatHeading(isMissionActive && targetHeadingDeg !== undefined ? targetHeadingDeg : null), [isMissionActive, targetHeadingDeg]);

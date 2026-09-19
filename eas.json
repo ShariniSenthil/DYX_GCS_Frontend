@@ -32,6 +32,15 @@
         "EXPO_PUBLIC_ROVER_ENABLED": "true",
         "EXPO_PUBLIC_AUTH_ENABLED": "true"
       }
+    },
+    "production-optimized": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_ROVER_ENABLED": "true",
+        "EXPO_PUBLIC_AUTH_ENABLED": "true"
+      }
     }
   },
   "submit": {

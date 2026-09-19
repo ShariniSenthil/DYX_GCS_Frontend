@@ -312,7 +312,25 @@ export default function MissionReportScreen({
   const setBackendMission = useCallback(
     (mission: MissionRuntimeState | null | undefined) => {
       const next = mission ?? null;
-      setBackendMissionState(next);
+      setBackendMissionState((prev) => {
+        if (
+          prev &&
+          next &&
+          prev.state === next.state &&
+          prev.loaded === next.loaded &&
+          prev.ready === next.ready &&
+          prev.execution_mode === next.execution_mode &&
+          prev.current_point_index === next.current_point_index &&
+          prev.active_point_index === next.active_point_index &&
+          prev.active_point_id === next.active_point_id &&
+          prev.mission_id === next.mission_id &&
+          prev.trajectory_ready === next.trajectory_ready &&
+          prev.progress_pct === next.progress_pct
+        ) {
+          return prev;
+        }
+        return next;
+      });
       rememberMission(next);
     },
     [rememberMission],
@@ -1485,7 +1503,7 @@ export default function MissionReportScreen({
      */
     const timer = setInterval(() => {
       void pollMission();
-    }, 250);
+    }, 1000);
 
     return () => {
       cancelled = true;

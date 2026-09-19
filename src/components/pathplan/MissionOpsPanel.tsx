@@ -43,6 +43,12 @@ type Props = {
     roverUploadBlockedReason?: string | null;
     /** True when the rover purple preview is on the map. */
     loadEnabled?: boolean;
+    /** The generated preview is ready to be shown to the operator. */
+    loadVisible?: boolean;
+    /** A mission previously loaded under this backend mission ID. */
+    loadAgain?: boolean;
+    /** An archived mission is regenerating its preview after Load Again. */
+    loadPreparing?: boolean;
 };
 
 const MissionOpsPanel = React.memo(({
@@ -65,6 +71,9 @@ const MissionOpsPanel = React.memo(({
     onClose,
     roverUploadBlockedReason = null,
     loadEnabled = false,
+    loadVisible = false,
+    loadAgain = false,
+    loadPreparing = false,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
     const [isLoadingMission, setIsLoadingMission] = useState(false);
@@ -367,19 +376,21 @@ const MissionOpsPanel = React.memo(({
                 </TouchableOpacity>
             </View>
 
-            {/* Load Mission Button */}
-            <TouchableOpacity
-                style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason && loadEnabled ? styles.loadActive : styles.disabledBtn]}
-                onPress={handleLoadMission}
-                activeOpacity={0.8}
-                disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled || isLoadingMission}
-            >
-                <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
-                <Text style={styles.loadText}>{isLoadingMission ? "Loading..." : "Load Mission"}</Text>
-                <View style={styles.loadCountBadge}>
-                    <Text style={styles.loadCountText}>{waypoints.length}</Text>
-                </View>
-            </TouchableOpacity>
+            {/* The button exists only after a preview. Its label belongs to that mission ID. */}
+            {loadVisible && (
+                <TouchableOpacity
+                    style={[styles.loadButton, waypoints.length && !roverUploadBlockedReason && loadEnabled ? styles.loadActive : styles.disabledBtn, loadPreparing && styles.loadPreparing]}
+                    onPress={handleLoadMission}
+                    activeOpacity={0.8}
+                    disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled || isLoadingMission || loadPreparing}
+                >
+                    <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
+                    <Text style={styles.loadText}>{isLoadingMission ? "Loading..." : loadPreparing ? "Preparing..." : loadAgain ? "Load Again" : "Load"}</Text>
+                    <View style={styles.loadCountBadge}>
+                        <Text style={styles.loadCountText}>{waypoints.length}</Text>
+                    </View>
+                </TouchableOpacity>
+            )}
 
             {/* Dash Mode Config Dialog */}
             <DashConfigDialog
@@ -586,6 +597,9 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
         fontVariant: ['tabular-nums'] as any,
+    },
+    loadPreparing: {
+        opacity: 0.72,
     },
 
     // ── MODALS ──

@@ -1,7 +1,8 @@
 import React, { useMemo, useRef } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
-import { MarkerView, MapView, Camera, ShapeSource, LineLayer, CircleLayer } from '@rnmapbox/maps';
+import { MarkerView, MapView, Camera } from '@rnmapbox/maps';
 import { RoverVehicleIcon } from '../shared/RoverVehicleIcon';
+import { NativeTrajectoryLayer, NativeWaypointLayer } from '../shared/NativeMapLayers';
 import { TrajectoryStatusBanner } from '../shared/TrajectoryStatusBanner';
 import {
   MAPBOX_STYLE_SATELLITE,
@@ -11,7 +12,6 @@ import { useMapboxSurface } from '../../hooks/useMapboxSurface';
 import { useBackendTrajectory } from '../../context/BackendTrajectoryContext';
 import {
   BACKEND_LINE_RENDER,
-  BACKEND_TRAJECTORY_LINE_COLOR,
   buildBackendTrajectoryCollection,
   canDrawBackendLine,
   limitMapPoints,
@@ -61,10 +61,11 @@ export const PathPlanMapNative: React.FC<any> = ({
     lon <= 180 &&
     !(lat === 0 && lon === 0);
 
+  const showTrajectory = canDrawBackendLine(preview);
   const trajectoryGeoJSON = useMemo(() => {
-    if (!canDrawBackendLine(preview)) return null;
+    if (!showTrajectory) return null;
     return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
-  }, [preview]);
+  }, [showTrajectory, preview.points]);
 
   const waypointGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length === 0) return null;
@@ -129,34 +130,25 @@ export const PathPlanMapNative: React.FC<any> = ({
         />
 
         {trajectoryGeoJSON && (
-          <ShapeSource id="path-source" shape={trajectoryGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
-            <LineLayer
-              id="path-layer"
-              filter={['==', ['get', 'kind'], 'line'] as any}
-              style={{
-                lineColor: BACKEND_TRAJECTORY_LINE_COLOR,
-                lineWidth: 4,
-                lineJoin: 'round',
-                lineCap: 'round',
-                lineOpacity: 0.96,
-                lineBlur: 0.15,
-              }}
-            />
-          </ShapeSource>
+          <NativeTrajectoryLayer
+            sourceId="path-source"
+            layerId="path-layer"
+            shape={trajectoryGeoJSON as any}
+            variant="authoring"
+            tolerance={0.00001}
+            maxZoomLevel={22}
+          />
         )}
 
         {waypointGeoJSON && visualization?.waypoints !== false && (
-          <ShapeSource id="waypoint-source" shape={waypointGeoJSON as any} tolerance={0.00001} maxZoomLevel={22}>
-            <CircleLayer
-              id="waypoint-layer"
-              style={{
-                circleRadius: 6,
-                circleColor: '#ef4444',
-                circleStrokeColor: '#ffffff',
-                circleStrokeWidth: 2,
-              }}
-            />
-          </ShapeSource>
+          <NativeWaypointLayer
+            sourceId="waypoint-source"
+            layerId="waypoint-layer"
+            shape={waypointGeoJSON as any}
+            variant="authoring"
+            tolerance={0.00001}
+            maxZoomLevel={22}
+          />
         )}
 
         {roverPosition &&

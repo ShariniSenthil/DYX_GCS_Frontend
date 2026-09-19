@@ -33,17 +33,19 @@ export interface MissionStats {
  * Generate Excel (.xlsx) file with professional formatting
  * @returns ArrayBuffer that can be written to file system
  */
+import { Platform } from 'react-native';
+import { loadExcelJS } from './loadExcelJS';
+
 export const generateExcel = async (
   data: ExportData[],
   stats: MissionStats,
   missionMode: string | null
 ): Promise<ArrayBuffer> => {
-  // Detect React Native environment (no DOM/window or navigator.product === 'ReactNative')
-  const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
+  // On native devices (Android/iOS), generate CSV content
+  // This avoids heavy Node.js stream polyfills and ensures instant, crash-free export
+  const isNative = Platform.OS !== 'web';
 
-  if (isReactNative) {
-    // Fallback: generate CSV content instead of Excel (xlsx) in React Native
-    // This avoids exceljs dependency which is Node.js/Browser oriented
+  if (isNative) {
     const headers = ['S/N','ROW','BLOCK','PILE','Latitude','Longitude','Altitude','Status','Timestamp','Remark'];
     const rows = data.map(row => [
       row['S/N'],
@@ -60,15 +62,14 @@ export const generateExcel = async (
 
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     // Convert CSV string to ArrayBuffer
-    const utf8 = new TextEncoder ? new TextEncoder().encode(csv) : Uint8Array.from(csv.split('').map(c => c.charCodeAt(0)));
+    const utf8 = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(csv) : Uint8Array.from(csv.split('').map(c => c.charCodeAt(0)));
     return utf8.buffer as ArrayBuffer;
   }
 
-  // Web/Node: try dynamic import of exceljs
+  // Web: load exceljs via dynamic platform loader
   let ExcelJS: any;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    ExcelJS = (await import('exceljs')).default || (await import('exceljs'));
+    ExcelJS = await loadExcelJS();
   } catch (err) {
     // If exceljs cannot be imported, fall back to CSV
     const headers = ['S/N','ROW','BLOCK','PILE','Latitude','Longitude','Altitude','Status','Timestamp','Remark'];

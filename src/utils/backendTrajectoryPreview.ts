@@ -64,6 +64,8 @@ export interface TrajectoryPreviewState {
   liveLoaded: boolean;
   /** Last STATUS `trajectory_ready` flag. */
   liveTrajectoryReady: boolean;
+  /** Backend confirmation that this exact mission has already been loaded. */
+  acceptedForStart?: boolean;
 }
 
 export interface MissionTrajectorySnapshot {
@@ -75,6 +77,7 @@ export interface MissionTrajectorySnapshot {
   rtk_fixed?: boolean;
   rtk_reason?: string | null;
   mission_id?: string | null;
+  accepted_for_start?: boolean;
   navigation_point_count?: number | null;
   terminal_cleanup_status?: string | null;
 }
@@ -88,6 +91,7 @@ export type TrajectoryPreviewEvent =
       epoch: number;
       mission: MissionTrajectorySnapshot;
     }
+  | { type: "LOAD_ACCEPTED" }
   | {
       type: "PREVIEW";
       epoch: number;
@@ -119,6 +123,7 @@ export const EMPTY_TRAJECTORY_PREVIEW: TrajectoryPreviewState = {
   epoch: 0,
   liveLoaded: false,
   liveTrajectoryReady: false,
+  acceptedForStart: false,
 };
 
 export type LineFeatureCollection = {
@@ -498,9 +503,17 @@ export function reduceTrajectoryPreview(
       const trajectoryReady = mission.trajectory_ready === true;
       const navCount = Number(mission.navigation_point_count ?? 0);
       const safeNavCount = Number.isFinite(navCount) ? Math.max(0, navCount) : 0;
+      // The label is bound to the backend mission ID, not to a temporary
+      // terminal state. Restoring the same archived ID must still say
+      // "Load Again"; only a different upload resets it to "Load".
+      const retainsAcceptedLoad =
+        previous.acceptedForStart === true &&
+        (missionId === null || missionId === previous.missionId);
       const liveFlags = {
         liveLoaded: loaded,
         liveTrajectoryReady: trajectoryReady,
+        acceptedForStart:
+          mission.accepted_for_start === true || retainsAcceptedLoad,
       };
 
       if (state === "ERROR" || (typeof mission.error === "string" && mission.error.trim())) {
@@ -631,6 +644,12 @@ export function reduceTrajectoryPreview(
         epoch: event.epoch,
       };
     }
+
+    case "LOAD_ACCEPTED":
+      return {
+        ...previous,
+        acceptedForStart: true,
+      };
 
     case "STATUS_ERROR":
       if (canDrawBackendLine(previous)) {

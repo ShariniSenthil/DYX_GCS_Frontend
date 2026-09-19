@@ -215,8 +215,22 @@ export function TelemetryProvider({
     useState<GpsFailsafeMode>("disable");
   const [gpsFailsafeStatus, setGpsFailsafeStatus] =
     useState<GpsFailsafeStatus | null>(null);
-  const [missionLifecycle, setMissionLifecycle] =
+  const [missionLifecycle, setMissionLifecycleState] =
     useState<MissionLifecycleSlice>({});
+
+  const setMissionLifecycle = useCallback((slice: MissionLifecycleSlice) => {
+    // Repeated mission_status packets often carry the same lifecycle fields.
+    // Preserve the context identity until a field actually changes.
+    setMissionLifecycleState((previous) =>
+      previous.state === slice.state &&
+      previous.state_lower === slice.state_lower &&
+      previous.start_stage === slice.start_stage &&
+      previous.start_failed_stage === slice.start_failed_stage &&
+      previous.resume_stage === slice.resume_stage
+        ? previous
+        : slice,
+    );
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -233,7 +247,7 @@ export function TelemetryProvider({
     if (visibleTelemetry.gps_failsafe) {
       setGpsFailsafeStatus(visibleTelemetry.gps_failsafe);
     }
-  }, [isRoverConnected, visibleTelemetry.gps_failsafe]);
+  }, [isRoverConnected, visibleTelemetry.gps_failsafe, setMissionLifecycle]);
 
   const setGpsFailsafeMode = useCallback((mode: GpsFailsafeMode) => {
     setGpsFailsafeModeState(mode);
@@ -304,6 +318,7 @@ export function TelemetryProvider({
       onFailsafeRestart,
       reportGpsSafetyAbort,
       missionLifecycle,
+      setMissionLifecycle,
     ],
   );
 

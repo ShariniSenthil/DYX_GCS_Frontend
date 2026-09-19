@@ -252,6 +252,63 @@ describe("backend trajectory display contract", () => {
     ).toBe("backend");
   });
 
+  test("a loaded mission retains its identity and Load Again state", () => {
+    const ready: TrajectoryPreviewState = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      phase: "ready",
+      points: backendPoints,
+      missionId: "m1",
+      liveLoaded: true,
+      liveTrajectoryReady: true,
+    };
+
+    expect(canLoadBackendPreview(ready)).toBe(true);
+
+    const refreshedReadyStatus = reduceTrajectoryPreview(ready, {
+      type: "STATUS",
+      epoch: 1,
+      mission: {
+        loaded: true,
+        trajectory_ready: true,
+        state: "READY",
+        mission_id: "m1",
+        accepted_for_start: true,
+      },
+    });
+
+    expect(refreshedReadyStatus.missionId).toBe("m1");
+    expect(refreshedReadyStatus.acceptedForStart).toBe(true);
+    expect(canLoadBackendPreview(refreshedReadyStatus)).toBe(true);
+
+    const completed = reduceTrajectoryPreview(refreshedReadyStatus, {
+      type: "STATUS",
+      epoch: 1,
+      mission: {
+        loaded: false,
+        trajectory_ready: false,
+        state: "COMPLETED",
+        mission_id: "m1",
+      },
+    });
+
+    expect(completed.missionId).toBe("m1");
+    expect(completed.acceptedForStart).toBe(true);
+
+    const restored = reduceTrajectoryPreview(completed, {
+      type: "STATUS",
+      epoch: 2,
+      mission: {
+        loaded: true,
+        trajectory_ready: false,
+        state: "LOADED",
+        mission_id: "m1",
+        accepted_for_start: false,
+      },
+    });
+
+    expect(restored.acceptedForStart).toBe(true);
+  });
+
   test("default map rendering omits interpolation point markers", () => {
     const collection = buildBackendTrajectoryCollection(
       backendPoints,

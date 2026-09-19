@@ -11,6 +11,13 @@ import React, {
 
 export type FieldMapSurface = "marking" | "mission";
 
+export interface FieldMapCamera {
+  centerCoordinate: [number, number];
+  zoomLevel: number;
+  source: FieldMapSurface;
+  revision: number;
+}
+
 export interface FieldMapWaypoint {
   lat: number;
   lon: number;
@@ -36,6 +43,11 @@ export interface FieldMapContextValue {
   mission: FieldMapSnapshot;
   setMarkingSnapshot: (snapshot: FieldMapSnapshot) => void;
   setMissionSnapshot: (snapshot: FieldMapSnapshot) => void;
+  sharedCamera: FieldMapCamera | null;
+  setSharedCamera: (
+    camera: Omit<FieldMapCamera, "source" | "revision">,
+    source: FieldMapSurface,
+  ) => void;
   markingPressRef: MutableRefObject<MarkingPressHandler | null>;
 }
 
@@ -54,6 +66,9 @@ export function FieldMapProvider({
     useState<FieldMapSurface>("mission");
   const [marking, setMarking] = useState<FieldMapSnapshot>(EMPTY_SNAPSHOT);
   const [mission, setMission] = useState<FieldMapSnapshot>(EMPTY_SNAPSHOT);
+  const [sharedCamera, setSharedCameraState] = useState<FieldMapCamera | null>(
+    null,
+  );
   const markingPressRef = useRef<MarkingPressHandler | null>(null);
 
   const setActiveSurface = useCallback((surface: FieldMapSurface) => {
@@ -78,6 +93,43 @@ export function FieldMapProvider({
     });
   }, []);
 
+  const setSharedCamera = useCallback(
+    (
+      camera: Omit<FieldMapCamera, "source" | "revision">,
+      source: FieldMapSurface,
+    ) => {
+      const [longitude, latitude] = camera.centerCoordinate;
+      if (
+        !Number.isFinite(longitude) ||
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(camera.zoomLevel) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return;
+      }
+
+      setSharedCameraState((previous) => {
+        const unchanged =
+          previous != null &&
+          Math.abs(previous.centerCoordinate[0] - longitude) < 0.000001 &&
+          Math.abs(previous.centerCoordinate[1] - latitude) < 0.000001 &&
+          Math.abs(previous.zoomLevel - camera.zoomLevel) < 0.01;
+        if (unchanged) return previous;
+
+        return {
+          centerCoordinate: [longitude, latitude],
+          zoomLevel: camera.zoomLevel,
+          source,
+          revision: (previous?.revision ?? 0) + 1,
+        };
+      });
+    },
+    [],
+  );
+
   const value = useMemo<FieldMapContextValue>(
     () => ({
       activeSurface,
@@ -86,6 +138,8 @@ export function FieldMapProvider({
       mission,
       setMarkingSnapshot,
       setMissionSnapshot,
+      sharedCamera,
+      setSharedCamera,
       markingPressRef,
     }),
     [
@@ -95,6 +149,8 @@ export function FieldMapProvider({
       mission,
       setMarkingSnapshot,
       setMissionSnapshot,
+      sharedCamera,
+      setSharedCamera,
     ],
   );
 

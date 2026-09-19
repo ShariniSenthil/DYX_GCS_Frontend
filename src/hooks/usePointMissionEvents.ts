@@ -10,7 +10,7 @@
  * current backend instead of being deleted.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import { getPointEvents, getPointStatus } from "../services/missionLifecycleService";
 import {
@@ -486,18 +486,32 @@ export function usePointMissionEvents(
       .catch(() => {});
   }, [connectionState, backfill]);
 
-  return {
-    statusMap,
-    waitingForContinue: hasWaitingForContinue(statusMap),
-    currentPointIndex:
-      authoritativeCurrentIndex ?? getCurrentPointIndex(statusMap),
-    lastEventId,
-    expectedGeneration,
-    missionTerminal,
-    resetStatusMap,
-    acknowledgeContinueSuccess,
-    clearMissionTerminal,
-  };
+  // Position updates still reach roverPositionRef for the next socket event,
+  // but must not rescan the whole mission or invalidate point-only consumers.
+  return useMemo(
+    () => ({
+      statusMap,
+      waitingForContinue: hasWaitingForContinue(statusMap),
+      currentPointIndex:
+        authoritativeCurrentIndex ?? getCurrentPointIndex(statusMap),
+      lastEventId,
+      expectedGeneration,
+      missionTerminal,
+      resetStatusMap,
+      acknowledgeContinueSuccess,
+      clearMissionTerminal,
+    }),
+    [
+      statusMap,
+      authoritativeCurrentIndex,
+      lastEventId,
+      expectedGeneration,
+      missionTerminal,
+      resetStatusMap,
+      acknowledgeContinueSuccess,
+      clearMissionTerminal,
+    ],
+  );
 }
 
 export default usePointMissionEvents;

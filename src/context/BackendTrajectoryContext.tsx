@@ -30,6 +30,7 @@ export interface BackendTrajectoryContextValue {
   preview: TrajectoryPreviewState;
   invalidateForUpload: () => void;
   resumePreviewAfterFailedUpload: () => void;
+  markLoadAccepted: () => void;
   refreshNow: () => Promise<void>;
 }
 
@@ -81,6 +82,10 @@ export function BackendTrajectoryProvider({
     holdPreviewRef.current = false;
     missionIdAtHoldRef.current = null;
   }, []);
+
+  const markLoadAccepted = useCallback(() => {
+    apply({ type: "LOAD_ACCEPTED" });
+  }, [apply]);
 
   const pollOnce = useCallback(async (): Promise<void> => {
     const offline = isOfflineMode();
@@ -250,12 +255,14 @@ export function BackendTrajectoryProvider({
       preview,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
+      markLoadAccepted,
       refreshNow,
     }),
     [
       preview,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
+      markLoadAccepted,
       refreshNow,
     ],
   );
