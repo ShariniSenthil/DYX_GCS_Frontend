@@ -17,6 +17,8 @@ import {
 } from "../services/missionApi";
 import {
   EMPTY_TRAJECTORY_PREVIEW,
+  parseTrajectoryPathCleared,
+  parseTrajectoryPathPush,
   reduceTrajectoryPreview,
   shouldFetchLoadedPath,
   shouldPollMissionStatus,
@@ -42,7 +44,7 @@ export function BackendTrajectoryProvider({
 }: {
   children: ReactNode;
 }): React.ReactElement {
-  const { connectionState } = useConnection();
+  const { connectionState, socket } = useConnection();
   const [preview, setPreview] = useState<TrajectoryPreviewState>(
     EMPTY_TRAJECTORY_PREVIEW,
   );
@@ -192,6 +194,17 @@ export function BackendTrajectoryProvider({
         ),
         previewTruncated: previewResponse.preview_truncated === true,
         points: previewResponse.points,
+        snapshot: previewResponse.snapshot,
+        snapshotState: previewResponse.snapshot_state,
+        snapshotReason: previewResponse.snapshot_reason,
+        requiresReprepare: previewResponse.requires_reprepare === true,
+        snapshotOrder:
+          typeof previewResponse.seq === "number"
+            ? {
+                server_instance_id: previewResponse.server_instance_id,
+                seq: previewResponse.seq,
+              }
+            : undefined,
       });
     } catch {
       if (epochAtStart === epochRef.current) {
@@ -206,6 +219,42 @@ export function BackendTrajectoryProvider({
     lastStatusAtRef.current = 0;
     await pollOnce();
   }, [pollOnce]);
+
+  // Verified push from the backend: the generator's whole path in one event.
+  // The reducer orders events, ties the path to the current mission and keeps
+  // the REST fallback from overwriting it. The poll below stays as the fallback.
+  useEffect(() => {
+    if (!socket) {
+      return undefined;
+    }
+    const onPath = (raw: unknown) => {
+      const push = parseTrajectoryPathPush(raw);
+      if (push) {
+        apply({ type: "PUSH_PATH", push });
+      }
+    };
+    const onCleared = (raw: unknown) => {
+      const cleared = parseTrajectoryPathCleared(raw);
+      if (cleared) {
+        apply({ type: "PUSH_CLEARED", cleared });
+      }
+    };
+    socket.on("trajectory_path", onPath);
+    socket.on("trajectory_path_cleared", onCleared);
+    return () => {
+      socket.off("trajectory_path", onPath);
+      socket.off("trajectory_path_cleared", onCleared);
+    };
+  }, [socket, apply]);
+
+  // A push for a mission STATUS has not named yet is held by the reducer; ask
+  // for STATUS now instead of waiting for the next poll tick.
+  const hasPendingPush = preview.pendingPush != null;
+  useEffect(() => {
+    if (hasPendingPush) {
+      void refreshNow();
+    }
+  }, [hasPendingPush, refreshNow]);
 
   useEffect(() => {
     const offline = isOfflineMode();

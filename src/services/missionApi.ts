@@ -464,6 +464,30 @@ export interface LoadedPathResponse {
 
   points:
     LoadedPathPoint[];
+
+  /**
+   * Identity of the verified generator snapshot (new backend). `null` or absent
+   * on old backends / while no verified snapshot is live: such a response is the
+   * legacy capped preview and must never replace a path already pushed.
+   */
+  snapshot?: {
+    server_instance_id: string;
+    seq: number;
+    mission_id: string;
+    signature: string;
+  } | null;
+
+  /**
+   * Present when the new backend has no live snapshot: why there are no points.
+   * "assembling" = keep waiting; "invalid" = a new preparation is required.
+   */
+  snapshot_state?: "live" | "assembling" | "invalid" | "idle" | "disabled";
+  snapshot_reason?: string | null;
+  requires_reprepare?: boolean;
+  assembling?: boolean;
+  /** Ordering identity of this response (not-live case). */
+  server_instance_id?: string;
+  seq?: number;
 }
 
 export interface DeleteMissionResponse {
