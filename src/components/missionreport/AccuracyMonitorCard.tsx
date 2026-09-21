@@ -4,6 +4,7 @@ import { GestureDetector } from "react-native-gesture-handler";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
+import { liveDataStateLabel, type LiveDataState } from "../../utils/liveDataState";
 
 interface AccuracyMonitorCardProps {
   isMissionActive?: boolean;
@@ -28,6 +29,9 @@ interface AccuracyMonitorCardProps {
   targetHeadingDeg?: number | null;
   headingErrorDeg?: number | null;
   distanceToGoalM?: number | null;
+
+  /** Freshness/availability of the backend telemetry shown by this monitor. */
+  dataState?: LiveDataState;
 
   /**
    * Injected automatically by DraggableCard
@@ -102,23 +106,35 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
   targetHeadingDeg,
   headingErrorDeg,
   distanceToGoalM,
+  dataState,
   dragGesture,
   isDraggingActive = false,
   onClose,
 }) => {
-  const validAlongSide = useMemo(
+  const rawAlongSide = useMemo(
     () => getValidMillimetres(alongSideMm),
     [alongSideMm],
   );
 
-  const validCrossTrack = useMemo(
+  const rawCrossTrack = useMemo(
     () => getValidMillimetres(crossTrackMm),
     [crossTrackMm],
   );
 
+  const resolvedDataState: LiveDataState =
+    dataState ??
+    (!isMissionActive
+      ? "inactive"
+      : rawAlongSide !== null || rawCrossTrack !== null
+        ? "live"
+        : "waiting");
+  const acceptsLiveData = resolvedDataState === "live";
+  const validAlongSide = acceptsLiveData ? rawAlongSide : null;
+  const validCrossTrack = acceptsLiveData ? rawCrossTrack : null;
+
   const alongSideStatus = useMemo(() => {
-    if (!isMissionActive) {
-      return "MISSION NOT ACTIVE";
+    if (!acceptsLiveData) {
+      return liveDataStateLabel(resolvedDataState);
     }
 
     if (validAlongSide === null) {
@@ -126,11 +142,11 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
     }
 
     return formatDirection(alongSidePosition);
-  }, [isMissionActive, validAlongSide, alongSidePosition]);
+  }, [acceptsLiveData, resolvedDataState, validAlongSide, alongSidePosition]);
 
   const crossTrackStatus = useMemo(() => {
-    if (!isMissionActive) {
-      return "MISSION NOT ACTIVE";
+    if (!acceptsLiveData) {
+      return liveDataStateLabel(resolvedDataState);
     }
 
     if (validCrossTrack === null) {
@@ -138,11 +154,11 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
     }
 
     return formatDirection(crossTrackSide);
-  }, [isMissionActive, validCrossTrack, crossTrackSide]);
+  }, [acceptsLiveData, resolvedDataState, validCrossTrack, crossTrackSide]);
 
-  const alongSideLive = isMissionActive && validAlongSide !== null;
+  const alongSideLive = acceptsLiveData && validAlongSide !== null;
 
-  const crossTrackLive = isMissionActive && validCrossTrack !== null;
+  const crossTrackLive = acceptsLiveData && validCrossTrack !== null;
 
   // Display smoothing is intentionally local to this panel. Mission control
   // continues to receive the unsmoothed telemetry values.
@@ -156,47 +172,47 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
     maxJump: 2_000,
     settleEpsilon: 0.15,
   });
-  const displayActualSpeed = useSmoothedDisplayValue(actualSpeedMps, {
+  const displayActualSpeed = useSmoothedDisplayValue(acceptsLiveData ? actualSpeedMps : null, {
     timeConstantMs: 220,
     maxJump: 4,
     settleEpsilon: 0.005,
   });
-  const displayTargetHeading = useSmoothedDisplayValue(targetHeadingDeg, {
+  const displayTargetHeading = useSmoothedDisplayValue(acceptsLiveData ? targetHeadingDeg : null, {
     timeConstantMs: 220,
     maxJump: 120,
     settleEpsilon: 0.05,
     circular: true,
   });
-  const displayHeadingError = useSmoothedDisplayValue(headingErrorDeg, {
+  const displayHeadingError = useSmoothedDisplayValue(acceptsLiveData ? headingErrorDeg : null, {
     timeConstantMs: 220,
     maxJump: 90,
     settleEpsilon: 0.05,
   });
-  const displayDistanceToGoal = useSmoothedDisplayValue(distanceToGoalM, {
+  const displayDistanceToGoal = useSmoothedDisplayValue(acceptsLiveData ? distanceToGoalM : null, {
     timeConstantMs: 260,
     maxJump: 10,
     settleEpsilon: 0.01,
   });
 
   const alongSideText = useMemo(
-    () => formatMillimetres(isMissionActive ? displayAlongSide : null),
-    [isMissionActive, displayAlongSide],
+    () => formatMillimetres(acceptsLiveData ? displayAlongSide : null),
+    [acceptsLiveData, displayAlongSide],
   );
 
   const crossTrackText = useMemo(
-    () => formatMillimetres(isMissionActive ? displayCrossTrack : null),
-    [isMissionActive, displayCrossTrack],
+    () => formatMillimetres(acceptsLiveData ? displayCrossTrack : null),
+    [acceptsLiveData, displayCrossTrack],
   );
 
-  const actualSpeedText = useMemo(() => formatSpeed(isMissionActive ? displayActualSpeed : null), [isMissionActive, displayActualSpeed]);
-  const targetHeadingText = useMemo(() => formatHeading(isMissionActive ? displayTargetHeading : null), [isMissionActive, displayTargetHeading]);
-  const headingErrorText = useMemo(() => formatHeadingError(isMissionActive ? displayHeadingError : null), [isMissionActive, displayHeadingError]);
-  const distanceToGoalText = useMemo(() => formatDistance(isMissionActive ? displayDistanceToGoal : null), [isMissionActive, displayDistanceToGoal]);
+  const actualSpeedText = useMemo(() => formatSpeed(acceptsLiveData ? displayActualSpeed : null), [acceptsLiveData, displayActualSpeed]);
+  const targetHeadingText = useMemo(() => formatHeading(acceptsLiveData ? displayTargetHeading : null), [acceptsLiveData, displayTargetHeading]);
+  const headingErrorText = useMemo(() => formatHeadingError(acceptsLiveData ? displayHeadingError : null), [acceptsLiveData, displayHeadingError]);
+  const distanceToGoalText = useMemo(() => formatDistance(acceptsLiveData ? displayDistanceToGoal : null), [acceptsLiveData, displayDistanceToGoal]);
 
-  const actualSpeedLive = isMissionActive && actualSpeedMps !== null && actualSpeedMps !== undefined;
-  const targetHeadingLive = isMissionActive && targetHeadingDeg !== null && targetHeadingDeg !== undefined;
-  const headingErrorLive = isMissionActive && headingErrorDeg !== null && headingErrorDeg !== undefined;
-  const distanceToGoalLive = isMissionActive && distanceToGoalM !== null && distanceToGoalM !== undefined;
+  const actualSpeedLive = acceptsLiveData && actualSpeedMps !== null && actualSpeedMps !== undefined;
+  const targetHeadingLive = acceptsLiveData && targetHeadingDeg !== null && targetHeadingDeg !== undefined;
+  const headingErrorLive = acceptsLiveData && headingErrorDeg !== null && headingErrorDeg !== undefined;
+  const distanceToGoalLive = acceptsLiveData && distanceToGoalM !== null && distanceToGoalM !== undefined;
 
   const hasLiveData = alongSideLive || crossTrackLive || actualSpeedLive;
 
@@ -279,7 +295,7 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
             {actualSpeedText}
           </Text>
           <Text numberOfLines={1} style={styles.metricStatus}>
-            RPP ODOM
+            {acceptsLiveData ? "RPP ODOM" : liveDataStateLabel(resolvedDataState)}
           </Text>
         </View>
         <View style={styles.verticalDivider} />
@@ -289,7 +305,7 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
             {targetHeadingText}
           </Text>
           <Text numberOfLines={1} style={styles.metricStatus}>
-            FINAL GUIDANCE
+            {acceptsLiveData ? "FINAL GUIDANCE" : liveDataStateLabel(resolvedDataState)}
           </Text>
         </View>
       </View>
@@ -303,7 +319,7 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
             {headingErrorText}
           </Text>
           <Text numberOfLines={1} style={styles.metricStatus}>
-            FINAL RPP ERROR
+            {acceptsLiveData ? "FINAL RPP ERROR" : liveDataStateLabel(resolvedDataState)}
           </Text>
         </View>
         <View style={styles.verticalDivider} />
@@ -313,7 +329,7 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
             {distanceToGoalText}
           </Text>
           <Text numberOfLines={1} style={styles.metricStatus}>
-            ACTIVE RPP GOAL
+            {acceptsLiveData ? "ACTIVE RPP GOAL" : liveDataStateLabel(resolvedDataState)}
           </Text>
         </View>
       </View>

@@ -116,9 +116,7 @@ export const NativeWaypointLayer = memo(function NativeWaypointLayer({
         id={layerId}
         style={variant === "authoring" ? AUTHORING_POINT_STYLE : MISSION_POINT_STYLE}
       />
-      {variant === "authoring" && (
-        <SymbolLayer id={`${layerId}-sequence`} style={WAYPOINT_LABEL_STYLE} />
-      )}
+      <SymbolLayer id={`${layerId}-sequence`} style={WAYPOINT_LABEL_STYLE} />
     </ShapeSource>
   );
 });

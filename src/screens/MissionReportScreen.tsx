@@ -20,6 +20,7 @@ import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard
 import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
 import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
 import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
+import type { LiveDataState } from "../utils/liveDataState";
 import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
 import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
 import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
@@ -222,6 +223,7 @@ export default function MissionReportScreen({
   const { setMissionSnapshot } = useFieldMap();
   const {
     preview,
+    authoringChanged,
     invalidateForUpload,
     resumePreviewAfterFailedUpload,
     refreshNow,
@@ -858,21 +860,49 @@ export default function MissionReportScreen({
       backendMissionState,
     );
 
-  const accuracyDataAvailable =
-    connectionState === "connected" &&
-    accuracyMissionActive &&
-    telemetry.accuracy_available === true &&
-    typeof telemetry.front_back_error_mm === "number" &&
-    Number.isFinite(telemetry.front_back_error_mm) &&
-    typeof telemetry.cross_track_error_mm === "number" &&
-    Number.isFinite(telemetry.cross_track_error_mm);
-
-  const overallAccuracyDataAvailable =
-    connectionState === "connected" &&
-    accuracyMissionActive &&
+  const overallAccuracyMeasurementPresent =
     telemetry.accuracy_available === true &&
     typeof telemetry.radial_error_mm === "number" &&
     Number.isFinite(telemetry.radial_error_mm);
+
+  const rppMeasurementsPresent = [
+    telemetry.rpp_along_remaining_mm,
+    telemetry.rpp_cross_track_error_mm,
+    telemetry.rpp_actual_speed_mps,
+    telemetry.rpp_guidance_bearing_deg,
+    telemetry.rpp_heading_error_deg,
+    telemetry.rpp_distance_to_goal_m,
+  ].some((value) => typeof value === "number" && Number.isFinite(value));
+
+  // Raw telemetry remains untouched. These are presentation states only, so
+  // each backend metric can say live/stale/waiting without fabricating a value.
+  const missionTelemetryState: LiveDataState =
+    connectionState !== "connected"
+      ? "offline"
+      : telemetry.stale === true
+        ? "stale"
+        : !accuracyMissionActive
+          ? "inactive"
+          : "live";
+
+  const rppDataState: LiveDataState =
+    missionTelemetryState !== "live"
+      ? missionTelemetryState
+      : rppMeasurementsPresent
+        ? "live"
+        : "waiting";
+
+  const overallAccuracyDataState: LiveDataState =
+    missionTelemetryState !== "live"
+      ? missionTelemetryState
+      : telemetry.accuracy_available !== true
+        ? "unavailable"
+        : overallAccuracyMeasurementPresent
+          ? "live"
+          : "waiting";
+
+  const overallAccuracyDataAvailable =
+    overallAccuracyDataState === "live";
 
   /**
    * Controls whether the main button displays
@@ -2762,6 +2792,13 @@ export default function MissionReportScreen({
       return {
         success: false,
         message: "Mission screen is not active.",
+      };
+    }
+
+    if (authoringChanged) {
+      return {
+        success: false,
+        message: "Update Trajectory in Marking Plan before starting this mission.",
       };
     }
 
@@ -4926,6 +4963,7 @@ export default function MissionReportScreen({
         >
           <AccuracyMonitorCard
             isMissionActive={accuracyMissionActive}
+            dataState={rppDataState}
             alongSideMm={telemetry.rpp_along_remaining_mm}
             alongSidePosition={telemetry.rpp_along_position}
             crossTrackMm={telemetry.rpp_cross_track_error_mm}
@@ -4946,6 +4984,7 @@ export default function MissionReportScreen({
         >
           <DistanceToTargetCard
             isMissionActive={accuracyMissionActive}
+            dataState={overallAccuracyDataState}
             accuracyAvailable={overallAccuracyDataAvailable}
             overallAccuracyMm={
               overallAccuracyDataAvailable ? telemetry.radial_error_mm : null
@@ -5001,6 +5040,7 @@ export default function MissionReportScreen({
             waitingForManual={effectiveWaitingForManual}
             isMissionLoaded={hasUploadedMission}
             isMissionReady={canStartMission}
+            isPlanUpdateRequired={authoringChanged}
             isPreparing={isPreparingMission}
             onClose={() => setPanelVisible("missionControls", false)}
           />

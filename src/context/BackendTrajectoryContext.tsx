@@ -30,6 +30,9 @@ const STATUS_INTERVAL_READY_MS = 2000;
 
 export interface BackendTrajectoryContextValue {
   preview: TrajectoryPreviewState;
+  /** The visible Marking Plan no longer matches the backend-confirmed path. */
+  authoringChanged: boolean;
+  markAuthoringChanged: () => void;
   invalidateForUpload: () => void;
   resumePreviewAfterFailedUpload: () => void;
   markLoadAccepted: () => void;
@@ -48,6 +51,7 @@ export function BackendTrajectoryProvider({
   const [preview, setPreview] = useState<TrajectoryPreviewState>(
     EMPTY_TRAJECTORY_PREVIEW,
   );
+  const [authoringChanged, setAuthoringChanged] = useState(false);
 
   const previewRef = useRef(preview);
   const epochRef = useRef(0);
@@ -56,6 +60,8 @@ export function BackendTrajectoryProvider({
   const lastStatusAtRef = useRef(0);
   const holdPreviewRef = useRef(false);
   const missionIdAtHoldRef = useRef<string | null>(null);
+  const authoringVersionRef = useRef(0);
+  const awaitingAuthoringVersionRef = useRef<number | null>(null);
 
   useEffect(() => {
     previewRef.current = preview;
@@ -77,13 +83,36 @@ export function BackendTrajectoryProvider({
     lastReadyRef.current = false;
     holdPreviewRef.current = true;
     missionIdAtHoldRef.current = previewRef.current.missionId;
+    // Keep Load and Start blocked until a path generated for this exact editor
+    // revision returns from the backend.
+    awaitingAuthoringVersionRef.current = authoringVersionRef.current;
     apply({ type: "UPLOAD_STARTED", epoch: epochRef.current });
   }, [apply]);
+
+  const markAuthoringChanged = useCallback(() => {
+    authoringVersionRef.current += 1;
+    awaitingAuthoringVersionRef.current = null;
+    setAuthoringChanged(true);
+  }, []);
 
   const resumePreviewAfterFailedUpload = useCallback(() => {
     holdPreviewRef.current = false;
     missionIdAtHoldRef.current = null;
+    awaitingAuthoringVersionRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (
+      awaitingAuthoringVersionRef.current !== null &&
+      awaitingAuthoringVersionRef.current === authoringVersionRef.current &&
+      preview.phase === "ready" &&
+      preview.points.length >= 2 &&
+      preview.pendingPush == null
+    ) {
+      awaitingAuthoringVersionRef.current = null;
+      setAuthoringChanged(false);
+    }
+  }, [preview.phase, preview.points.length, preview.pendingPush]);
 
   const markLoadAccepted = useCallback(() => {
     apply({ type: "LOAD_ACCEPTED" });
@@ -302,6 +331,8 @@ export function BackendTrajectoryProvider({
   const value = useMemo<BackendTrajectoryContextValue>(
     () => ({
       preview,
+      authoringChanged,
+      markAuthoringChanged,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
       markLoadAccepted,
@@ -309,6 +340,8 @@ export function BackendTrajectoryProvider({
     }),
     [
       preview,
+      authoringChanged,
+      markAuthoringChanged,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
       markLoadAccepted,

@@ -429,6 +429,8 @@ export default function PathPlanScreen({
   const { connectionState } = useConnection();
   const {
     preview,
+    authoringChanged,
+    markAuthoringChanged,
     invalidateForUpload,
     resumePreviewAfterFailedUpload,
     markLoadAccepted,
@@ -595,6 +597,8 @@ export default function PathPlanScreen({
     [missionWaypoints],
   );
 
+  const planNeedsUpload = authoringChanged;
+
   useEffect(() => {
     waypointsRef.current = waypoints;
   }, [waypoints]);
@@ -604,6 +608,7 @@ export default function PathPlanScreen({
     (newWaypoints: PathPlanWaypoint[]) => {
       if (!isRestoringMissionRef.current) {
         userEditedWaypointsRef.current = true;
+        markAuthoringChanged();
       }
       setMissionWaypoints(
         newWaypoints.map((wp, idx) => ({
@@ -623,7 +628,7 @@ export default function PathPlanScreen({
         })),
       );
     },
-    [setMissionWaypoints],
+    [markAuthoringChanged, setMissionWaypoints],
   );
 
   // Undo/Redo history — wraps updateWaypoints for all user-initiated changes
@@ -2580,6 +2585,24 @@ export default function PathPlanScreen({
     }
   }
 
+  function handleUpdateTrajectory(): void {
+    if (roverUploadBlockedReason) {
+      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      return;
+    }
+    if (waypoints.length < 2) {
+      showPathPlanToast(
+        "error",
+        "Not Enough Points",
+        "Add at least two marking points before updating the trajectory.",
+      );
+      return;
+    }
+    // Upload this exact visible order. Backend confirmation (socket push or
+    // verified preview) is still required before Load becomes available.
+    askExtensionAndUpload(waypoints);
+  }
+
   const restoreLatestMission = useCallback(
     async ({
       silent = false,
@@ -3677,12 +3700,16 @@ export default function PathPlanScreen({
                         }
                       : { lat: 0, lon: 0, alt: 0 }
                   }
-                  onRequestUpload={handleRequestUpload}
+                  onRequestUpload={
+                    planNeedsUpload ? handleUpdateTrajectory : handleRequestUpload
+                  }
+                  planNeedsUpload={planNeedsUpload}
                   onLoadMission={handleLoadMissionToController}
                   roverUploadBlockedReason={roverUploadBlockedReason}
                   loadEnabled={
-                    canLoadBackendPreview(preview) ||
-                    (preview.acceptedForStart && preview.missionId !== null)
+                    !planNeedsUpload &&
+                    (canLoadBackendPreview(preview) ||
+                      (preview.acceptedForStart && preview.missionId !== null))
                   }
                   loadVisible={canDrawBackendLine(preview) && preview.missionId !== null}
                   loadAgain={preview.acceptedForStart}
@@ -3745,6 +3772,15 @@ export default function PathPlanScreen({
                 }
               >
                 <RobotPositionPanel
+                  dataState={
+                    connectionState !== "connected"
+                      ? "offline"
+                      : telemetry.stale === true
+                        ? "stale"
+                        : roverPosition
+                          ? "live"
+                          : "waiting"
+                  }
                   roverPosition={
                     roverPosition
                       ? {

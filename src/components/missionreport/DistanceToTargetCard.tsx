@@ -4,6 +4,7 @@ import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
+import { liveDataStateLabel, type LiveDataState } from "../../utils/liveDataState";
 
 interface Props {
   isMissionActive?: boolean;
@@ -27,6 +28,9 @@ interface Props {
    * UNAVAILABLE
    */
   accuracyStatus?: string | null;
+
+  /** Freshness/availability of the backend value shown by this card. */
+  dataState?: LiveDataState;
 
   dragGesture?: any;
   isDraggingActive?: boolean;
@@ -72,6 +76,7 @@ export const DistanceToTargetCard: React.FC<Props> = ({
   overallAccuracyMm,
   accuracyAvailable = false,
   accuracyStatus,
+  dataState,
   dragGesture,
   isDraggingActive = false,
 }) => {
@@ -80,8 +85,15 @@ export const DistanceToTargetCard: React.FC<Props> = ({
     [overallAccuracyMm],
   );
 
-  const displayedAccuracy =
-    isMissionActive && accuracyAvailable ? validAccuracy : null;
+  const resolvedDataState: LiveDataState =
+    dataState ??
+    (!isMissionActive
+      ? "inactive"
+      : accuracyAvailable && validAccuracy !== null
+        ? "live"
+        : "waiting");
+  const isLive = resolvedDataState === "live";
+  const displayedAccuracy = isLive ? validAccuracy : null;
 
   // Presentation-only smoothing. The raw accuracy remains available to
   // the mission lifecycle and accuracy pass/fail logic.
@@ -96,14 +108,9 @@ export const DistanceToTargetCard: React.FC<Props> = ({
     [smoothedAccuracy],
   );
 
-  const isLive =
-    isMissionActive && accuracyAvailable && displayedAccuracy !== null;
-
-  const statusText = !isMissionActive
-    ? "MISSION NOT ACTIVE"
-    : !isLive
-      ? "WAITING FOR ACCURACY"
-      : formatStatus(accuracyStatus);
+  const statusText = isLive
+    ? formatStatus(accuracyStatus)
+    : liveDataStateLabel(resolvedDataState);
 
   return (
     <OptionalGestureDetector gesture={dragGesture}>

@@ -82,6 +82,8 @@ export type MissionControlCardProps = {
    * True while GCS is re-preparing a stored CSV after COMPLETED/STOPPED.
    */
   isPreparing?: boolean;
+  /** A local Marking Plan edit has not yet been rebuilt by the backend. */
+  isPlanUpdateRequired?: boolean;
 
   dragGesture?: any;
   isDraggingActive?: boolean;
@@ -110,6 +112,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   isMissionLoaded = false,
   isMissionReady = false,
   isPreparing = false,
+  isPlanUpdateRequired = false,
   dragGesture,
   isDraggingActive,
   onClose,
@@ -552,7 +555,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             style={[
               styles.controlButton,
               isRunning ? styles.stopButton : styles.startButton,
-              !isRunning && !isMissionReady && styles.buttonDisabled,
+              !isRunning && (!isMissionReady || isPlanUpdateRequired) && styles.buttonDisabled,
             ]}
             onPress={() => {
               if (isRunning) {
@@ -568,7 +571,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
               isStarting ||
               isStopping ||
               isPreparing ||
-              (!isRunning && !isMissionReady)
+              (!isRunning && (!isMissionReady || isPlanUpdateRequired))
             }
           >
             <Text style={styles.buttonText}>
@@ -578,6 +581,8 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                   ? "Stopping..."
                   : isRunning
                     ? "STOP"
+                    : isPlanUpdateRequired
+                      ? "UPDATE PLAN"
                     : !isMissionLoaded
                       ? "NO MISSION"
                       : "START"}

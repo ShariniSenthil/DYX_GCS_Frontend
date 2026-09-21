@@ -64,7 +64,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
   armed = false,
   rtkFixType = 0,
   edgeToEdge = false,
-  isVisible: _isVisible = true,
+  isVisible = true,
   statusMap,
 }) => {
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
@@ -82,31 +82,69 @@ const MissionMapNativeBase: React.FC<Props> = ({
   const { preview } = useBackendTrajectory();
   const { sharedCamera, setSharedCamera } = useFieldMap();
 
-  const hasRoverPosition =
+  const rawHasRoverPosition =
     isValidLngLat(roverLon, roverLat) && !(roverLat === 0 && roverLon === 0);
-  const roverStatus = armed ? "armed" : rtkFixType >= 5 ? "rtk" : "disarmed";
+  const [mapRover, setMapRover] = useState<{
+    lat: number;
+    lon: number;
+    heading: number | null;
+    armed: boolean;
+    rtkFixType: number;
+  } | null>(null);
+  const roverUpdateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRoverUpdateRef = useRef(0);
+
+  // Mapbox MarkerView is a native view. Updating it for every websocket packet
+  // can overwhelm Android's renderer, so draw the latest rover position at a
+  // stable 10 FPS. The raw telemetry is still used everywhere else.
+  useEffect(() => {
+    if (!isVisible || !rawHasRoverPosition) {
+      if (roverUpdateRef.current) clearTimeout(roverUpdateRef.current);
+      roverUpdateRef.current = null;
+      setMapRover(null);
+      return undefined;
+    }
+    const next = { lat: roverLat, lon: roverLon, heading, armed, rtkFixType };
+    const apply = () => {
+      lastRoverUpdateRef.current = Date.now();
+      roverUpdateRef.current = null;
+      setMapRover(next);
+    };
+    const wait = Math.max(0, 100 - (Date.now() - lastRoverUpdateRef.current));
+    if (wait === 0) apply();
+    else roverUpdateRef.current = setTimeout(apply, wait);
+    return () => {
+      if (roverUpdateRef.current) clearTimeout(roverUpdateRef.current);
+      roverUpdateRef.current = null;
+    };
+  }, [isVisible, rawHasRoverPosition, roverLat, roverLon, heading, armed, rtkFixType]);
+
+  const roverStatus = mapRover?.armed ? "armed" : (mapRover?.rtkFixType ?? 0) >= 5 ? "rtk" : "disarmed";
 
   const center = useMemo<[number, number]>(() => {
-    if (hasRoverPosition) return [roverLon, roverLat];
+    if (mapRover) return [mapRover.lon, mapRover.lat];
     const firstValid = waypoints.find((wp) => isValidLngLat(wp.lon, wp.lat));
     if (firstValid) return [firstValid.lon, firstValid.lat];
     return [80.2707, 13.0827];
-  }, [hasRoverPosition, roverLat, roverLon, waypoints]);
+  }, [mapRover, waypoints]);
 
   const waypointCollection = useMemo(() => {
     return {
       type: "FeatureCollection" as const,
-      features: limitMapPoints(waypoints)
-        .map((wp, index) => {
+      // Preserve the source sequence before sampling. A rendered subset must
+      // still display the same mission numbers as the Marking Plan map.
+      features: limitMapPoints(waypoints.map((waypoint, sequence) => ({ waypoint, sequence })))
+        .map(({ waypoint: wp, sequence }) => {
           if (!isValidLngLat(wp.lon, wp.lat)) return null;
           const status = statusMap?.[wp.sn]?.status;
           const completed = status === "completed" || status === "skipped";
           return {
             type: "Feature" as const,
-            id: index,
+            id: sequence,
             properties: {
               sn: wp.sn,
-              active: index === activeWaypointIndex ? 1 : 0,
+              sequence: sequence + 1,
+              active: sequence === activeWaypointIndex ? 1 : 0,
               completed: completed ? 1 : 0,
             },
             geometry: {
@@ -180,21 +218,21 @@ const MissionMapNativeBase: React.FC<Props> = ({
       maxLon = Math.max(maxLon, wp.lon);
       maxLat = Math.max(maxLat, wp.lat);
     }
-    if (hasRoverPosition) {
-      minLon = Math.min(minLon, roverLon);
-      minLat = Math.min(minLat, roverLat);
-      maxLon = Math.max(maxLon, roverLon);
-      maxLat = Math.max(maxLat, roverLat);
+    if (mapRover) {
+      minLon = Math.min(minLon, mapRover.lon);
+      minLat = Math.min(minLat, mapRover.lat);
+      maxLon = Math.max(maxLon, mapRover.lon);
+      maxLat = Math.max(maxLat, mapRover.lat);
     }
     cameraRef.current?.fitBounds([maxLon, maxLat], [minLon, minLat], 50, 400);
-  }, [waypoints, hasRoverPosition, roverLat, roverLon]);
+  }, [waypoints, mapRover]);
 
   const handleCenterRover = useCallback(() => {
-    if (!hasRoverPosition) return;
+    if (!mapRover) return;
     zoomRef.current = 22;
-    cameraRef.current?.flyTo([roverLon, roverLat], 500);
+    cameraRef.current?.flyTo([mapRover.lon, mapRover.lat], 500);
     cameraRef.current?.zoomTo(22, 500);
-  }, [hasRoverPosition, roverLat, roverLon]);
+  }, [mapRover]);
 
   const handleZoomIn = useCallback(() => {
     zoomRef.current = Math.min(zoomRef.current + 1, 22);
@@ -218,6 +256,12 @@ const MissionMapNativeBase: React.FC<Props> = ({
     );
   }
 
+  if (!isVisible) {
+    // Cached tab: unmount the expensive native surface while it is hidden.
+    // This prevents concurrent Mapbox surfaces and stale telemetry work.
+    return <View style={[styles.mapContainer, edgeToEdge && styles.edgeToEdge]} />;
+  }
+
   return (
     <View
       style={[styles.mapContainer, edgeToEdge && styles.edgeToEdge]}
@@ -232,7 +276,10 @@ const MissionMapNativeBase: React.FC<Props> = ({
         logoEnabled={false}
         attributionEnabled={false}
         scaleBarEnabled={false}
-        surfaceView={true}
+        // TextureView survives tab overlays/remounts more reliably than a
+        // SurfaceView on the tablet during a live mission. The marker itself
+        // is rate-limited above, so this safety choice does not cause churn.
+        surfaceView={false}
         pitchEnabled={false}
         rotateEnabled={false}
         onDidFinishLoadingStyle={onStyleLoaded}
@@ -263,14 +310,14 @@ const MissionMapNativeBase: React.FC<Props> = ({
           />
         )}
 
-        {hasRoverPosition && (
+        {mapRover && (
           <MarkerView
-            coordinate={[roverLon, roverLat]}
+            coordinate={[mapRover.lon, mapRover.lat]}
             anchor={{ x: 0.5, y: 0.5 }}
             allowOverlap
             style={{ backgroundColor: "transparent" }}
           >
-            <RoverVehicleIcon heading={heading} status={roverStatus} />
+            <RoverVehicleIcon heading={mapRover.heading} status={roverStatus} />
           </MarkerView>
         )}
       </MapView>

@@ -30,6 +30,8 @@ type Props = {
      * Called to request upload (host should open a native file picker and then call onUpdateWaypoints)
      */
     onRequestUpload?: () => void;
+    /** The edited point order differs from the backend-verified trajectory. */
+    planNeedsUpload?: boolean;
     /**
      * Called when user selects Manual Control mode to open fullscreen control UI
      */
@@ -65,6 +67,7 @@ const MissionOpsPanel = React.memo(({
     onBulkDelete = () => { },
     onExportMission,
     onRequestUpload,
+    planNeedsUpload = false,
     onManualControlOpen,
     dragGesture,
     isDraggingActive,
@@ -361,9 +364,15 @@ const MissionOpsPanel = React.memo(({
 
             {/* Action Buttons */}
             <View style={styles.buttonsRow}>
-                <TouchableOpacity style={[styles.button, styles.uploadBtn]} onPress={onRequestUpload} activeOpacity={0.75}>
-                    <MaterialCommunityIcons name="upload" size={20} color="#10B981" />
-                    <Text style={[styles.buttonText, { color: '#10B981' }]}>Upload</Text>
+                <TouchableOpacity
+                    style={[styles.button, styles.uploadBtn, planNeedsUpload && styles.updateTrajectoryBtn]}
+                    onPress={onRequestUpload}
+                    activeOpacity={0.75}
+                >
+                    <MaterialCommunityIcons name={planNeedsUpload ? "upload-sync" : "upload"} size={20} color="#10B981" />
+                    <Text style={[styles.buttonText, { color: '#10B981' }]}>
+                        {planNeedsUpload ? "Update Trajectory" : "Upload"}
+                    </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.button, waypoints.length ? styles.exportBtn : styles.disabledBtn]}
@@ -385,7 +394,17 @@ const MissionOpsPanel = React.memo(({
                     disabled={waypoints.length === 0 || Boolean(roverUploadBlockedReason) || !loadEnabled || isLoadingMission || loadPreparing}
                 >
                     <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
-                    <Text style={styles.loadText}>{isLoadingMission ? "Loading..." : loadPreparing ? "Preparing..." : loadAgain ? "Load Again" : "Load"}</Text>
+                    <Text style={styles.loadText}>
+                        {planNeedsUpload
+                            ? "Update trajectory first"
+                            : isLoadingMission
+                                ? "Loading..."
+                                : loadPreparing
+                                    ? "Preparing..."
+                                    : loadAgain
+                                        ? "Load Again"
+                                        : "Load"}
+                    </Text>
                     <View style={styles.loadCountBadge}>
                         <Text style={styles.loadCountText}>{waypoints.length}</Text>
                     </View>
@@ -552,6 +571,15 @@ const styles = StyleSheet.create({
     },
     uploadBtn: {
         borderColor: 'rgba(16, 185, 129, 0.3)',
+    },
+    updateTrajectoryBtn: {
+        backgroundColor: 'rgba(16, 185, 129, 0.18)',
+        borderColor: '#34D399',
+        shadowColor: '#34D399',
+        shadowOpacity: 0.72,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 9,
     },
     exportBtn: {
         borderColor: 'rgba(59, 130, 246, 0.3)',

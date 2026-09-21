@@ -4,10 +4,13 @@ import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSmoothedDisplayValue } from '../../hooks/useSmoothedDisplayValue';
 import { PATH_PLAN_GLASS } from '../../constants/pathPlanGlass';
+import { liveDataStateLabel, type LiveDataState } from '../../utils/liveDataState';
 
 interface Props {
     roverPosition?: { lat: number; lon: number; alt?: number } | null;
     heading?: number | null;
+    /** Whether the displayed location is fresh enough for an operator to use. */
+    dataState?: LiveDataState;
     /** Injected by DraggableCard (handleType="custom") — gesture object for the header drag handle */
     dragGesture?: any;
     /** True while the card is being dragged — injected by DraggableCard */
@@ -15,26 +18,29 @@ interface Props {
     onClose?: () => void;
 }
 
-export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dragGesture, isDraggingActive, onClose }) => {
-    const hasFix = !!roverPosition;
+export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dataState, dragGesture, isDraggingActive, onClose }) => {
+    const resolvedDataState: LiveDataState = dataState ?? (roverPosition ? 'live' : 'waiting');
+    const hasFix = resolvedDataState === 'live' && !!roverPosition;
+    const visiblePosition = hasFix ? roverPosition : null;
+    const visibleHeading = hasFix ? heading : null;
     // Smooth only what is shown in the panel. The map, mission control, and
     // telemetry store continue to receive the original rover coordinates.
-    const displayLat = useSmoothedDisplayValue(roverPosition?.lat, {
+    const displayLat = useSmoothedDisplayValue(visiblePosition?.lat, {
         timeConstantMs: 320,
         maxJump: 0.0005,
         settleEpsilon: 0.00000001,
     });
-    const displayLon = useSmoothedDisplayValue(roverPosition?.lon, {
+    const displayLon = useSmoothedDisplayValue(visiblePosition?.lon, {
         timeConstantMs: 320,
         maxJump: 0.0005,
         settleEpsilon: 0.00000001,
     });
-    const displayAlt = useSmoothedDisplayValue(roverPosition?.alt, {
+    const displayAlt = useSmoothedDisplayValue(visiblePosition?.alt, {
         timeConstantMs: 300,
         maxJump: 8,
         settleEpsilon: 0.01,
     });
-    const displayHeading = useSmoothedDisplayValue(heading, {
+    const displayHeading = useSmoothedDisplayValue(visibleHeading, {
         timeConstantMs: 240,
         maxJump: 120,
         settleEpsilon: 0.05,
@@ -55,6 +61,7 @@ export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dr
                         <MaterialCommunityIcons name="robot" size={13} color={PATH_PLAN_GLASS.cyan} />
                         <Text style={styles.headerTitle}>ROBOT POSITION</Text>
                         <View style={[styles.liveDot, { backgroundColor: hasFix ? '#4ade80' : 'rgba(255,255,255,0.3)' }]} />
+                        {!hasFix && <Text style={styles.stateText}>{liveDataStateLabel(resolvedDataState)}</Text>}
                     </View>
                     {onClose && (
                         <TouchableOpacity style={styles.headerCloseBtn} onPress={onClose} activeOpacity={0.7}>
@@ -121,6 +128,12 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
         letterSpacing: 1.5,
+    },
+    stateText: {
+        color: '#94A3B8',
+        fontSize: 7,
+        fontWeight: '700',
+        letterSpacing: 0.4,
     },
     liveDot: {
         width: 5,
