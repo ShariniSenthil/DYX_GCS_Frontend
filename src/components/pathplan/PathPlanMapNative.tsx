@@ -69,13 +69,24 @@ export const PathPlanMapNative: React.FC<any> = ({
 
   const waypointGeoJSON = useMemo(() => {
     if (!waypoints || waypoints.length === 0) return null;
-    const features = limitMapPoints(waypoints)
-      .map((wp: any, i: number) => {
+    // Preserve the original sequence before limiting points for rendering. A
+    // sampled map marker must still show its real plan number, not its index in
+    // the sampled array.
+    const features = limitMapPoints(
+      waypoints.map((waypoint: any, sequence: number) => ({
+        waypoint,
+        sequence,
+      })),
+    )
+      .map(({ waypoint: wp, sequence }: { waypoint: any; sequence: number }) => {
         if (!isValidLngLat(wp.lon, wp.lat)) return null;
         return {
           type: 'Feature',
-          id: i,
-          properties: { id: wp.id || i },
+          id: sequence,
+          properties: {
+            id: wp.id ?? sequence + 1,
+            sequence: sequence + 1,
+          },
           geometry: {
             type: 'Point',
             coordinates: [wp.lon, wp.lat],

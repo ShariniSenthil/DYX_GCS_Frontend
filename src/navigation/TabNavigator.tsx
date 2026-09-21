@@ -98,6 +98,7 @@ function TabNavigatorInner() {
   const [isMissionOpsVisible, setIsMissionOpsVisible] = useState(true);
   const [isStatisticsVisible, setIsStatisticsVisible] = useState(true);
   const [isBottomTableVisible, setIsBottomTableVisible] = useState(true);
+  const [isLightMode, setIsLightMode] = useState(false);
 
   const isMarkingPlanVisible = activeTab === "Marking Plan";
   const isMissionProgressVisible = activeTab === "Mission Progress";
@@ -110,7 +111,12 @@ function TabNavigatorInner() {
   return (
     <MissionProgressOverlayProvider>
       <View style={styles.root}>
-        <AppHeader activeTab={activeTab} onTabChange={handleTabChange} />
+        <AppHeader 
+          activeTab={activeTab} 
+          onTabChange={handleTabChange} 
+          isLightMode={isLightMode} 
+          onToggleTheme={() => setIsLightMode(!isLightMode)} 
+        />
 
         <RtkRuntimeNotice />
 
@@ -144,7 +150,7 @@ function TabNavigatorInner() {
               collapsable={false}
             >
               <ErrorBoundary componentName="Dashboard Screen">
-                <MemoDashboardScreen />
+                <MemoDashboardScreen isLightMode={isLightMode} />
               </ErrorBoundary>
             </View>
           )}

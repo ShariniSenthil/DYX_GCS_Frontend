@@ -174,7 +174,7 @@ const BottomWaypointRow = memo(
   }) => {
     let badgeColor = "#EF4444";
     if (index === 0) badgeColor = "#10B981";
-    else if (index === 1 || index === 2) badgeColor = "#F59E0B";
+    else if (index === 1 || index === 2) badgeColor = colors.info;
 
     const distanceText =
       index === 0 ? "—" : formatCoord(wp.distance || 0, 2);
@@ -1637,13 +1637,47 @@ export default function PathPlanScreen({
     }
 
     const reversed = reverseWaypointOrder(waypoints);
-    recordAndApply(reversed);
-    showPathPlanToast(
-      "success",
-      "Path Reversed",
-      `${waypoints.length} waypoint coordinates reversed.`,
+    const applyAndUploadReversedMission = (extensionMode: MissionExtensionMode) => {
+      // Load Mission works from the server's staged CSV, not from local React
+      // state. Update both from this same snapshot so the rover can never load
+      // the pre-reversal order after an operator reverses a plan.
+      recordAndApply(reversed);
+      void uploadWaypointsToBackend(reversed, extensionMode);
+    };
+
+    if (roverUploadBlockedReason) {
+      recordAndApply(reversed);
+      showPathPlanToast(
+        "info",
+        "Path Reversed Locally",
+        "Connect the rover and upload this reversed plan before loading it.",
+        5000,
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Reverse & Update Mission",
+      "This replaces the staged mission with the reversed waypoint order before it can be loaded to the rover.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "DISABLE Extension",
+          onPress: () => applyAndUploadReversedMission("DISABLE"),
+        },
+        {
+          text: "ENABLE Extension",
+          onPress: () => applyAndUploadReversedMission("ENABLE"),
+        },
+      ],
     );
-  }, [reverseWaypointOrder, waypoints, recordAndApply, showPathPlanToast]);
+  }, [
+    reverseWaypointOrder,
+    waypoints,
+    recordAndApply,
+    showPathPlanToast,
+    roverUploadBlockedReason,
+  ]);
 
   // Corner extension preview
   const [cornerExtensionOptions, setCornerExtensionOptions] =
@@ -3320,7 +3354,7 @@ export default function PathPlanScreen({
                 <MaterialCommunityIcons
                   name="loading"
                   size={24}
-                  color={colors.yellow}
+                  color={colors.info}
                 />
                 <Text style={cadStyles.loadingText}>
                   Loading CAD drawing...
@@ -5288,7 +5322,7 @@ const cadStyles = StyleSheet.create({
     gap: 8,
   },
   loadingText: {
-    color: colors.yellow,
+    color: colors.info,
     fontFamily: "monospace",
     fontSize: 13,
   },

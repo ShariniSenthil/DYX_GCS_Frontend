@@ -9,7 +9,7 @@ import {
   TouchableWithoutFeedback,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { colors } from "../../theme/colors";
+import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import { SettingsScreen } from "../../screens/SettingsScreen";
 import { useRover } from "../../context/RoverContext";
 import { useConnection } from "../../context/ConnectionContext";
@@ -27,6 +27,8 @@ import { MISSION_PROGRESS_LAYOUT } from "../../constants/missionProgressLayout";
 interface Props {
   activeTab: "Dashboard" | "Marking Plan" | "Mission Progress";
   onTabChange: (tab: "Dashboard" | "Marking Plan" | "Mission Progress") => void;
+  isLightMode?: boolean;
+  onToggleTheme?: () => void;
 }
 
 type WidgetMenuItem = {
@@ -77,7 +79,7 @@ const VEHICLE_STATUS_CARD_HEIGHT = 345;
 const WIDGET_DROPDOWN_TOP = MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE;
 const WIDGET_DROPDOWN_LEFT = MISSION_PROGRESS_LAYOUT.EDGE;
 
-const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
+const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, onToggleTheme }) => {
   // Only destructure what AppHeader actually uses — not telemetry.
   // Note: useRover() still triggers re-renders on every telemetry tick because
   // it subscribes to the full context. Phase 2 (context split) will fix this.
@@ -258,7 +260,7 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
                           <MaterialCommunityIcons
                             name={item.icon}
                             size={18}
-                            color={isSelected ? "#67E8F9" : "#94A3B8"}
+                            color={isSelected ? PATH_PLAN_GLASS.cyan : PATH_PLAN_GLASS.muted}
                             style={styles.widgetMenuItemIcon}
                           />
                           <Text
@@ -327,12 +329,27 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
               marginTop: 1,
             }}
           >
-            <MaterialCommunityIcons name="near-me" size={12} color="#67E8F9" />
+            <MaterialCommunityIcons name="near-me" size={12} color={PATH_PLAN_GLASS.cyan} />
             <Text style={styles.modeCapsuleValue}>{missionMode}</Text>
           </View>
         </TouchableOpacity>
 
         <View style={styles.rightDivider} />
+
+        {/* Theme Toggle Button */}
+        <TouchableOpacity
+          onPress={onToggleTheme}
+          style={styles.settingsCapsuleBtn}
+          accessibilityLabel="Toggle Theme"
+          accessibilityRole="button"
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons
+            name={isLightMode ? "weather-night" : "white-balance-sunny"}
+            size={18}
+            color={PATH_PLAN_GLASS.title}
+          />
+        </TouchableOpacity>
 
         {/* Settings Button */}
         <TouchableOpacity
@@ -345,7 +362,7 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange }) => {
           <MaterialCommunityIcons
             name="cog-outline"
             size={18}
-            color="#E5F1FF"
+            color={PATH_PLAN_GLASS.title}
           />
         </TouchableOpacity>
       </View>
@@ -399,9 +416,9 @@ const styles = StyleSheet.create({
   leftSection: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#07111be6",
+    backgroundColor: PATH_PLAN_GLASS.panelBg,
     borderWidth: 1,
-    borderColor: "rgba(103, 232, 249, 0.15)",
+    borderColor: PATH_PLAN_GLASS.border,
     borderRadius: 14,
     paddingHorizontal: 14,
     height: 48,
@@ -425,12 +442,12 @@ const styles = StyleSheet.create({
     height: 28,
   },
   title: {
-    color: "#E5F1FF",
+    color: PATH_PLAN_GLASS.title,
     fontSize: 13,
     fontWeight: "700",
   },
   subtitle: {
-    color: "#9FBEE3",
+    color: PATH_PLAN_GLASS.label,
     fontSize: 8,
     fontWeight: "500",
     marginTop: 0,
@@ -444,10 +461,10 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: "row",
-    backgroundColor: "#07111be6",
+    backgroundColor: PATH_PLAN_GLASS.panelBg,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(103, 232, 249, 0.15)",
+    borderColor: PATH_PLAN_GLASS.border,
     padding: 2,
     pointerEvents: "auto",
     height: 48,
@@ -466,15 +483,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabActive: {
-    backgroundColor: "rgba(103, 232, 249, 0.08)",
+    backgroundColor: PATH_PLAN_GLASS.iconWrapBg,
   },
   tabText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#94A3B8",
+    color: PATH_PLAN_GLASS.muted,
   },
   tabTextActive: {
-    color: "#67E8F9",
+    color: PATH_PLAN_GLASS.cyan,
   },
   activeIndicatorContainer: {
     position: "absolute",
@@ -486,15 +503,15 @@ const styles = StyleSheet.create({
   activeUnderline: {
     width: 14,
     height: 2.5,
-    backgroundColor: "#67E8F9",
+    backgroundColor: PATH_PLAN_GLASS.cyan,
     borderRadius: 1.25,
   },
   rightSection: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#07111be6",
+    backgroundColor: PATH_PLAN_GLASS.panelBg,
     borderWidth: 1,
-    borderColor: "rgba(103, 232, 249, 0.15)",
+    borderColor: PATH_PLAN_GLASS.border,
     borderRadius: 14,
     paddingHorizontal: 12,
     height: 48,
@@ -523,7 +540,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   wsHost: {
-    color: "#94A3B8",
+    color: PATH_PLAN_GLASS.muted,
     fontSize: 9,
     maxWidth: 140,
   },
@@ -532,20 +549,20 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   modeCapsuleLabel: {
-    color: "#94A3B8",
+    color: PATH_PLAN_GLASS.muted,
     fontSize: 8,
     fontWeight: "600",
     letterSpacing: 0.5,
   },
   modeCapsuleValue: {
-    color: "#E5F1FF",
+    color: PATH_PLAN_GLASS.title,
     fontSize: 11,
     fontWeight: "700",
   },
   rightDivider: {
     width: 1,
     height: 20,
-    backgroundColor: "rgba(103, 232, 249, 0.15)",
+    backgroundColor: PATH_PLAN_GLASS.border,
     marginHorizontal: 4,
   },
   settingsCapsuleBtn: {
@@ -567,10 +584,10 @@ const styles = StyleSheet.create({
     width: MISSION_PROGRESS_LAYOUT.LEFT_PANEL_WIDTH,
     height: VEHICLE_STATUS_CARD_HEIGHT,
     zIndex: 1002,
-    backgroundColor: "#07111be6",
+    backgroundColor: PATH_PLAN_GLASS.panelBg,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(103,232,249,0.15)",
+    borderColor: PATH_PLAN_GLASS.border,
     padding: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
@@ -579,7 +596,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   widgetDropdownTitle: {
-    color: "#67E8F9",
+    color: PATH_PLAN_GLASS.cyan,
     fontSize: 9,
     fontWeight: "700",
     letterSpacing: 0.5,
@@ -595,25 +612,25 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(103, 232, 249, 0.1)",
-    backgroundColor: "rgba(8, 16, 26, 0.9)",
+    borderColor: PATH_PLAN_GLASS.borderSubtle,
+    backgroundColor: PATH_PLAN_GLASS.innerBg,
     paddingHorizontal: 12,
   },
   widgetMenuItemSelected: {
-    borderColor: "rgba(103, 232, 249, 0.55)",
-    backgroundColor: "rgba(103, 232, 249, 0.14)",
+    borderColor: PATH_PLAN_GLASS.dragBorder,
+    backgroundColor: PATH_PLAN_GLASS.iconWrapBg,
   },
   widgetMenuItemIcon: {
     marginRight: 10,
   },
   widgetMenuItemLabel: {
     flex: 1,
-    color: "#94A3B8",
+    color: PATH_PLAN_GLASS.muted,
     fontSize: 13,
     fontWeight: "700",
   },
   widgetMenuItemLabelSelected: {
-    color: "#67E8F9",
+    color: PATH_PLAN_GLASS.cyan,
   },
 });
 

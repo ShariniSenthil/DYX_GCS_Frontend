@@ -1988,7 +1988,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   lineSegmentSelected: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: colors.info,
     height: 3,
   },
   linePoint: {
@@ -2006,12 +2006,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   linePointSelected: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: colors.info,
     width: 10,
     height: 10,
     borderRadius: 5,
     borderWidth: 2,
-    borderColor: '#FBBF24',
+    borderColor: colors.accentLight,
   },
   pointMarker: {
     position: 'absolute',
@@ -2028,12 +2028,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   pointMarkerSelected: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: colors.info,
     width: 12,
     height: 12,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#FBBF24',
+    borderColor: colors.accentLight,
   },
   currentLineSegment: {
     position: 'absolute',
@@ -2068,7 +2068,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   entityTextSelected: {
-    color: '#F59E0B',
+    color: colors.info,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -2093,9 +2093,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59, 130, 246, 0.1)',
   },
   circleSelected: {
-    borderColor: '#F59E0B',
+    borderColor: colors.info,
     borderWidth: 3,
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
   },
   circleCenter: {
     position: 'absolute',
@@ -2118,7 +2118,7 @@ const styles = StyleSheet.create({
   dimensionLine: {
     position: 'absolute',
     height: 1,
-    backgroundColor: '#F59E0B',
+    backgroundColor: colors.info,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
@@ -2127,17 +2127,17 @@ const styles = StyleSheet.create({
   },
   dimensionLineSelected: {
     height: 2,
-    backgroundColor: '#FBBF24',
+    backgroundColor: colors.accentLight,
   },
   dimensionLabel: {
     position: 'absolute',
-    backgroundColor: 'rgba(245, 158, 11, 0.9)',
+    backgroundColor: 'rgba(59, 130, 246, 0.9)',
     paddingHorizontal: 4,
     paddingVertical: 2,
     borderRadius: 3,
   },
   dimensionLabelSelected: {
-    backgroundColor: '#FBBF24',
+    backgroundColor: colors.accentLight,
   },
   dimensionText: {
     fontSize: 9,

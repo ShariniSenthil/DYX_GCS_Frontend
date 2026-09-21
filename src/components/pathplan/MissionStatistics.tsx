@@ -167,7 +167,7 @@ export const MissionStatistics: React.FC<Props> = ({ waypoints, roverPosition, d
                     {/* Est Time */}
                     <View style={styles.metricBox}>
                         <View style={styles.metricLeft}>
-                            <MaterialCommunityIcons name="clock-outline" size={16} color="#F59E0B" />
+                            <MaterialCommunityIcons name="clock-outline" size={16} color={colors.info} />
                         </View>
                         <View style={styles.metricRight}>
                             <Text style={styles.metricLabel}>EST. TIME</Text>

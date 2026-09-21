@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { CircleLayer, LineLayer, ShapeSource } from "@rnmapbox/maps";
+import { CircleLayer, LineLayer, ShapeSource, SymbolLayer } from "@rnmapbox/maps";
 import { BACKEND_TRAJECTORY_LINE_COLOR } from "../../utils/backendTrajectoryPreview";
 
 type ShapeSourceProps = React.ComponentProps<typeof ShapeSource>;
@@ -44,10 +44,30 @@ const MISSION_POINT_STYLE: React.ComponentProps<typeof CircleLayer>["style"] = {
 };
 
 const AUTHORING_POINT_STYLE: React.ComponentProps<typeof CircleLayer>["style"] = {
-  circleRadius: 6,
-  circleColor: "#ef4444",
+  // The number lives in the marker itself, so each point remains readable as
+  // part of the path rather than looking like an anonymous dot.
+  circleRadius: ["interpolate", ["linear"], ["zoom"], 16, 10, 19, 12, 22, 14],
+  circleColor: "#2563eb",
   circleStrokeColor: "#ffffff",
-  circleStrokeWidth: 2,
+  circleStrokeWidth: 2.25,
+};
+
+// Compact plan-order labels make every uploaded point identifiable without
+// turning the map into a colored overlay. Keep them visible above satellite
+// labels as well: a plan number is operational information, not decoration.
+const WAYPOINT_LABEL_STYLE: React.ComponentProps<typeof SymbolLayer>["style"] = {
+  // Token syntax is supported by both Mapbox renderers used in our Android
+  // builds and avoids expression-serialization differences between versions.
+  textField: "{sequence}",
+  textSize: ["interpolate", ["linear"], ["zoom"], 16, 9, 19, 11, 22, 12],
+  textColor: "#f8fafc",
+  textHaloColor: "#0f172a",
+  textHaloWidth: 0.75,
+  textHaloBlur: 0.2,
+  textOffset: [0, 0],
+  textAnchor: "center",
+  textAllowOverlap: true,
+  textIgnorePlacement: true,
 };
 
 // ShapeSource serializes its entire GeoJSON whenever it renders. Keep the
@@ -96,6 +116,9 @@ export const NativeWaypointLayer = memo(function NativeWaypointLayer({
         id={layerId}
         style={variant === "authoring" ? AUTHORING_POINT_STYLE : MISSION_POINT_STYLE}
       />
+      {variant === "authoring" && (
+        <SymbolLayer id={`${layerId}-sequence`} style={WAYPOINT_LABEL_STYLE} />
+      )}
     </ShapeSource>
   );
 });

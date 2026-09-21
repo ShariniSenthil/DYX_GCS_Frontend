@@ -1420,9 +1420,9 @@ const styles = StyleSheet.create({
     borderColor: "#7F00FF",
   },
   nextButtonWaiting: {
-    backgroundColor: "#F59E0B",
+    backgroundColor: colors.info,
     borderWidth: 2,
-    borderColor: "#FCD34D",
+    borderColor: colors.accentLight,
   },
   skipButton: {
     backgroundColor: "#0891B2",
@@ -1440,8 +1440,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   bulkToggleActive: {
-    backgroundColor: "#F59E0B",
-    borderColor: "#F59E0B",
+    backgroundColor: colors.info,
+    borderColor: colors.info,
   },
   bulkToggleText: {
     color: colors.textSecondary,
@@ -1619,9 +1619,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(245,158,11,0.1)",
+    backgroundColor: "rgba(59,130,246,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(245,158,11,0.3)",
+    borderColor: "rgba(59,130,246,0.30)",
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,

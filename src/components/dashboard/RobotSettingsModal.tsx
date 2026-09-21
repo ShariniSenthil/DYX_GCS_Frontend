@@ -73,7 +73,7 @@ const ParamRow: React.FC<ParamRowProps> = ({
 
   return (
     <View style={styles.paramRow}>
-      {/* Left: param name + description */}
+      {/* Left: param name + description + current value */}
       <View style={styles.paramInfo}>
         <View style={styles.paramNameRow}>
           <Text style={styles.paramName}>{param.name}</Text>
@@ -83,25 +83,22 @@ const ParamRow: React.FC<ParamRowProps> = ({
             </View>
           )}
         </View>
-        <Text style={styles.paramDesc} numberOfLines={1}>{param.description}</Text>
-      </View>
-
-      {/* Center: current value from rover */}
-      <View style={styles.paramCurrentCol}>
-        {isLoading ? (
-          <ActivityIndicator size="small" color={colors.textMuted} />
-        ) : currentValue !== null ? (
-          <View style={styles.currentValueWrap}>
+        <Text style={styles.paramDesc} numberOfLines={2}>{param.description}</Text>
+        
+        {/* Subtle Current Value Readout */}
+        <View style={styles.currentValueRow}>
+          <Text style={styles.currentValueLabel}>Current:</Text>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#64748B" style={{ marginLeft: 6 }} />
+          ) : currentValue !== null ? (
             <Text style={styles.paramCurrentValue}>
               {param.paramType === 'INT' ? currentValue : currentValue.toFixed(2)}
+              {enumLabel ? ` (${enumLabel})` : ''}
             </Text>
-            {enumLabel && (
-              <Text style={styles.enumLabel} numberOfLines={1}>{enumLabel}</Text>
-            )}
-          </View>
-        ) : (
-          <Text style={styles.paramNoValue}>—</Text>
-        )}
+          ) : (
+            <Text style={styles.paramNoValue}>—</Text>
+          )}
+        </View>
       </View>
 
       {/* Right: editable value */}
@@ -402,16 +399,9 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({
         </View>
       )}
 
-      {/* Table Header */}
-      <View style={styles.tableHeader}>
-        <Text style={[styles.tableHeaderCell, styles.tableHeaderParam]}>Parameter</Text>
-        <Text style={[styles.tableHeaderCell, styles.tableHeaderValue]}>Current</Text>
-        <Text style={[styles.tableHeaderCell, styles.tableHeaderValue]}>New Value</Text>
-      </View>
-
       {/* Param rows */}
       <ScrollView
-        style={styles.tableScroll}
+        style={[styles.tableScroll, styles.listContainer]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -571,7 +561,7 @@ const styles = StyleSheet.create({
   // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: '#070C15', // Sleek deep slate
   },
 
   // Header
@@ -579,40 +569,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
   headerIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.accent + '18',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,212,0,0.1)',
     borderWidth: 1,
-    borderColor: colors.accent + '40',
+    borderColor: 'rgba(255,212,0,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#F8FAFC',
     letterSpacing: 0.5,
   },
   closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.cardBg,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -621,11 +612,12 @@ const styles = StyleSheet.create({
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(0,0,0,0.1)',
   },
   statusBadge: {
     flexDirection: 'row',
@@ -648,14 +640,14 @@ const styles = StyleSheet.create({
   },
   statusHint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: '#64748B',
     flex: 1,
   },
 
   // Content
   content: {
     flex: 1,
-    padding: 16,
+    padding: 20,
   },
 
   // Category Cards
@@ -663,26 +655,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.cardBg,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   categoryCardLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 16,
     flex: 1,
   },
   categoryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.accent + '15',
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,212,0,0.1)',
     borderWidth: 1,
-    borderColor: colors.accent + '30',
+    borderColor: 'rgba(255,212,0,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -690,14 +682,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   categoryTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F8FAFC',
+    letterSpacing: 0.3,
   },
   categorySubtitle: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 3,
   },
   categoryRight: {
     flexDirection: 'row',
@@ -705,15 +698,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   paramCountBadge: {
-    backgroundColor: colors.accent + '20',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   paramCountText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.accentLight,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#94A3B8',
   },
 
   // Panel
@@ -723,20 +716,21 @@ const styles = StyleSheet.create({
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 14,
-    paddingBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: 8,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    gap: 12,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.cardBg,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -744,145 +738,124 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   panelTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    letterSpacing: 0.5,
   },
   resetButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: colors.cardBg,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   resetText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
   },
 
   // Warning banner
   warningBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 12,
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.warning + '12',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,59,48,0.1)',
     borderWidth: 1,
-    borderColor: colors.warning + '30',
+    borderColor: 'rgba(255,59,48,0.2)',
   },
   warningText: {
     flex: 1,
-    fontSize: 11,
-    color: colors.warning,
-    fontWeight: '500',
+    fontSize: 12,
+    color: '#FF3B30',
+    fontWeight: '600',
   },
 
-  // Table header
-  tableHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.secondary,
-  },
-  tableHeaderCell: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  tableHeaderParam: {
-    flex: 2,
-  },
-  tableHeaderValue: {
-    flex: 1,
-    textAlign: 'center',
+  listContainer: {
+    paddingTop: 8,
   },
   tableScroll: {
     flex: 1,
   },
 
   // Param row
+  // Param row
   paramRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border + '40',
-    minHeight: 52,
+    borderBottomColor: 'rgba(255,255,255,0.03)',
+    minHeight: 56,
   },
   paramInfo: {
     flex: 2,
-    paddingRight: 6,
+    paddingRight: 8,
   },
   paramNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   paramName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#E2E8F0',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   rebootBadge: {
-    backgroundColor: colors.warning + '25',
-    borderRadius: 3,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
+    backgroundColor: 'rgba(255,59,48,0.15)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   rebootBadgeText: {
-    fontSize: 7,
+    fontSize: 8,
     fontWeight: '800',
-    color: colors.warning,
+    color: '#FF3B30',
     letterSpacing: 0.5,
   },
   paramDesc: {
-    fontSize: 10,
-    color: colors.textMuted,
-    marginTop: 2,
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+    lineHeight: 16,
   },
-
-  // Current value column
-  paramCurrentCol: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  currentValueRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+    gap: 6,
   },
-  currentValueWrap: {
-    alignItems: 'center',
+  currentValueLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    letterSpacing: 0.3,
   },
   paramCurrentValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  enumLabel: {
-    fontSize: 8,
-    color: colors.textMuted,
-    marginTop: 1,
-  },
   paramNoValue: {
-    fontSize: 13,
-    color: colors.textMuted,
+    fontSize: 12,
+    color: '#475569',
   },
 
   // Edit value column
@@ -893,89 +866,91 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   paramValueBtn: {
-    minWidth: 64,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: colors.cardBg,
+    minWidth: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   paramValueBtnChanged: {
     borderColor: colors.accent,
-    backgroundColor: colors.accent + '12',
+    backgroundColor: 'rgba(255,212,0,0.1)',
   },
   paramValueBtnSuccess: {
     borderColor: colors.success,
-    backgroundColor: colors.success + '15',
+    backgroundColor: 'rgba(255,212,0,0.1)',
   },
   paramValueBtnError: {
     borderColor: colors.danger,
-    backgroundColor: colors.danger + '15',
+    backgroundColor: 'rgba(255,59,48,0.1)',
   },
   paramEditValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F8FAFC',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   paramEditValueChanged: {
-    color: colors.accentLight,
+    color: colors.accent,
   },
   paramInput: {
-    minWidth: 64,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: colors.panelBg,
+    minWidth: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     borderWidth: 1.5,
     borderColor: colors.accent,
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
     textAlign: 'center',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   paramInputChanged: {
-    borderColor: colors.accentLight,
+    borderColor: colors.accent,
   },
   paramUnit: {
-    fontSize: 9,
-    color: colors.textMuted,
-    marginTop: 2,
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 4,
+    fontWeight: '600',
   },
   editIcon: {
     position: 'absolute',
-    top: -2,
-    right: -2,
+    top: -4,
+    right: -4,
   },
 
   // Apply bar
   applyBar: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.primary,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(11,17,33,0.95)',
   },
   applyAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.success,
-    borderRadius: 10,
-    paddingVertical: 13,
-    paddingHorizontal: 20,
+    gap: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
   },
   applyAllButtonDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   applyAllText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: 0.5,
   },
 });

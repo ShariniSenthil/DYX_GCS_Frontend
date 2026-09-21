@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
+import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
 
 interface Props {
   isMissionActive?: boolean;
@@ -82,9 +83,17 @@ export const DistanceToTargetCard: React.FC<Props> = ({
   const displayedAccuracy =
     isMissionActive && accuracyAvailable ? validAccuracy : null;
 
+  // Presentation-only smoothing. The raw accuracy remains available to
+  // the mission lifecycle and accuracy pass/fail logic.
+  const smoothedAccuracy = useSmoothedDisplayValue(displayedAccuracy, {
+    timeConstantMs: 280,
+    maxJump: 2_000,
+    settleEpsilon: 0.15,
+  });
+
   const accuracyText = useMemo(
-    () => formatMillimetres(displayedAccuracy),
-    [displayedAccuracy],
+    () => formatMillimetres(smoothedAccuracy),
+    [smoothedAccuracy],
   );
 
   const isLive =

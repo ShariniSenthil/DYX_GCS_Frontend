@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSmoothedDisplayValue } from '../../hooks/useSmoothedDisplayValue';
+import { PATH_PLAN_GLASS } from '../../constants/pathPlanGlass';
 
 interface Props {
     roverPosition?: { lat: number; lon: number; alt?: number } | null;
@@ -15,10 +17,34 @@ interface Props {
 
 export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dragGesture, isDraggingActive, onClose }) => {
     const hasFix = !!roverPosition;
-    const latStr = hasFix ? roverPosition!.lat.toFixed(7) : '—';
-    const lonStr = hasFix ? roverPosition!.lon.toFixed(7) : '—';
-    const altStr = hasFix && roverPosition!.alt !== undefined ? `${roverPosition!.alt.toFixed(1)}m` : '—';
-    const headingStr = heading !== null && heading !== undefined ? `${heading.toFixed(0)}°` : '—';
+    // Smooth only what is shown in the panel. The map, mission control, and
+    // telemetry store continue to receive the original rover coordinates.
+    const displayLat = useSmoothedDisplayValue(roverPosition?.lat, {
+        timeConstantMs: 320,
+        maxJump: 0.0005,
+        settleEpsilon: 0.00000001,
+    });
+    const displayLon = useSmoothedDisplayValue(roverPosition?.lon, {
+        timeConstantMs: 320,
+        maxJump: 0.0005,
+        settleEpsilon: 0.00000001,
+    });
+    const displayAlt = useSmoothedDisplayValue(roverPosition?.alt, {
+        timeConstantMs: 300,
+        maxJump: 8,
+        settleEpsilon: 0.01,
+    });
+    const displayHeading = useSmoothedDisplayValue(heading, {
+        timeConstantMs: 240,
+        maxJump: 120,
+        settleEpsilon: 0.05,
+        circular: true,
+    });
+
+    const latStr = displayLat !== null ? displayLat.toFixed(7) : '—';
+    const lonStr = displayLon !== null ? displayLon.toFixed(7) : '—';
+    const altStr = displayAlt !== null ? `${displayAlt.toFixed(1)}m` : '—';
+    const headingStr = displayHeading !== null ? `${displayHeading.toFixed(0)}°` : '—';
 
     return (
         <View style={styles.container}>
@@ -26,7 +52,7 @@ export const RobotPositionPanel: React.FC<Props> = ({ roverPosition, heading, dr
             <OptionalGestureDetector gesture={dragGesture}>
                 <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
                     <View style={styles.headerLeft}>
-                        <MaterialCommunityIcons name="robot" size={13} color="#F59E0B" />
+                        <MaterialCommunityIcons name="robot" size={13} color={PATH_PLAN_GLASS.cyan} />
                         <Text style={styles.headerTitle}>ROBOT POSITION</Text>
                         <View style={[styles.liveDot, { backgroundColor: hasFix ? '#4ade80' : 'rgba(255,255,255,0.3)' }]} />
                     </View>

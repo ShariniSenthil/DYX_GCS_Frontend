@@ -259,7 +259,7 @@ export const CADAlignmentCanvas: React.FC<CADAlignmentCanvasProps> = ({
             cx={sp.x}
             cy={sp.y}
             r={4}
-            fill={colors.yellow}
+            fill={colors.info}
           />
         );
       }
@@ -348,7 +348,7 @@ export const CADAlignmentCanvas: React.FC<CADAlignmentCanvasProps> = ({
         <MaterialCommunityIcons
           name={selectedPoints.length === 0 ? 'gesture-tap' : selectedPoints.length === 1 ? 'gesture-tap-button' : 'check-circle'}
           size={20}
-          color={selectedPoints.length < 2 ? colors.yellow : colors.green}
+          color={selectedPoints.length < 2 ? colors.info : colors.green}
         />
         <Text style={[styles.statusText, { color: selectedPoints.length < 2 ? colors.text : colors.green }]}>
           {statusText}

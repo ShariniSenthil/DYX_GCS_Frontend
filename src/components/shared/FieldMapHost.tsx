@@ -147,18 +147,27 @@ const FieldMapHostBase: React.FC = () => {
   const waypointCollection = useMemo(() => {
     return {
       type: "FeatureCollection" as const,
-      features: limitMapPoints(fallbackSnapshot.waypoints)
-        .map((wp, index) => {
+      // Keep the source index before applying the render limit. The marker
+      // number must reflect its actual mission order, not its position inside
+      // a sampled subset of a large plan.
+      features: limitMapPoints(
+        fallbackSnapshot.waypoints.map((waypoint, sequence) => ({
+          waypoint,
+          sequence,
+        })),
+      )
+        .map(({ waypoint: wp, sequence }) => {
           if (!isValidLngLat(wp.lon, wp.lat)) return null;
-          const sn = typeof wp.sn === "number" ? wp.sn : index + 1;
+          const sn = typeof wp.sn === "number" ? wp.sn : sequence + 1;
           const status = fallbackSnapshot.statusMap?.[sn]?.status;
           const completed = status === "completed" || status === "skipped";
           return {
             type: "Feature" as const,
-            id: index,
+            id: sequence,
             properties: {
               sn,
-              active: index === fallbackSnapshot.activeWaypointIndex ? 1 : 0,
+              sequence: sequence + 1,
+              active: sequence === fallbackSnapshot.activeWaypointIndex ? 1 : 0,
               completed: completed ? 1 : 0,
             },
             geometry: {
@@ -404,6 +413,7 @@ const FieldMapHostBase: React.FC = () => {
               sourceId="field-points"
               layerId="field-points-layer"
               shape={waypointCollection as any}
+              variant="authoring"
             />
           )}
 

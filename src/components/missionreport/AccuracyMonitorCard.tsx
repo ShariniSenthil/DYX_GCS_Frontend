@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
+import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
 
 interface AccuracyMonitorCardProps {
   isMissionActive?: boolean;
@@ -143,22 +144,54 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 
   const crossTrackLive = isMissionActive && validCrossTrack !== null;
 
-  // These are the latest WebSocket values. Memoization avoids extra string
-  // formatting only; it does not delay or interpolate telemetry.
+  // Display smoothing is intentionally local to this panel. Mission control
+  // continues to receive the unsmoothed telemetry values.
+  const displayAlongSide = useSmoothedDisplayValue(validAlongSide, {
+    timeConstantMs: 240,
+    maxJump: 2_000,
+    settleEpsilon: 0.15,
+  });
+  const displayCrossTrack = useSmoothedDisplayValue(validCrossTrack, {
+    timeConstantMs: 240,
+    maxJump: 2_000,
+    settleEpsilon: 0.15,
+  });
+  const displayActualSpeed = useSmoothedDisplayValue(actualSpeedMps, {
+    timeConstantMs: 220,
+    maxJump: 4,
+    settleEpsilon: 0.005,
+  });
+  const displayTargetHeading = useSmoothedDisplayValue(targetHeadingDeg, {
+    timeConstantMs: 220,
+    maxJump: 120,
+    settleEpsilon: 0.05,
+    circular: true,
+  });
+  const displayHeadingError = useSmoothedDisplayValue(headingErrorDeg, {
+    timeConstantMs: 220,
+    maxJump: 90,
+    settleEpsilon: 0.05,
+  });
+  const displayDistanceToGoal = useSmoothedDisplayValue(distanceToGoalM, {
+    timeConstantMs: 260,
+    maxJump: 10,
+    settleEpsilon: 0.01,
+  });
+
   const alongSideText = useMemo(
-    () => formatMillimetres(isMissionActive ? validAlongSide : null),
-    [isMissionActive, validAlongSide],
+    () => formatMillimetres(isMissionActive ? displayAlongSide : null),
+    [isMissionActive, displayAlongSide],
   );
 
   const crossTrackText = useMemo(
-    () => formatMillimetres(isMissionActive ? validCrossTrack : null),
-    [isMissionActive, validCrossTrack],
+    () => formatMillimetres(isMissionActive ? displayCrossTrack : null),
+    [isMissionActive, displayCrossTrack],
   );
 
-  const actualSpeedText = useMemo(() => formatSpeed(isMissionActive && actualSpeedMps !== undefined ? actualSpeedMps : null), [isMissionActive, actualSpeedMps]);
-  const targetHeadingText = useMemo(() => formatHeading(isMissionActive && targetHeadingDeg !== undefined ? targetHeadingDeg : null), [isMissionActive, targetHeadingDeg]);
-  const headingErrorText = useMemo(() => formatHeadingError(isMissionActive && headingErrorDeg !== undefined ? headingErrorDeg : null), [isMissionActive, headingErrorDeg]);
-  const distanceToGoalText = useMemo(() => formatDistance(isMissionActive && distanceToGoalM !== undefined ? distanceToGoalM : null), [isMissionActive, distanceToGoalM]);
+  const actualSpeedText = useMemo(() => formatSpeed(isMissionActive ? displayActualSpeed : null), [isMissionActive, displayActualSpeed]);
+  const targetHeadingText = useMemo(() => formatHeading(isMissionActive ? displayTargetHeading : null), [isMissionActive, displayTargetHeading]);
+  const headingErrorText = useMemo(() => formatHeadingError(isMissionActive ? displayHeadingError : null), [isMissionActive, displayHeadingError]);
+  const distanceToGoalText = useMemo(() => formatDistance(isMissionActive ? displayDistanceToGoal : null), [isMissionActive, displayDistanceToGoal]);
 
   const actualSpeedLive = isMissionActive && actualSpeedMps !== null && actualSpeedMps !== undefined;
   const targetHeadingLive = isMissionActive && targetHeadingDeg !== null && targetHeadingDeg !== undefined;

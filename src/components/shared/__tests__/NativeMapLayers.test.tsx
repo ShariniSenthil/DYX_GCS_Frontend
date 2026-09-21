@@ -29,6 +29,7 @@ jest.mock("@rnmapbox/maps", () => ({
   MarkerView: "MarkerView",
   LineLayer: "LineLayer",
   CircleLayer: "CircleLayer",
+  SymbolLayer: "SymbolLayer",
   ShapeSource: (props: any) => {
     // Match the installed Mapbox ShapeSource's serialization on each render.
     mockSerializeShape(props.id, props.shape);
@@ -135,6 +136,7 @@ test("rover telemetry and preview metadata do not reserialize unchanged mission 
   const waypointShape = mockSerializeShape.mock.calls[2][1] as any;
   expect(waypointShape.features[0].properties.completed).toBe(1);
   expect(waypointShape.features[1].properties.active).toBe(1);
+  expect(waypointShape.features[1].properties.sequence).toBe(2);
 
   mockPreview = { ...mockPreview, points: [...mockPreview.points, { latitude: 13.2, longitude: 80.3 }] };
   act(() => { renderer!.update(fieldMap(22)); });
@@ -165,6 +167,10 @@ test("authoring layers retain their source options and visual styles", () => {
   });
   expect(renderer!.root.findByType("CircleLayer").props).toMatchObject({
     id: "waypoint-layer",
-    style: { circleRadius: 6, circleColor: "#ef4444", circleStrokeColor: "#ffffff", circleStrokeWidth: 2 },
+    style: { circleColor: "#2563eb", circleStrokeColor: "#ffffff", circleStrokeWidth: 2.25 },
+  });
+  expect(renderer!.root.findByType("SymbolLayer").props).toMatchObject({
+    id: "waypoint-layer-sequence",
+    style: { textField: "{sequence}", textAnchor: "center" },
   });
 });

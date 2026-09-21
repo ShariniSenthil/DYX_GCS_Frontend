@@ -1,21 +1,23 @@
 /**
  * PathPlan floating glass HUD tokens — shared visual language for
- * Path Plan overlays and Mission Progress floating panels.
+ * Path Plan overlays, Mission Progress floating panels, and Dashboard.
+ *
+ * White = text  ·  Blue = accent / live  ·  Deep slate = surfaces
  */
 export const PATH_PLAN_GLASS = {
-  panelBg: '#07111be6',
-  innerBg: '#08101a',
-  border: 'rgba(103, 232, 249, 0.15)',
-  borderSubtle: 'rgba(103, 232, 249, 0.1)',
-  dragBg: 'rgba(103, 232, 249, 0.04)',
-  dragBorder: 'rgba(103, 232, 249, 0.4)',
-  cyan: '#67E8F9',
-  title: '#E5F1FF',
-  label: '#9FBEE3',
+  panelBg: 'rgba(15, 23, 42, 0.96)',
+  innerBg: '#0B1220',
+  border: 'rgba(148, 163, 184, 0.24)',
+  borderSubtle: 'rgba(148, 163, 184, 0.14)',
+  dragBg: 'rgba(59, 130, 246, 0.10)',
+  dragBorder: 'rgba(96, 165, 250, 0.68)',
+  cyan: '#38BDF8',
+  title: '#F8FAFC',
+  label: '#CBD5E1',
   muted: '#94A3B8',
-  iconWrapBg: 'rgba(103, 232, 249, 0.12)',
-  badgeBg: 'rgba(103, 232, 249, 0.15)',
-  borderRadius: 12,
+  iconWrapBg: 'rgba(59, 130, 246, 0.16)',
+  badgeBg: 'rgba(56, 189, 248, 0.16)',
+  borderRadius: 14,
 } as const;
 
 /** Standard floating panel header typography (MissionOps / MissionStatistics) */
@@ -43,11 +45,10 @@ export const PATH_PLAN_HEADER = {
     width: 20,
     height: 20,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
   },
-  /** Compact toolbar row (Clear / Export in mission table header) */
   toolbarActions: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -63,8 +64,8 @@ export const PATH_PLAN_HEADER = {
     borderWidth: 1,
   },
   actionBtnDanger: {
-    borderColor: 'rgba(239, 68, 68, 0.35)',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderColor: 'rgba(255, 59, 48, 0.45)',
+    backgroundColor: 'rgba(255, 59, 48, 0.12)',
   },
   actionBtnAccent: {
     borderColor: PATH_PLAN_GLASS.border,
@@ -76,7 +77,7 @@ export const PATH_PLAN_HEADER = {
     letterSpacing: 0.3,
   },
   actionBtnTextDanger: {
-    color: '#F87171',
+    color: '#FF3B30',
   },
   actionBtnTextAccent: {
     color: PATH_PLAN_GLASS.cyan,
