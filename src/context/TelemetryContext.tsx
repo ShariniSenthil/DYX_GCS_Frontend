@@ -26,6 +26,10 @@ import type {
   RoverTelemetry,
 } from "../types/telemetry";
 import type { Socket } from "socket.io-client";
+import {
+  isSameMissionLifecycleSlice,
+  type MissionLifecycleSlice,
+} from "../utils/missionLifecycleState";
 
 /**
  * Safe empty snapshot exposed whenever the tablet is not currently connected
@@ -148,13 +152,7 @@ const DISCONNECTED_TELEMETRY: RoverTelemetry = {
   rpp_along_position: null,
 };
 
-export interface MissionLifecycleSlice {
-  state?: string;
-  state_lower?: string;
-  start_stage?: string | null;
-  start_failed_stage?: string | null;
-  resume_stage?: string | null;
-}
+export type { MissionLifecycleSlice };
 
 export interface TelemetryContextValue {
   telemetry: RoverTelemetry;
@@ -221,14 +219,10 @@ export function TelemetryProvider({
   const setMissionLifecycle = useCallback((slice: MissionLifecycleSlice) => {
     // Repeated mission_status packets often carry the same lifecycle fields.
     // Preserve the context identity until a field actually changes.
+    // Receive time is not compared, so an unchanged packet keeps the older
+    // object (and its older received_at_ms).
     setMissionLifecycleState((previous) =>
-      previous.state === slice.state &&
-      previous.state_lower === slice.state_lower &&
-      previous.start_stage === slice.start_stage &&
-      previous.start_failed_stage === slice.start_failed_stage &&
-      previous.resume_stage === slice.resume_stage
-        ? previous
-        : slice,
+      isSameMissionLifecycleSlice(previous, slice) ? previous : slice,
     );
   }, []);
 

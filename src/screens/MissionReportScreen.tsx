@@ -110,6 +110,10 @@ import {
 } from "../utils/missionStartEligibility";
 import { shouldAcceptCanonicalReport } from "../utils/missionReportRunGuard";
 import {
+  isSameMissionRuntimeLifecycle,
+  resolveEffectiveMissionLifecycle,
+} from "../utils/missionLifecycleState";
+import {
   extractRawGnssSurvey,
   pickBestRawGnssSurvey,
   surveyFromRadialMm,
@@ -219,7 +223,7 @@ export default function MissionReportScreen({
     if (normalized === "dash") return "DASH";
     return null;
   };
-  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport, pointEvents } = useTelemetry();
+  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport, pointEvents, missionLifecycle } = useTelemetry();
   const { setMissionSnapshot } = useFieldMap();
   const {
     preview,
@@ -272,6 +276,9 @@ export default function MissionReportScreen({
 
   const [backendMission, setBackendMissionState] =
     useState<MissionRuntimeState | null>(null);
+  // When the current backendMission object was accepted. Lets a newer
+  // Socket.IO lifecycle push win over an older REST snapshot and vice versa.
+  const backendMissionReceivedAtRef = useRef<number | null>(null);
 
   /**
    * The backend intentionally archives the active CSV after COMPLETED and
@@ -315,22 +322,12 @@ export default function MissionReportScreen({
     (mission: MissionRuntimeState | null | undefined) => {
       const next = mission ?? null;
       setBackendMissionState((prev) => {
-        if (
-          prev &&
-          next &&
-          prev.state === next.state &&
-          prev.loaded === next.loaded &&
-          prev.ready === next.ready &&
-          prev.execution_mode === next.execution_mode &&
-          prev.current_point_index === next.current_point_index &&
-          prev.active_point_index === next.active_point_index &&
-          prev.active_point_id === next.active_point_id &&
-          prev.mission_id === next.mission_id &&
-          prev.trajectory_ready === next.trajectory_ready &&
-          prev.progress_pct === next.progress_pct
-        ) {
+        // Keep the old object only when no lifecycle field changed. A PAUSED
+        // snapshot flipping resume_available must reach the Resume button.
+        if (prev && next && isSameMissionRuntimeLifecycle(prev, next)) {
           return prev;
         }
+        backendMissionReceivedAtRef.current = Date.now();
         return next;
       });
       rememberMission(next);
@@ -955,19 +952,30 @@ export default function MissionReportScreen({
   );
   const canStartMission = startEligibility.canPressStart;
 
-  const isBackendMissionPaused = backendMissionState === "PAUSED";
+  /**
+   * Single authoritative lifecycle view for the control buttons: the
+   * Socket.IO push when it describes this exact mission run and is at least
+   * as recent as the REST snapshot, otherwise REST. handleResume uses the
+   * same view, so the button and the handler cannot disagree.
+   */
+  const effectiveLifecycle = useMemo(
+    () =>
+      resolveEffectiveMissionLifecycle(
+        missionLifecycle,
+        backendMission,
+        backendMissionReceivedAtRef.current,
+      ),
+    [missionLifecycle, backendMission],
+  );
 
-  const backendResumeAvailable = backendMission?.resume_available === true;
+  const isBackendMissionPaused =
+    (effectiveLifecycle.state ?? backendMissionState) === "PAUSED";
 
-  const backendPauseReason =
-    typeof backendMission?.pause_reason === "string"
-      ? backendMission.pause_reason.trim().toUpperCase()
-      : null;
+  const backendResumeAvailable = effectiveLifecycle.resumeAvailable;
 
-  const backendRtkReason =
-    typeof backendMission?.rtk_reason === "string"
-      ? backendMission.rtk_reason
-      : null;
+  const backendPauseReason = effectiveLifecycle.pauseReason;
+
+  const backendRtkReason = effectiveLifecycle.rtkReason;
 
   /**
    * Current marking-point index selected from
@@ -3194,15 +3202,12 @@ export default function MissionReportScreen({
   };
 
   const handleResume = async () => {
-    if (backendMission?.resume_available !== true) {
-      const reason =
-        typeof backendMission?.rtk_reason === "string" &&
-        backendMission.rtk_reason.trim()
-          ? backendMission.rtk_reason
-          : typeof backendMission?.pause_reason === "string" &&
-              backendMission.pause_reason.trim()
-            ? `Resume blocked: ${backendMission.pause_reason}`
-            : "Mission is not ready to resume.";
+    if (!backendResumeAvailable) {
+      const reason = backendRtkReason
+        ? backendRtkReason
+        : backendPauseReason
+          ? `Resume blocked: ${backendPauseReason}`
+          : "Mission is not ready to resume.";
 
       showNotification("info", "Resume Blocked", reason, 4500);
 

@@ -86,6 +86,8 @@ it("does not broadcast repeated lifecycle snapshots to telemetry consumers", () 
 
 it.each<keyof MissionLifecycleSlice>([
   "state", "state_lower", "start_stage", "start_failed_stage", "resume_stage",
+  "stop_stage", "mission_id", "mission_run_id", "pause_reason", "rtk_reason",
+  "px4_mode",
 ])("immediately publishes a changed %s field", (field) => {
   const hook = renderTelemetry();
   const setter = hook.result.current.setMissionLifecycle;
@@ -94,6 +96,34 @@ it.each<keyof MissionLifecycleSlice>([
   expect(hook.result.current).not.toBe(before);
   expect(hook.result.current.missionLifecycle[field]).toBe("changed");
   expect(hook.result.current.setMissionLifecycle).toBe(setter);
+});
+
+it("publishes PAUSED resume_available false -> true but not a repeat with a new receive time", () => {
+  const hook = renderTelemetry();
+  const blocked: MissionLifecycleSlice = {
+    state: "PAUSED",
+    mission_id: "m-1",
+    mission_run_id: "run-7",
+    resume_available: false,
+    rtk_motion_ok: false,
+    received_at_ms: 1,
+  };
+  act(() => hook.result.current.setMissionLifecycle(blocked));
+  const held = hook.result.current;
+  act(() => hook.result.current.setMissionLifecycle({ ...blocked, received_at_ms: 2 }));
+  expect(hook.result.current).toBe(held);
+
+  act(() =>
+    hook.result.current.setMissionLifecycle({
+      ...blocked,
+      resume_available: true,
+      rtk_motion_ok: true,
+      received_at_ms: 3,
+    }),
+  );
+  expect(hook.result.current).not.toBe(held);
+  expect(hook.result.current.missionLifecycle.resume_available).toBe(true);
+  expect(hook.result.current.missionLifecycle.rtk_motion_ok).toBe(true);
 });
 
 it("retains staleness updates, GPS abort delivery and disconnected state clearing", () => {

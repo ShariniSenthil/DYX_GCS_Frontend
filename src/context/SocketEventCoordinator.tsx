@@ -31,6 +31,7 @@ import { useMission } from './MissionContext';
 import { useMissionStaging } from './MissionStagingContext';
 import { ROVER_ENABLED } from '../config/featureFlags';
 import type { GpsSafetyAbortEvent } from '../types/px4/mission';
+import { buildMissionLifecycleSlice } from '../utils/missionLifecycleState';
 
 function isValidGpsSafetyAbort(event: unknown): event is GpsSafetyAbortEvent {
   if (!event || typeof event !== 'object') {
@@ -70,16 +71,9 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
 
     const handleMissionModeUpdate = (event: any) => {
       if (event && typeof event === "object") {
-        const nextStateLower =
-          event.state_lower ??
-          (typeof event.state === "string" ? event.state.toLowerCase() : undefined);
-        setMissionLifecycle({
-          state: event.state,
-          state_lower: nextStateLower,
-          start_stage: event.start_stage ?? null,
-          start_failed_stage: event.start_failed_stage ?? null,
-          resume_stage: event.resume_stage ?? null,
-        });
+        const slice = buildMissionLifecycleSlice(event, Date.now());
+        const nextStateLower = slice.state_lower;
+        setMissionLifecycle(slice);
         if (nextStateLower === 'ready' && previousStateLowerRef.current !== 'ready') {
           void refreshLoadedPath();
         }
@@ -131,16 +125,11 @@ export function SocketEventCoordinator({ children }: { children: React.ReactNode
       if (!event || typeof event !== "object") {
         return;
       }
-      const nextStateLower =
-        event.state_lower ??
-        (typeof event.state === "string" ? event.state.toLowerCase() : undefined);
-      setMissionLifecycle({
-        state: event.state,
-        state_lower: nextStateLower,
-        start_stage: event.start_stage ?? null,
-        start_failed_stage: event.start_failed_stage ?? null,
-        resume_stage: event.resume_stage ?? null,
-      });
+      // Carries mission identity and Resume authority so Mission Report can
+      // act on the push without waiting for its REST poll.
+      const slice = buildMissionLifecycleSlice(event, Date.now());
+      const nextStateLower = slice.state_lower;
+      setMissionLifecycle(slice);
       if (nextStateLower === 'ready' && previousStateLowerRef.current !== 'ready') {
         void refreshLoadedPath();
       }
