@@ -263,6 +263,32 @@ describe("px4 telemetry adapter — RPP and live backend ingest", () => {
     });
   });
 
+  test("rpp_accuracy stream freshness is carried independently", () => {
+    const base = {
+      lat: 25.1,
+      lon: 55.2,
+      accuracy: { available: true, radial_error_mm: 9 },
+      rpp_accuracy_receive_age_ms: 320,
+    };
+    const stale = toRoverTelemetry({
+      ...base,
+      rpp_accuracy_stream_fresh: false,
+    } as never);
+    expect(stale.rpp_accuracy_stream_fresh).toBe(false);
+    expect(stale.rpp_accuracy_receive_age_ms).toBe(320);
+    expect(stale.radial_error_mm).toBe(9);
+    expect(
+      toLiveTelemetryEnvelope(stale, 1).rpp_accuracy_stream_fresh,
+    ).toBe(false);
+    expect(
+      toRoverTelemetry({ ...base, rpp_accuracy_stream_fresh: true } as never)
+        .rpp_accuracy_stream_fresh,
+    ).toBe(true);
+    expect(
+      toRoverTelemetry(base as never).rpp_accuracy_stream_fresh,
+    ).toBeUndefined();
+  });
+
   test("toTelemetryEnvelopeFromRoverData forwards nested RPP debug", () => {
     const envelope = toTelemetryEnvelopeFromRoverData({
       lat: 25.1,

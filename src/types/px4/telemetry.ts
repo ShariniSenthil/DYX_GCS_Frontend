@@ -98,6 +98,8 @@ export interface Px4AccuracyTelemetry {
   accuracy_status?: string | null;
   accuracy_pass?: boolean;
   within_test_tolerance?: boolean;
+  rpp_accuracy_stream_fresh?: boolean;
+  rpp_accuracy_receive_age_ms?: number | null;
 }
 
 /** Payload from socket `telemetry` and REST `/api/telemetry/latest`. */
@@ -149,6 +151,8 @@ export interface Px4TelemetryData {
   /** Canonical backend freshness name; mapped onto rpp_debug_fresh. */
   rpp_debug_stream_fresh?: boolean;
   rpp_debug_receive_age_ms?: number | null;
+  rpp_accuracy_stream_fresh?: boolean;
+  rpp_accuracy_receive_age_ms?: number | null;
   rpp_control_mode?: string | null;
   rpp_goal_number?: number | null;
 

@@ -3,6 +3,7 @@
  *
  * Authority boundaries (never reconstructed here):
  *   AccuracyMonitorCard   <- /rpp/debug     (rpp_debug_* freshness)
+ *   DistanceToTargetCard  <- /rpp/accuracy  (rpp_accuracy_* freshness)
  *
  * A panel may say LIVE only when the backend has positively reported its
  * source stream as fresh. Cached numbers may stay in memory, but a stream
@@ -24,6 +25,16 @@ export interface RppDebugFreshness {
   available: boolean | undefined;
   fresh: boolean | undefined;
   valuesPresent: boolean;
+}
+
+export interface RppAccuracyFreshness {
+  available: boolean | undefined;
+  /**
+   * Backend `rpp_accuracy_stream_fresh`. `undefined` means an older backend
+   * that never reported it; that is treated as "unknown", not as fresh.
+   */
+  fresh: boolean | undefined;
+  measurementPresent: boolean;
 }
 
 function gateState(gate: LiveStreamGate): LiveDataState | null {
@@ -50,4 +61,26 @@ export function resolveRppDebugDataState(
 
   if (rpp.available === false) return "unavailable";
   return "waiting";
+}
+
+export function resolveRppAccuracyDataState(
+  gate: LiveStreamGate,
+  accuracy: RppAccuracyFreshness,
+): LiveDataState {
+  const blocked = gateState(gate);
+  if (blocked) return blocked;
+
+  if (accuracy.available !== true) {
+    return accuracy.measurementPresent ? "stale" : "unavailable";
+  }
+
+  if (accuracy.fresh === false) return "stale";
+
+  // Freshness unknown (older backend): the retained TRANSIENT_LOCAL sample
+  // cannot be told apart from a current one. Never call that LIVE.
+  if (accuracy.fresh !== true) {
+    return accuracy.measurementPresent ? "stale" : "waiting";
+  }
+
+  return accuracy.measurementPresent ? "live" : "waiting";
 }

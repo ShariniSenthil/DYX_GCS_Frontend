@@ -1174,6 +1174,12 @@ if (envelope.within_test_tolerance !== undefined) {
     if (envelope.rpp_debug_receive_age_ms !== undefined) {
       next.rpp_debug_receive_age_ms = envelope.rpp_debug_receive_age_ms;
     }
+    if (envelope.rpp_accuracy_stream_fresh !== undefined) {
+      next.rpp_accuracy_stream_fresh = envelope.rpp_accuracy_stream_fresh;
+    }
+    if (envelope.rpp_accuracy_receive_age_ms !== undefined) {
+      next.rpp_accuracy_receive_age_ms = envelope.rpp_accuracy_receive_age_ms;
+    }
     if (envelope.rpp_control_mode !== undefined) {
       next.rpp_control_mode = envelope.rpp_control_mode;
     }
@@ -1275,6 +1281,14 @@ if (envelope.within_test_tolerance !== undefined) {
       changed = changed || prev.rpp_debug_available !== next.rpp_debug_available;
     if (envelope.rpp_debug_fresh !== undefined)
       changed = changed || prev.rpp_debug_fresh !== next.rpp_debug_fresh;
+    if (envelope.rpp_accuracy_stream_fresh !== undefined)
+      changed =
+        changed ||
+        prev.rpp_accuracy_stream_fresh !== next.rpp_accuracy_stream_fresh;
+    if (envelope.rpp_accuracy_receive_age_ms !== undefined)
+      changed =
+        changed ||
+        prev.rpp_accuracy_receive_age_ms !== next.rpp_accuracy_receive_age_ms;
     if (envelope.rpp_debug_receive_age_ms !== undefined)
       changed =
         changed ||

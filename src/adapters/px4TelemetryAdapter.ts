@@ -599,6 +599,22 @@ const withinTestTolerance = safeBool(
   false,
 );
 
+// Independent /rpp/accuracy stream freshness. Absent stays undefined so an
+// older backend's retained sample is "unknown", never "fresh".
+const rppAccuracyStreamFresh = isAbsent(
+  flat.rpp_accuracy_stream_fresh ?? accuracySection?.rpp_accuracy_stream_fresh,
+)
+  ? undefined
+  : safeBool(
+      flat.rpp_accuracy_stream_fresh ?? accuracySection?.rpp_accuracy_stream_fresh,
+      false,
+    );
+
+const rppAccuracyReceiveAgeMs = firstOptionalNum(
+  flat.rpp_accuracy_receive_age_ms,
+  accuracySection?.rpp_accuracy_receive_age_ms,
+);
+
 const accuracyAvailable = safeBool(
   flat.accuracy_available ??
     accuracySection?.available,
@@ -747,6 +763,8 @@ const rppDebugReceiveAgeMs = firstOptionalNum(flat.rpp_debug_receive_age_ms);
 },
 
 accuracy_available: accuracyAvailable,
+rpp_accuracy_stream_fresh: rppAccuracyStreamFresh,
+rpp_accuracy_receive_age_ms: rppAccuracyReceiveAgeMs ?? undefined,
 
 cross_track_error_mm: crossTrackErrorMm,
 cross_track_abs_mm: crossTrackAbsMm,
@@ -839,6 +857,8 @@ export function toLiveTelemetryEnvelope(
     xtrack_cm: adapted.xtrack_cm,
     accuracy: adapted.accuracy,
     accuracy_available: adapted.accuracy_available,
+    rpp_accuracy_stream_fresh: adapted.rpp_accuracy_stream_fresh,
+    rpp_accuracy_receive_age_ms: adapted.rpp_accuracy_receive_age_ms,
     cross_track_error_mm: adapted.cross_track_error_mm,
     cross_track_abs_mm: adapted.cross_track_abs_mm,
     cross_track_side: adapted.cross_track_side,

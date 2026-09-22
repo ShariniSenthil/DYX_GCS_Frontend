@@ -105,3 +105,57 @@ describe("reconnect cannot revive cached RPP values", () => {
     }
   });
 });
+
+describe("resolveRppAccuracyDataState (/rpp/accuracy, live radial panel)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { resolveRppAccuracyDataState } = require("../liveAccuracyState");
+
+  test("LIVE only when available AND stream fresh", () => {
+    expect(
+      resolveRppAccuracyDataState(liveGate, {
+        available: true,
+        fresh: true,
+        measurementPresent: true,
+      }),
+    ).toBe("live");
+  });
+
+  test("retained sample with fresh=false is STALE", () => {
+    expect(
+      resolveRppAccuracyDataState(liveGate, {
+        available: true,
+        fresh: false,
+        measurementPresent: true,
+      }),
+    ).toBe("stale");
+  });
+
+  test("unknown freshness (older backend) is never LIVE", () => {
+    expect(
+      resolveRppAccuracyDataState(liveGate, {
+        available: true,
+        fresh: undefined,
+        measurementPresent: true,
+      }),
+    ).toBe("stale");
+  });
+
+  test("unavailable stream", () => {
+    expect(
+      resolveRppAccuracyDataState(liveGate, {
+        available: false,
+        fresh: false,
+        measurementPresent: false,
+      }),
+    ).toBe("unavailable");
+  });
+
+  test("socket gate outranks radial freshness", () => {
+    expect(
+      resolveRppAccuracyDataState(
+        { ...liveGate, socketStale: true },
+        { available: true, fresh: true, measurementPresent: true },
+      ),
+    ).toBe("stale");
+  });
+});

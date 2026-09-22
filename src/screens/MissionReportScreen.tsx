@@ -20,7 +20,10 @@ import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard
 import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
 import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
 import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
-import { resolveRppDebugDataState } from "../utils/liveAccuracyState";
+import {
+  resolveRppAccuracyDataState,
+  resolveRppDebugDataState,
+} from "../utils/liveAccuracyState";
 import type { LiveDataState } from "../utils/liveDataState";
 import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
 import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
@@ -959,14 +962,20 @@ export default function MissionReportScreen({
     },
   );
 
-  const overallAccuracyDataState: LiveDataState =
-    missionTelemetryState !== "live"
-      ? missionTelemetryState
-      : telemetry.accuracy_available !== true
-        ? "unavailable"
-        : overallAccuracyMeasurementPresent
-          ? "live"
-          : "waiting";
+  // /rpp/accuracy is retained (TRANSIENT_LOCAL); LIVE needs its own
+  // backend-confirmed freshness, independent of /rpp/debug.
+  const overallAccuracyDataState: LiveDataState = resolveRppAccuracyDataState(
+    {
+      connectionState,
+      socketStale: telemetry.stale === true,
+      missionActive: accuracyMissionActive,
+    },
+    {
+      available: telemetry.accuracy_available,
+      fresh: telemetry.rpp_accuracy_stream_fresh,
+      measurementPresent: overallAccuracyMeasurementPresent,
+    },
+  );
 
   const overallAccuracyDataAvailable =
     overallAccuracyDataState === "live";
