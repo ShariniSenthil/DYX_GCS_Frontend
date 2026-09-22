@@ -5,6 +5,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
+import { useRenderCounter } from "../utils/realtimeDiagnostics";
 import {
   TouchableOpacity,
   View,
@@ -243,6 +244,7 @@ export default function MissionReportScreen({
   isVisible = true,
   embedMap = false,
 }: MissionReportScreenProps) {
+  useRenderCounter("MissionReportScreen");
   const DEBUG_MISSION_LOGS = false;
   const missionLog = (...args: any[]) => {
     if (DEBUG_MISSION_LOGS) console.log(...args);

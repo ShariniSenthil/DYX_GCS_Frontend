@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useRenderCounter } from "../../utils/realtimeDiagnostics";
 import { View, Text, StyleSheet } from "react-native";
 import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -80,6 +81,7 @@ export const DistanceToTargetCard: React.FC<Props> = ({
   dragGesture,
   isDraggingActive = false,
 }) => {
+  useRenderCounter("DistanceToTargetCard");
   const validAccuracy = useMemo(
     () => validMillimetres(overallAccuracyMm),
     [overallAccuracyMm],

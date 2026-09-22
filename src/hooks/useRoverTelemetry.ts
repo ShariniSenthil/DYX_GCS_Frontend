@@ -5,6 +5,7 @@
  * Adapted from web app's useRoverROS for React Native
  */
 
+import { countSocketPacket } from "../utils/realtimeDiagnostics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import io from "socket.io-client";
@@ -2102,6 +2103,7 @@ if (envelope.within_test_tolerance !== undefined) {
         // 4WD_SERVER — flat telemetry socket contract
 
         socket.on(SOCKET_EVENTS.TELEMETRY, (payload: unknown) => {
+          countSocketPacket("telemetry");
           try {
             /*
              * Reject packets handled by an older socket connection.
@@ -2213,6 +2215,7 @@ if (envelope.within_test_tolerance !== undefined) {
 
         // 4WD_SERVER — flat mission_status socket contract
         socket.on(SOCKET_EVENTS.MISSION_STATUS, (data: any) => {
+          countSocketPacket("mission_status");
           try {
             if (!data || typeof data !== "object") {
               return;

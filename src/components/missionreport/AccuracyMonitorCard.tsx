@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useRenderCounter } from "../../utils/realtimeDiagnostics";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -111,6 +112,7 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
   isDraggingActive = false,
   onClose,
 }) => {
+  useRenderCounter("AccuracyMonitorCard");
   const rawAlongSide = useMemo(
     () => getValidMillimetres(alongSideMm),
     [alongSideMm],

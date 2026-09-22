@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo } from "react";
+import { useRenderCounter } from "../../utils/realtimeDiagnostics";
 import { View, Text, StyleSheet } from "react-native";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list";
 import { colors } from "../../theme/colors";
@@ -310,6 +311,7 @@ export const WaypointsTable = React.memo<Props>(
     currentIndex,
     embedded = false,
   }) => {
+    useRenderCounter("WaypointsTable");
     const currentWaypointNumber =
       currentIndex != null ? currentIndex + 1 : null;
 
