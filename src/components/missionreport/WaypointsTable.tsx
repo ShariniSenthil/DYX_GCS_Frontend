@@ -64,8 +64,13 @@ function finiteSurveyNumber(value: unknown): number | null {
 
 function formatRawGnssOverall(
   survey: RawGnssSurveySnapshot | null | undefined,
+  status?: string,
 ): string {
-  if (!survey) return "—";
+  if (!survey) {
+    return ["completed", "failed", "skipped"].includes(String(status ?? "").toLowerCase())
+      ? "UNAVAILABLE"
+      : "—";
+  }
 
   if (survey.available !== true) {
     return "UNAVAILABLE";
@@ -197,6 +202,7 @@ const WaypointRow = React.memo(
         >
           {formatRawGnssOverall(
             wpStatus?.survey,
+            wpStatus?.status,
           )}
         </Text>
 

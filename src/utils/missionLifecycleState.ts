@@ -72,6 +72,44 @@ export function isSameMissionRuntimeLifecycle(
   return sameOnKeys(previous, next, MISSION_RUNTIME_LIFECYCLE_KEYS);
 }
 
+/**
+ * `mission_status` is emitted several times per second.  Do not retain a new
+ * object merely because the backend rebuilt its payload, but do retain it when
+ * a point result actually changed.  In particular this includes the frozen
+ * survey/result for the final point, which used to be discarded by the
+ * lifecycle-only de-duplication and caused the table to lag or disagree.
+ */
+export function isSameMissionPointResults(
+  previous: LifecycleRecord | null | undefined,
+  next: LifecycleRecord | null | undefined,
+): boolean {
+  if (!previous || !next) return previous === next;
+
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(normalize);
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      return Object.keys(record)
+        .sort()
+        .reduce<Record<string, unknown>>((result, key) => {
+          // These are transport-only timestamps, not a marking-point change.
+          if (key !== "updated_at" && key !== "generated_at") {
+            result[key] = normalize(record[key]);
+          }
+          return result;
+        }, {});
+    }
+    return value;
+  };
+
+  return JSON.stringify(normalize(previous.point_results)) ===
+    JSON.stringify(normalize(next.point_results)) &&
+    JSON.stringify(normalize(previous.point_status)) ===
+      JSON.stringify(normalize(next.point_status));
+}
+
 /** Socket.IO lifecycle slice shared through TelemetryContext. */
 export interface MissionLifecycleSlice {
   state?: string;

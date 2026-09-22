@@ -111,12 +111,12 @@ import {
 import { shouldAcceptCanonicalReport } from "../utils/missionReportRunGuard";
 import {
   isSameMissionRuntimeLifecycle,
+  isSameMissionPointResults,
   resolveEffectiveMissionLifecycle,
 } from "../utils/missionLifecycleState";
 import {
   extractRawGnssSurvey,
   pickBestRawGnssSurvey,
-  surveyFromRadialMm,
 } from "../utils/rawGnssSurvey";
 import {
   createMissionStartAttemptId,
@@ -190,6 +190,28 @@ type WpStatus = {
   // Frozen display-only physical stop snapshot from backend.
   survey?: RawGnssSurveySnapshot | null;
 };
+
+function findSocketPointResult(
+  pointResults: unknown,
+  pointId: string,
+  pointIndex: number,
+): Record<string, unknown> | undefined {
+  if (Array.isArray(pointResults)) {
+    return pointResults.find((candidate) => {
+      if (!candidate || typeof candidate !== "object") return false;
+      const row = candidate as Record<string, unknown>;
+      return String(row.point_id ?? "").trim() === pointId || Number(row.point_index) === pointIndex;
+    }) as Record<string, unknown> | undefined;
+  }
+  if (!pointResults || typeof pointResults !== "object") return undefined;
+  const rows = pointResults as Record<string, unknown>;
+  const direct = rows[pointId];
+  if (direct && typeof direct === "object") return direct as Record<string, unknown>;
+  return Object.values(rows).find((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    return Number((candidate as Record<string, unknown>).point_index) === pointIndex;
+  }) as Record<string, unknown> | undefined;
+}
 
 /**
  * Calculate target-to-rover horizontal position error in millimetres.
@@ -276,6 +298,7 @@ export default function MissionReportScreen({
 
   const [backendMission, setBackendMissionState] =
     useState<MissionRuntimeState | null>(null);
+  const backendMissionRef = useRef<MissionRuntimeState | null>(null);
   // When the current backendMission object was accepted. Lets a newer
   // Socket.IO lifecycle push win over an older REST snapshot and vice versa.
   const backendMissionReceivedAtRef = useRef<number | null>(null);
@@ -324,16 +347,51 @@ export default function MissionReportScreen({
       setBackendMissionState((prev) => {
         // Keep the old object only when no lifecycle field changed. A PAUSED
         // snapshot flipping resume_available must reach the Resume button.
-        if (prev && next && isSameMissionRuntimeLifecycle(prev, next)) {
+        if (
+          prev &&
+          next &&
+          isSameMissionRuntimeLifecycle(prev, next) &&
+          isSameMissionPointResults(prev, next)
+        ) {
           return prev;
         }
         backendMissionReceivedAtRef.current = Date.now();
+        backendMissionRef.current = next;
         return next;
       });
       rememberMission(next);
     },
     [rememberMission],
   );
+
+  // FastAPI emits this complete snapshot immediately on Socket.IO connection
+  // and on every backend tick. It is the live marking-point authority; REST
+  // remains a slow recovery/export path only.
+  useEffect(() => {
+    if (!socket || connectionState !== "connected") return;
+    const handleMissionStatus = (raw: unknown) => {
+      if (!raw || typeof raw !== "object") return;
+      const incoming = raw as MissionRuntimeState;
+      const current = backendMissionRef.current;
+      const incomingId = String(incoming.mission_id ?? "").trim();
+      const currentId = String(current?.mission_id ?? "").trim();
+      const incomingRun = String(incoming.mission_run_id ?? "").trim();
+      const currentRun = String(current?.mission_run_id ?? "").trim();
+      if (current && ((currentId && incomingId && currentId !== incomingId) ||
+        (currentRun && incomingRun && currentRun !== incomingRun))) return;
+
+      setBackendMission(incoming);
+      const state = String(incoming.state ?? "").trim().toUpperCase();
+      const executionMode = mapBackendMissionModeToUiMode(incoming.execution_mode);
+      if (executionMode) setMode(executionMode);
+      setWaitingForManual(state === "WAITING_FOR_NEXT");
+      setIsMissionActive(["RUNNING", "PAUSED", "WAITING_FOR_NEXT", "ARMING", "PREPARING"].includes(state));
+    };
+    socket.on("mission_status", handleMissionStatus);
+    return () => {
+      socket.off("mission_status", handleMissionStatus);
+    };
+  }, [socket, connectionState, setBackendMission]);
 
   const clearRetainedMission = useCallback(() => {
     retainedMissionRef.current = null;
@@ -982,6 +1040,16 @@ export default function MissionReportScreen({
    * the currently active mission workflow.
    */
   const effectiveCurrentIndex = useMemo<number | null>(() => {
+    const socketActiveIndex = Number(
+      backendMission?.active_point_index ?? backendMission?.current_point_index,
+    );
+    if (Number.isInteger(socketActiveIndex) && socketActiveIndex >= 0) {
+      return socketActiveIndex;
+    }
+
+    if (POINT_MISSION_ENABLED && px4CurrentPointIndex !== null) {
+      return px4CurrentPointIndex;
+    }
     /*
      * Canonical Mission Report active point
      * has first priority for the table.
@@ -994,12 +1062,10 @@ export default function MissionReportScreen({
       return verifiedTargetIndex;
     }
 
-    if (POINT_MISSION_ENABLED && px4CurrentPointIndex !== null) {
-      return px4CurrentPointIndex;
-    }
-
     return currentIndex;
   }, [
+    backendMission?.active_point_index,
+    backendMission?.current_point_index,
     canonicalReportProjection,
     verifiedCtx.isLoaded,
     verifiedTargetIndex,
@@ -1017,11 +1083,13 @@ export default function MissionReportScreen({
     const next: Record<number, WpStatus> = {};
 
     for (const waypoint of waypoints) {
-      const reportRow =
-        canonicalReportProjection
-          ?.statusMap[
-            waypoint.sn
-          ];
+      const liveRunId = String(backendMission?.mission_run_id ?? "").trim();
+      const reportRunId = String(canonicalMissionReport?.mission_run_id ?? "").trim();
+      const canonicalMatchesLiveRun =
+        !liveRunId || (Boolean(reportRunId) && liveRunId === reportRunId);
+      const reportRow = canonicalMatchesLiveRun
+        ? canonicalReportProjection?.statusMap[waypoint.sn]
+        : undefined;
 
       const runtimeRow =
         effectiveStatusMap[
@@ -1046,12 +1114,14 @@ export default function MissionReportScreen({
         `P${String(waypoint.sn).padStart(4, "0")}`;
 
       const canonicalPoint =
-        canonicalMissionReport?.points
+        canonicalMatchesLiveRun
+          ? canonicalMissionReport?.points
           ?.find(
             (point) =>
               Number(point.sequence) ===
               waypoint.sn,
-          );
+          )
+          : undefined;
 
       /*
        * Fast final-point RPP fallback.
@@ -1064,13 +1134,7 @@ export default function MissionReportScreen({
       const runtimePointResults =
         backendMission?.point_results;
 
-      const runtimePointResult =
-        runtimePointResults &&
-        typeof runtimePointResults === "object"
-          ? (
-              runtimePointResults as Record<string, unknown>
-            )[pointId]
-          : undefined;
+      const runtimePointResult = findSocketPointResult(runtimePointResults, pointId, waypoint.sn - 1);
 
       const runtimePointAccuracy =
         runtimePointResult &&
@@ -1109,12 +1173,6 @@ export default function MissionReportScreen({
           extractRawGnssSurvey(runtimeSurveyCandidate),
           extractRawGnssSurvey(reportSurveyCandidate),
           extractRawGnssSurvey((runtimeRow as any)?.survey),
-          extractRawGnssSurvey(runtimeAccuracy),
-          surveyFromRadialMm(
-            typeof runtimeRow?.position_error_cm === "number"
-              ? runtimeRow.position_error_cm * 10
-              : null,
-          ),
         );
 
       // DYX FINAL POINT RUNTIME STATUS
@@ -1179,13 +1237,15 @@ export default function MissionReportScreen({
             }
           : undefined;
 
-      const displayRow =
-        runtimeTerminalRow
-          ? reconcileMissionReportRow(
-              reconciledRow ?? undefined,
-              runtimeTerminalRow,
-            )
-          : reconciledRow;
+      // A terminal Socket.IO result is the live authority.  REST reports are
+      // intentionally allowed to lag, but may still supply their RPP remark.
+      const displayRow = runtimeTerminalRow
+        ? {
+            ...reconciledRow,
+            ...runtimeTerminalRow,
+            remark: reconciledRow?.remark ?? "Along — | Cross — | Overall —",
+          }
+        : reconciledRow;
 
       const runtimeAlong =
         typeof runtimeAccuracy?.along_track_error_mm === "number" &&
@@ -1567,7 +1627,7 @@ export default function MissionReportScreen({
      */
     const timer = setInterval(() => {
       void pollMission();
-    }, 1000);
+    }, 15_000);
 
     return () => {
       cancelled = true;
@@ -1618,7 +1678,7 @@ export default function MissionReportScreen({
      */
     const timer = setInterval(() => {
       void pollReport();
-    }, 500);
+    }, 30_000);
 
     return () => {
       cancelled = true;
@@ -2175,7 +2235,7 @@ export default function MissionReportScreen({
     }
 
     const markedPoints = waypoints.reduce((count, waypoint) => {
-      const pointStatus = effectiveStatusMap[waypoint.sn]?.status;
+      const pointStatus = reportStatusMap[waypoint.sn]?.status;
 
       const isMarked = pointStatus === "completed" || pointStatus === "marked";
 
@@ -2209,7 +2269,7 @@ export default function MissionReportScreen({
       currentPoint,
       totalPoints,
     };
-  }, [waypoints, effectiveStatusMap, effectiveCurrentIndex]);
+  }, [waypoints, reportStatusMap, effectiveCurrentIndex]);
 
   // Automatically derive currentIndex from statusMap to keep UI in sync
   // This fixes the issue where currentIndex gets stuck even though statusMap updates correctly
@@ -4301,10 +4361,6 @@ export default function MissionReportScreen({
               extractRawGnssSurvey(event),
               extractRawGnssSurvey(event.data),
               extractRawGnssSurvey(event.accuracy),
-              surveyFromRadialMm(backendAccuracyMm, {
-                point_id: `P${String(statusKey).padStart(4, "0")}`,
-                point_index: statusKey,
-              }),
             ),
           };
 

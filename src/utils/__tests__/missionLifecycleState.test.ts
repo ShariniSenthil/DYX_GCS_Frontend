@@ -1,6 +1,7 @@
 import {
   buildMissionLifecycleSlice,
   isSameMissionLifecycleSlice,
+  isSameMissionPointResults,
   isSameMissionRuntimeLifecycle,
   resolveEffectiveMissionLifecycle,
   socketLifecycleMatchesMission,
@@ -86,6 +87,27 @@ describe("REST mission lifecycle dedupe", () => {
       arrival_settle_elapsed_sec: 0.1,
     };
     expect(isSameMissionRuntimeLifecycle(PAUSED_BLOCKED, next)).toBe(true);
+  });
+});
+
+describe("socket marking-point snapshot dedupe", () => {
+  it("ignores transport timestamps but retains changed frozen point data", () => {
+    const previous = {
+      point_results: { P0001: { point_outcome: "COMPLETED", updated_at: "a" } },
+      point_status: [{ point_index: 0, status: "COMPLETED" }],
+    };
+    const same = {
+      point_results: { P0001: { point_outcome: "COMPLETED", updated_at: "b" } },
+      point_status: [{ point_index: 0, status: "COMPLETED" }],
+    };
+    const changed = {
+      point_results: {
+        P0001: { point_outcome: "COMPLETED", accuracy: { survey: { radial_error_mm: 14.8 } } },
+      },
+      point_status: [{ point_index: 0, status: "COMPLETED" }],
+    };
+    expect(isSameMissionPointResults(previous, same)).toBe(true);
+    expect(isSameMissionPointResults(previous, changed)).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-import { ActivityIndicator, StatusBar, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { NavigationContainer } from "@react-navigation/native";
 
@@ -227,6 +227,8 @@ function AppContent(): React.ReactElement {
   useImmersiveMode();
 
   const [backendReady, setBackendReady] = useState(false);
+  const [backendStartupTimedOut, setBackendStartupTimedOut] = useState(false);
+  const [backendStartupAttempt, setBackendStartupAttempt] = useState(0);
 
   const [backendConfigured, setBackendConfigured] = useState(false);
   const [gcsMounted, setGcsMounted] = useState(false);
@@ -287,7 +289,35 @@ function AppContent(): React.ReactElement {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [backendStartupAttempt]);
+
+  useEffect(() => {
+    if (backendReady) {
+      setBackendStartupTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => setBackendStartupTimedOut(true), 12_000);
+    return () => clearTimeout(timer);
+  }, [backendReady, backendStartupAttempt]);
+
+  if (backendStartupTimedOut) {
+    return (
+      <View style={styles.bootRecovery}>
+        <Text style={styles.bootRecoveryTitle}>Connection setup is taking too long</Text>
+        <Text style={styles.bootRecoveryText}>The display is still running. Retry to reopen rover discovery.</Text>
+        <TouchableOpacity
+          style={styles.bootRecoveryButton}
+          onPress={() => {
+            setBackendReady(false);
+            setBackendStartupTimedOut(false);
+            setBackendStartupAttempt((value) => value + 1);
+          }}
+        >
+          <Text style={styles.bootRecoveryButtonText}>Retry connection</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   /**
    * Called after the operator selects and connects to a rover.
@@ -392,6 +422,32 @@ export default function App(): React.ReactElement | null {
     ...MaterialCommunityIcons.font,
     ...MaterialIcons.font,
   });
+  const [bootTimedOut, setBootTimedOut] = useState(false);
+  const [bootAttempt, setBootAttempt] = useState(0);
+
+  // A bad font/native-provider startup must never look like a white crash.
+  // Keep the recovery UI in JS's smallest possible root, outside map/auth
+  // providers, so it remains usable when one of those providers is stuck.
+  useEffect(() => {
+    if (fontsLoaded) {
+      setBootTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => setBootTimedOut(true), 12_000);
+    return () => clearTimeout(timer);
+  }, [fontsLoaded, bootAttempt]);
+
+  if (bootTimedOut) {
+    return (
+      <View style={styles.bootRecovery}>
+        <Text style={styles.bootRecoveryTitle}>Starting took too long</Text>
+        <Text style={styles.bootRecoveryText}>The app is still safe. Retry after the tablet finishes reconnecting.</Text>
+        <TouchableOpacity style={styles.bootRecoveryButton} onPress={() => setBootAttempt((value) => value + 1)}>
+          <Text style={styles.bootRecoveryButtonText}>Retry startup</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!fontsLoaded) {
     return (
@@ -450,4 +506,15 @@ const styles = StyleSheet.create({
     zIndex: 100000,
     elevation: 100000,
   },
+  bootRecovery: {
+    flex: 1,
+    backgroundColor: "#0A1628",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 28,
+  },
+  bootRecoveryTitle: { color: "#F8FAFC", fontSize: 22, fontWeight: "700" },
+  bootRecoveryText: { color: "#CBD5E1", fontSize: 15, textAlign: "center", marginTop: 12 },
+  bootRecoveryButton: { backgroundColor: "#2563EB", borderRadius: 8, marginTop: 20, paddingHorizontal: 22, paddingVertical: 12 },
+  bootRecoveryButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
 });

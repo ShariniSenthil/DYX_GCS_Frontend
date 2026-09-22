@@ -130,8 +130,6 @@ function TabNavigatorInner() {
             >
               <ErrorBoundary
                 componentName="Field Map"
-                autoResetMs={400}
-                maxAutoResets={2}
               >
                 <FieldMapHost />
               </ErrorBoundary>
@@ -170,8 +168,6 @@ function TabNavigatorInner() {
             >
               <ErrorBoundary
                 componentName="Marking Plan Screen"
-                autoResetMs={500}
-                maxAutoResets={2}
               >
                 <MemoPathPlanScreen
                   embedMap={false}

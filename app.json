@@ -56,8 +56,8 @@
       "policy": "appVersion"
     },
     "updates": {
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
+      "enabled": false,
+      "checkAutomatically": "ON_ERROR_RECOVERY",
       "fallbackToCacheTimeout": 0
     },
     "plugins": [
@@ -66,7 +66,7 @@
       [
         "@rnmapbox/maps",
         {
-          "RNMapboxMapsVersion": "11.20.1"
+          "RNMapboxMapsVersion": "11.23.1"
         }
       ]
     ],
