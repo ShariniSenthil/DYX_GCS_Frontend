@@ -22,6 +22,7 @@ import {
   type PointResultMap,
 } from "../utils/pointResultStore";
 import {
+  AppState,
   TouchableOpacity,
   View,
   StyleSheet,
@@ -1645,6 +1646,16 @@ export default function MissionReportScreen({
     },
     [],
   );
+
+  // Returning to the foreground may follow missed Socket.IO events even when
+  // the socket never reported a disconnect: re-hydrate once from REST.
+  // (Socket reconnects re-hydrate through the connectionState effects.)
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") refreshLiveMarkingPoints();
+    });
+    return () => subscription.remove();
+  }, [refreshLiveMarkingPoints]);
 
   // Terminal point events are the meaningful trigger for a canonical
   // confirmation read. Row state itself is already updated from the event.
