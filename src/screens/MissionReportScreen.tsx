@@ -21,6 +21,11 @@ import { DistanceToTargetCard } from "../components/missionreport/DistanceToTarg
 import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
 import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
 import {
+  CoalescedRefresh,
+  classifyMissionEventForReport,
+  isTerminalPointEventPayload,
+} from "../utils/reportRefreshScheduler";
+import {
   resolveRppAccuracyDataState,
   resolveRppDebugDataState,
 } from "../utils/liveAccuracyState";
@@ -230,6 +235,9 @@ interface MissionReportScreenProps {
   isVisible?: boolean;
   embedMap?: boolean;
 }
+
+/** Canonical report confirmation read after a meaningful mission event. */
+const LIVE_REPORT_REFRESH_DELAY_MS = 80;
 
 export default function MissionReportScreen({
   isVisible = true,
@@ -610,9 +618,7 @@ export default function MissionReportScreen({
   const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const liveReportRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const missionReportSignatureRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
   // Use waypoints from shared context for persistence across screens
@@ -1569,28 +1575,50 @@ export default function MissionReportScreen({
     }
   }, []);
 
+  // Canonical report reads are confirmation/hydration only. The coalescer
+  // never pushes its timer back, so a burst of requests still refreshes
+  // within LIVE_REPORT_REFRESH_DELAY_MS of the first one.
+  const refreshCanonicalNowRef = useRef<() => void>(() => {});
+  refreshCanonicalNowRef.current = () => {
+    if (!isVisible || connectionState !== "connected" || isOfflineMode()) return;
+    void Promise.all([refreshBackendMission(), refreshCanonicalMissionReport()]);
+  };
+  const liveReportRefreshRef = useRef<CoalescedRefresh | null>(null);
+  if (liveReportRefreshRef.current === null) {
+    liveReportRefreshRef.current = new CoalescedRefresh({
+      delayMs: LIVE_REPORT_REFRESH_DELAY_MS,
+      run: () => refreshCanonicalNowRef.current(),
+    });
+  }
+
   const refreshLiveMarkingPoints = useCallback(() => {
     if (!isVisible || connectionState !== "connected" || isOfflineMode()) return;
-    if (liveReportRefreshTimerRef.current) {
-      clearTimeout(liveReportRefreshTimerRef.current);
-    }
-    // Socket events update the lightweight row state immediately. This short,
-    // coalesced read fills in the canonical status/accuracy details without
-    // waiting for the next periodic poll.
-    liveReportRefreshTimerRef.current = setTimeout(() => {
-      liveReportRefreshTimerRef.current = null;
-      void Promise.all([refreshBackendMission(), refreshCanonicalMissionReport()]);
-    }, 80);
-  }, [connectionState, isVisible, refreshBackendMission, refreshCanonicalMissionReport]);
+    liveReportRefreshRef.current?.request();
+  }, [connectionState, isVisible]);
 
   useEffect(
     () => () => {
-      if (liveReportRefreshTimerRef.current) {
-        clearTimeout(liveReportRefreshTimerRef.current);
-      }
+      liveReportRefreshRef.current?.cancel();
     },
     [],
   );
+
+  // Terminal point events are the meaningful trigger for a canonical
+  // confirmation read. Row state itself is already updated from the event.
+  useEffect(() => {
+    if (!socket || connectionState !== "connected") return;
+    const handler = () => refreshLiveMarkingPoints();
+    const names = ["point_completed", "point_failed", "point_skipped"] as const;
+    names.forEach((name) => socket.on(name, handler));
+    const onGenericPointEvent = (payload: unknown) => {
+      if (isTerminalPointEventPayload(payload)) refreshLiveMarkingPoints();
+    };
+    socket.on("point_event", onGenericPointEvent);
+    return () => {
+      names.forEach((name) => socket.off(name, handler));
+      socket.off("point_event", onGenericPointEvent);
+    };
+  }, [socket, connectionState, refreshLiveMarkingPoints]);
 
   /*
    * ============================================================
@@ -3849,7 +3877,14 @@ export default function MissionReportScreen({
     // Subscribe to mission events from backend
     const unsubscribe = onMissionEvent((event: any) => {
       if (!mountedRef.current) return;
-      refreshLiveMarkingPoints();
+      // Only meaningful report changes may request a canonical read; a
+      // steady 50 Hz mission_status stream must not (and cannot) postpone it.
+      const classification = classifyMissionEventForReport(
+        event,
+        missionReportSignatureRef.current,
+      );
+      missionReportSignatureRef.current = classification.signature;
+      if (classification.refresh) refreshLiveMarkingPoints();
 
       const rawEventType = event.type || event.event || event.event_type;
       const eventType = (() => {
