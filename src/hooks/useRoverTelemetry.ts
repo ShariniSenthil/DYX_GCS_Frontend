@@ -6,6 +6,10 @@
  */
 
 import { countSocketPacket } from "../utils/realtimeDiagnostics";
+import {
+  clearSocketTelemetryPacket,
+  markSocketTelemetryPacket,
+} from "../utils/socketPacketClock";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import io from "socket.io-client";
@@ -1880,6 +1884,7 @@ if (envelope.within_test_tolerance !== undefined) {
             transport: socket.io.engine?.transport?.name ?? "unknown",
           });
           socketConnectedAtRef.current = Date.now();
+          clearSocketTelemetryPacket();
 
           hasLiveTelemetryRef.current = false;
 
@@ -2052,6 +2057,7 @@ if (envelope.within_test_tolerance !== undefined) {
           hasLiveTelemetryRef.current = false;
           connectionGeneration = null;
           lastSocketPacketTsRef.current = null;
+          clearSocketTelemetryPacket();
 
           const emptyTelemetry = createDefaultTelemetry();
 
@@ -2162,6 +2168,7 @@ if (envelope.within_test_tolerance !== undefined) {
             }
 
             lastSocketPacketTsRef.current = Date.now();
+            markSocketTelemetryPacket(lastSocketPacketTsRef.current);
             applyEnvelopeRef.current(envelope);
 
             if (isRobotStatusDebugEnabled()) {

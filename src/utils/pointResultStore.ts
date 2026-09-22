@@ -164,3 +164,49 @@ export function pruneToIdentity(
   }
   return changed ? next : map;
 }
+
+export type RuntimePointResult = Record<string, unknown>;
+
+/**
+ * Index runtime point results for one run. Entries that carry a different
+ * mission_run_id are excluded, so a previous run's terminal accuracy can
+ * never become the current run's row remark.
+ */
+export function indexRuntimePointResults(
+  pointResults: unknown,
+  runId: string | null,
+): { byId: Map<string, RuntimePointResult>; byIndex: Map<number, RuntimePointResult> } {
+  const byId = new Map<string, RuntimePointResult>();
+  const byIndex = new Map<number, RuntimePointResult>();
+  const rows = Array.isArray(pointResults)
+    ? pointResults
+    : pointResults && typeof pointResults === "object"
+      ? Object.values(pointResults as Record<string, unknown>)
+      : [];
+  for (const candidate of rows) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const row = candidate as RuntimePointResult;
+    const rowRun = String(row.mission_run_id ?? "").trim();
+    if (runId && rowRun && rowRun !== runId) continue;
+    const pointId = String(row.point_id ?? "").trim();
+    if (pointId) byId.set(pointId, row);
+    const pointIndex = Number(row.point_index);
+    if (Number.isInteger(pointIndex)) byIndex.set(pointIndex, row);
+  }
+  return { byId, byIndex };
+}
+
+function receivedAtMs(result: RuntimePointResult | undefined): number {
+  const parsed = Date.parse(String(result?.received_at ?? ""));
+  return Number.isFinite(parsed) ? parsed : -Infinity;
+}
+
+/** Pick the later of two results for the same point (backend receive time). */
+export function newerPointResult(
+  a: RuntimePointResult | undefined,
+  b: RuntimePointResult | undefined,
+): RuntimePointResult | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return receivedAtMs(b) > receivedAtMs(a) ? b : a;
+}

@@ -158,3 +158,30 @@ describe("run identity at read time", () => {
     expect(pruneToIdentity(map, RUN)).toBe(map);
   });
 });
+
+describe("runtime point_results fallback (REST / full mission_status)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { indexRuntimePointResults, newerPointResult } = require("../pointResultStore");
+
+  test("entries from another run are excluded", () => {
+    const index = indexRuntimePointResults(
+      {
+        P0001: { point_id: "P0001", point_index: 0, mission_run_id: "run-0" },
+        P0002: { point_id: "P0002", point_index: 1, mission_run_id: "run-1" },
+      },
+      "run-1",
+    );
+    expect(index.byId.has("P0001")).toBe(false);
+    expect(index.byIndex.has(0)).toBe(false);
+    expect(index.byId.get("P0002").point_index).toBe(1);
+  });
+
+  test("the newer result wins regardless of transport", () => {
+    const achieved = { point_outcome: "ACCURACY_ACHIEVED", received_at: "2026-09-22T10:00:00.100Z" };
+    const completed = { point_outcome: "COMPLETED", received_at: "2026-09-22T10:00:00.900Z" };
+    expect(newerPointResult(achieved, completed)).toBe(completed);
+    expect(newerPointResult(completed, achieved)).toBe(completed);
+    expect(newerPointResult(undefined, achieved)).toBe(achieved);
+    expect(newerPointResult(achieved, undefined)).toBe(achieved);
+  });
+});

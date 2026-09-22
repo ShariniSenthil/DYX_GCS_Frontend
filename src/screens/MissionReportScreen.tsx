@@ -1,6 +1,7 @@
 import React, {
   useState,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useCallback,
@@ -15,6 +16,8 @@ import {
 import {
   EMPTY_POINT_RESULTS,
   applyPointResult,
+  indexRuntimePointResults,
+  newerPointResult,
   parsePointResultEvent,
   pointResultsForRun,
   pruneToIdentity,
@@ -218,28 +221,6 @@ type WpStatus = {
   survey?: RawGnssSurveySnapshot | null;
 };
 
-function findSocketPointResult(
-  pointResults: unknown,
-  pointId: string,
-  pointIndex: number,
-): Record<string, unknown> | undefined {
-  if (Array.isArray(pointResults)) {
-    return pointResults.find((candidate) => {
-      if (!candidate || typeof candidate !== "object") return false;
-      const row = candidate as Record<string, unknown>;
-      return String(row.point_id ?? "").trim() === pointId || Number(row.point_index) === pointIndex;
-    }) as Record<string, unknown> | undefined;
-  }
-  if (!pointResults || typeof pointResults !== "object") return undefined;
-  const rows = pointResults as Record<string, unknown>;
-  const direct = rows[pointId];
-  if (direct && typeof direct === "object") return direct as Record<string, unknown>;
-  return Object.values(rows).find((candidate) => {
-    if (!candidate || typeof candidate !== "object") return false;
-    return Number((candidate as Record<string, unknown>).point_index) === pointIndex;
-  }) as Record<string, unknown> | undefined;
-}
-
 /**
  * Calculate target-to-rover horizontal position error in millimetres.
  * Kept local so MissionReportScreen does not depend on an incompatible
@@ -345,6 +326,8 @@ export default function MissionReportScreen({
   // When the current backendMission object was accepted. Lets a newer
   // Socket.IO lifecycle push win over an older REST snapshot and vice versa.
   const backendMissionReceivedAtRef = useRef<number | null>(null);
+  // When the last accepted socket mission_status arrived (REST ordering guard).
+  const lastSocketMissionStatusAtRef = useRef(0);
 
   /**
    * The backend intentionally archives the active CSV after COMPLETED and
@@ -386,8 +369,20 @@ export default function MissionReportScreen({
 
   const setBackendMission = useCallback(
     (mission: MissionRuntimeState | null | undefined) => {
-      const next = mission ?? null;
+      const incoming = mission ?? null;
       setBackendMissionState((prev) => {
+        // A compact mission_lifecycle@1 packet carries no point_results or
+        // report. Merge it into the same mission/run's previous snapshot
+        // instead of dropping those fields (which made REST and socket
+        // snapshots flip the table back and forth).
+        const next =
+          incoming &&
+          prev &&
+          (incoming as { contract?: unknown }).contract === "mission_lifecycle@1" &&
+          String(incoming.mission_id ?? "") === String(prev.mission_id ?? "") &&
+          String(incoming.mission_run_id ?? "") === String(prev.mission_run_id ?? "")
+            ? ({ ...prev, ...incoming } as MissionRuntimeState)
+            : incoming;
         // Keep the old object only when no lifecycle field changed. A PAUSED
         // snapshot flipping resume_available must reach the Resume button.
         if (
@@ -402,7 +397,7 @@ export default function MissionReportScreen({
         backendMissionRef.current = next;
         return next;
       });
-      rememberMission(next);
+      rememberMission(incoming);
     },
     [rememberMission],
   );
@@ -423,6 +418,7 @@ export default function MissionReportScreen({
       if (current && ((currentId && incomingId && currentId !== incomingId) ||
         (currentRun && incomingRun && currentRun !== incomingRun))) return;
 
+      lastSocketMissionStatusAtRef.current = Date.now();
       setBackendMission(incoming);
       const state = String(incoming.state ?? "").trim().toUpperCase();
       const executionMode = mapBackendMissionModeToUiMode(incoming.execution_mode);
@@ -450,7 +446,10 @@ export default function MissionReportScreen({
     [liveMissionId, liveRunId],
   );
   const liveIdentityRef = useRef(liveIdentity);
-  liveIdentityRef.current = liveIdentity;
+  useLayoutEffect(() => {
+    // Only a committed identity may gate incoming point events.
+    liveIdentityRef.current = liveIdentity;
+  }, [liveIdentity]);
 
   useEffect(() => {
     setSocketPointResults((previous) => pruneToIdentity(previous, liveIdentity));
@@ -485,6 +484,13 @@ export default function MissionReportScreen({
   const currentRunSocketPointResults = useMemo(
     () => pointResultsForRun(socketPointResults, liveIdentity),
     [socketPointResults, liveIdentity],
+  );
+
+  // backendMission.point_results (REST / full socket snapshot), restricted to
+  // the current run and indexed once so row lookup is O(1).
+  const currentRunBackendPointResults = useMemo(
+    () => indexRuntimePointResults(backendMission?.point_results, liveRunId),
+    [backendMission?.point_results, liveRunId],
   );
 
   const clearRetainedMission = useCallback(() => {
@@ -758,22 +764,42 @@ export default function MissionReportScreen({
    */
   // Transitional live-telemetry terminal capture, driven by a store
   // subscription so it never re-renders the screen at telemetry rate.
+  // Only terminal points can be captured; recomputed when point status
+  // changes so the per-packet subscription does not scan every point.
+  const terminalCaptureCandidates = useMemo(
+    () =>
+      Object.entries(pointStatusMap).filter(([, entry]) =>
+        isTerminalRppAccuracyStatus(entry.status),
+      ),
+    [pointStatusMap],
+  );
   const terminalCaptureInputsRef = useRef({
     pointStatusMap,
     px4CurrentPointIndex,
     waypoints,
+    candidates: terminalCaptureCandidates,
   });
-  terminalCaptureInputsRef.current = {
-    pointStatusMap,
-    px4CurrentPointIndex,
-    waypoints,
-  };
+  useLayoutEffect(() => {
+    terminalCaptureInputsRef.current = {
+      pointStatusMap,
+      px4CurrentPointIndex,
+      waypoints,
+      candidates: terminalCaptureCandidates,
+    };
+  }, [pointStatusMap, px4CurrentPointIndex, waypoints, terminalCaptureCandidates]);
   const runTerminalCaptureRef = useRef<(telemetry: RoverTelemetry) => void>(
     () => {},
   );
   runTerminalCaptureRef.current = (telemetry: RoverTelemetry) => {
-    const { pointStatusMap, px4CurrentPointIndex, waypoints } =
+    // Never freeze a retained or stale /rpp/accuracy sample.
+    if (telemetry.rpp_accuracy_stream_fresh !== true) {
+      return;
+    }
+    const { px4CurrentPointIndex, waypoints, candidates } =
       terminalCaptureInputsRef.current;
+    if (candidates.length === 0) {
+      return;
+    }
     const currentPx4PointIndex =
       px4CurrentPointIndex;
 
@@ -781,9 +807,7 @@ export default function MissionReportScreen({
       const [
         pointIndexText,
         entry,
-      ] of Object.entries(
-        pointStatusMap,
-      )
+      ] of candidates
     ) {
       const pointIndex =
         Number.parseInt(
@@ -1173,13 +1197,12 @@ export default function MissionReportScreen({
        * Use that stored RPP result while /api/mission/report catches up.
        * This is copy/format only; no accuracy is reconstructed.
        */
-      const runtimePointResult =
-        currentRunSocketPointResults[pointId] ??
-        findSocketPointResult(
-          backendMission?.point_results,
-          pointId,
-          waypoint.sn - 1,
-        );
+      // Newest current-run result wins, whichever transport delivered it.
+      const runtimePointResult = newerPointResult(
+        currentRunSocketPointResults[pointId],
+        currentRunBackendPointResults.byId.get(pointId) ??
+          currentRunBackendPointResults.byIndex.get(waypoint.sn - 1),
+      );
 
       const runtimePointAccuracy =
         runtimePointResult &&
@@ -1398,7 +1421,7 @@ export default function MissionReportScreen({
     canonicalReportProjection,
     canonicalMissionReport,
     canonicalPointsBySequence,
-    backendMission?.point_results,
+    currentRunBackendPointResults,
     currentRunSocketPointResults,
     effectiveStatusMap,
     terminalRppAccuracyFallbackMap,
@@ -1504,6 +1527,7 @@ export default function MissionReportScreen({
     }
 
     try {
+      const requestStartedAt = Date.now();
       const response = await getMissionStatus();
 
       if (!response?.success || !response?.mission) {
@@ -1511,6 +1535,18 @@ export default function MissionReportScreen({
       }
 
       const mission = response.mission;
+
+      // A REST snapshot that was in flight while a newer socket packet for
+      // the SAME mission/run was accepted is older; do not let it roll the
+      // lifecycle back. An identity change is always accepted.
+      const current = backendMissionRef.current;
+      const sameIdentity =
+        current !== null &&
+        String(current.mission_id ?? "") === String(mission.mission_id ?? "") &&
+        String(current.mission_run_id ?? "") === String(mission.mission_run_id ?? "");
+      if (sameIdentity && lastSocketMissionStatusAtRef.current > requestStartedAt) {
+        return;
+      }
 
       setBackendMission(mission);
 
@@ -1623,10 +1659,12 @@ export default function MissionReportScreen({
   // never pushes its timer back, so a burst of requests still refreshes
   // within LIVE_REPORT_REFRESH_DELAY_MS of the first one.
   const refreshCanonicalNowRef = useRef<() => void>(() => {});
-  refreshCanonicalNowRef.current = () => {
-    if (!isVisible || connectionState !== "connected" || isOfflineMode()) return;
-    void Promise.all([refreshBackendMission(), refreshCanonicalMissionReport()]);
-  };
+  useLayoutEffect(() => {
+    refreshCanonicalNowRef.current = () => {
+      if (!isVisible || connectionState !== "connected" || isOfflineMode()) return;
+      void Promise.all([refreshBackendMission(), refreshCanonicalMissionReport()]);
+    };
+  }, [isVisible, connectionState, refreshBackendMission, refreshCanonicalMissionReport]);
   const liveReportRefreshRef = useRef<CoalescedRefresh | null>(null);
   if (liveReportRefreshRef.current === null) {
     liveReportRefreshRef.current = new CoalescedRefresh({
@@ -1812,39 +1850,41 @@ export default function MissionReportScreen({
   // First-motion start timing, checked on position updates without
   // re-rendering the screen.
   const checkFirstMotionRef = useRef<() => void>(() => {});
-  checkFirstMotionRef.current = () => {
-    const attemptId = startTimingAttemptRef.current;
-    const origin = startOriginRef.current;
-    if (
-      !attemptId ||
-      !origin ||
-      firstMotionLoggedRef.current ||
-      !isMissionActive
-    ) {
-      return;
-    }
+  useLayoutEffect(() => {
+    checkFirstMotionRef.current = () => {
+      const attemptId = startTimingAttemptRef.current;
+      const origin = startOriginRef.current;
+      if (
+        !attemptId ||
+        !origin ||
+        firstMotionLoggedRef.current ||
+        !isMissionActive
+      ) {
+        return;
+      }
 
-    const roverPosition = liveStore.getSnapshot().roverPosition;
-    const lat = roverPosition?.lat ?? 0;
-    const lon = roverPosition?.lng ?? 0;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      return;
-    }
+      const roverPosition = liveStore.getSnapshot().roverPosition;
+      const lat = roverPosition?.lat ?? 0;
+      const lon = roverPosition?.lng ?? 0;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return;
+      }
 
-    const moved =
-      Math.abs(lat - origin.lat) > 0.00001 ||
-      Math.abs(lon - origin.lon) > 0.00001;
-    if (!moved) {
-      return;
-    }
+      const moved =
+        Math.abs(lat - origin.lat) > 0.00001 ||
+        Math.abs(lon - origin.lon) > 0.00001;
+      if (!moved) {
+        return;
+      }
 
-    firstMotionLoggedRef.current = true;
-    logMissionStartTiming(
-      attemptId,
-      "first_motion",
-      `lat=${lat.toFixed(7)} lon=${lon.toFixed(7)}`,
-    );
-  };
+      firstMotionLoggedRef.current = true;
+      logMissionStartTiming(
+        attemptId,
+        "first_motion",
+        `lat=${lat.toFixed(7)} lon=${lon.toFixed(7)}`,
+      );
+      };
+  });
   useEffect(() => {
     checkFirstMotionRef.current();
     return liveStore.subscribe(() => checkFirstMotionRef.current());

@@ -9,7 +9,7 @@
  * forwarded them from /rpp/debug and /rpp/accuracy.
  */
 
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { ComponentProps } from "react";
 import {
   shallowEqual,
@@ -29,6 +29,23 @@ import { DistanceToTargetCard } from "./DistanceToTargetCard";
 import { MissionMapNative } from "./MissionMapNative";
 import { VehicleStatusCard } from "./VehicleStatusCard";
 import type { VehicleStatus } from "./types";
+import { isSocketTelemetryStalled } from "../../utils/socketPacketClock";
+
+/**
+ * True when no telemetry packet has arrived within the live-panel window.
+ * Polled at 4 Hz inside the panel only, so it never re-renders the screen.
+ */
+export function useSocketPacketStall(pollMs = 250): boolean {
+  const [stalled, setStalled] = useState(() => isSocketTelemetryStalled());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = isSocketTelemetryStalled();
+      setStalled((previous) => (previous === next ? previous : next));
+    }, pollMs);
+    return () => clearInterval(timer);
+  }, [pollMs]);
+  return stalled;
+}
 
 const ACTIVE_TELEMETRY_MISSION_STATES = new Set([
   "running",
@@ -98,6 +115,7 @@ export const LiveAccuracyMonitorPanel: React.FC<
   DragProps & { backendMissionState: string; onClose?: () => void }
 > = ({ backendMissionState, onClose, ...drag }) => {
   const rpp = useLiveTelemetrySelector(selectRppDebug, shallowEqual);
+  const packetStalled = useSocketPacketStall();
   const missionActive = isAccuracyMissionActive(rpp.missionStatus, backendMissionState);
   const valuesPresent = [
     rpp.along,
@@ -110,7 +128,7 @@ export const LiveAccuracyMonitorPanel: React.FC<
   const dataState = resolveRppDebugDataState(
     {
       connectionState: rpp.connectionState,
-      socketStale: rpp.socketStale,
+      socketStale: rpp.socketStale || packetStalled,
       missionActive,
     },
     { available: rpp.available, fresh: rpp.fresh, valuesPresent },
@@ -152,12 +170,13 @@ export const LiveDistanceToTargetPanel: React.FC<
   DragProps & { backendMissionState: string }
 > = ({ backendMissionState, ...drag }) => {
   const radial = useLiveTelemetrySelector(selectRadial, shallowEqual);
+  const packetStalled = useSocketPacketStall();
   const missionActive = isAccuracyMissionActive(radial.missionStatus, backendMissionState);
   const measurementPresent = radial.available === true && finite(radial.radial);
   const dataState = resolveRppAccuracyDataState(
     {
       connectionState: radial.connectionState,
-      socketStale: radial.socketStale,
+      socketStale: radial.socketStale || packetStalled,
       missionActive,
     },
     { available: radial.available, fresh: radial.fresh, measurementPresent },
