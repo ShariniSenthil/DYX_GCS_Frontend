@@ -22,6 +22,7 @@ import { isUnknownControlOutcome } from "../../services/apiError";
 import { Waypoint } from "./types";
 import { Toast } from "../shared/Toast";
 import { validateBulkSkip } from "../../utils/bulkSkipValidator";
+import { stopProgressLabel } from "../../utils/missionLifecycleState";
 import {
   useActionGuard,
   useComponentLifecycle,
@@ -67,6 +68,12 @@ export type MissionControlCardProps = {
   rtkReason?: string | null;
 
   /**
+   * Mission Manager STOP progress (HARD_STOP_ASSERTED, DISARMING,
+   * DISARM_CONFIRMED, DISARM_FAILED). Display only.
+   */
+  stopStage?: string | null;
+
+  /**
    * True when a mission is uploaded in the backend.
    * Controls START versus NO MISSION text.
    */
@@ -108,6 +115,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   resumeAvailable = false,
   pauseReason = null,
   rtkReason = null,
+  stopStage = null,
   waitingForManual = false,
   isMissionLoaded = false,
   isMissionReady = false,
@@ -123,6 +131,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
   const [isStarting, setIsStarting] = React.useState(false);
   const [isStopping, setIsStopping] = React.useState(false);
+  const stopProgress = stopProgressLabel(stopStage);
   const [isNexting, setIsNexting] = React.useState(false);
   const [isSkipping, setIsSkipping] = React.useState(false);
   const [isBulkMode, setIsBulkMode] = React.useState(false);
@@ -578,7 +587,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
               {isPreparing || isStarting
                 ? startPhaseLabel
                 : isStopping
-                  ? "Stopping..."
+                  ? stopProgress.button
                   : isRunning
                     ? "STOP"
                     : isPlanUpdateRequired
@@ -749,9 +758,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
             <View style={styles.modalContent}>
               <ActivityIndicator size="large" color={colors.danger} />
               <Text style={styles.modalTitle}>Stopping Mission</Text>
-              <Text style={styles.modalText}>
-                Shutting down mission controller...
-              </Text>
+              <Text style={styles.modalText}>{stopProgress.detail}</Text>
             </View>
           </View>
         </Modal>

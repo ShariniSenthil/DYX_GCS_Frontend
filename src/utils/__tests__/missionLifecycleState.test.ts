@@ -4,6 +4,7 @@ import {
   isSameMissionRuntimeLifecycle,
   resolveEffectiveMissionLifecycle,
   socketLifecycleMatchesMission,
+  stopProgressLabel,
   type MissionLifecycleSlice,
 } from "../missionLifecycleState";
 
@@ -209,5 +210,24 @@ describe("effective lifecycle authority", () => {
       source: "none",
       resumeAvailable: false,
     });
+  });
+});
+
+describe("stopProgressLabel", () => {
+  it.each([
+    ["HARD_STOP_ASSERTED", "Motion stopped — disarming…"],
+    ["disarming", "Motion stopped — disarming…"],
+    ["DISARM_CONFIRMED", "Motion stopped — disarm confirmed"],
+  ])("%s", (stage, detail) => {
+    expect(stopProgressLabel(stage).detail).toBe(detail);
+  });
+
+  it("never claims a disarm that failed", () => {
+    expect(stopProgressLabel("DISARM_FAILED").detail).toMatch(/NOT CONFIRMED/);
+  });
+
+  it("falls back to the generic text before any stage arrives", () => {
+    expect(stopProgressLabel(null).button).toBe("Stopping...");
+    expect(stopProgressLabel("IDLE").button).toBe("Stopping...");
   });
 });

@@ -281,3 +281,28 @@ export function resolveEffectiveMissionLifecycle(
     stopStage: upperOrNull(mission.stop_stage),
   };
 }
+
+/**
+ * STOP progress text while the STOP HTTP request is still waiting for
+ * Mission Manager's disarm confirmation. Display only: STOP semantics and
+ * completion still come from the backend response.
+ */
+export function stopProgressLabel(stopStage: string | null | undefined): {
+  button: string;
+  detail: string;
+} {
+  switch (upperOrNull(stopStage)) {
+    case "HARD_STOP_ASSERTED":
+    case "DISARMING":
+      return { button: "Disarming...", detail: "Motion stopped — disarming…" };
+    case "DISARM_CONFIRMED":
+      return { button: "Stopped", detail: "Motion stopped — disarm confirmed" };
+    case "DISARM_FAILED":
+      return {
+        button: "Stopping...",
+        detail: "Motion stopped — DISARM NOT CONFIRMED. Press STOP to retry.",
+      };
+    default:
+      return { button: "Stopping...", detail: "Shutting down mission controller..." };
+  }
+}

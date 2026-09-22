@@ -5042,6 +5042,7 @@ export default function MissionReportScreen({
             resumeAvailable={backendResumeAvailable}
             pauseReason={backendPauseReason}
             rtkReason={backendRtkReason}
+            stopStage={effectiveLifecycle.stopStage}
             onResume={handleResume}
             onStop={handleStop}
             onNext={handleNext}
