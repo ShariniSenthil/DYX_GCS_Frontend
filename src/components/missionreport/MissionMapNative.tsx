@@ -8,6 +8,7 @@ import {
 import { RoverVehicleIcon } from "../shared/RoverVehicleIcon";
 import { NativeTrajectoryLayer, NativeWaypointLayer } from "../shared/NativeMapLayers";
 import { TrajectoryStatusBanner } from "../shared/TrajectoryStatusBanner";
+import { OfflineMapStatusBadge } from "../shared/OfflineMapStatusBadge";
 import {
   MAPBOX_FALLBACK_STYLE_JSON,
   mapboxStyleUrlForMode,
@@ -330,6 +331,8 @@ const MissionMapNativeBase: React.FC<Props> = ({
           </Text>
         </View>
       )}
+
+      <OfflineMapStatusBadge />
 
       <TrajectoryStatusBanner
         preview={preview}

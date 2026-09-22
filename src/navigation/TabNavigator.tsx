@@ -8,6 +8,7 @@ import { FieldMapHost } from "../components/shared/FieldMapHost";
 import { MissionProgressOverlayProvider } from "../context/MissionProgressOverlayContext";
 import { BackendTrajectoryProvider } from "../context/BackendTrajectoryContext";
 import { FieldMapProvider, useFieldMap } from "../context/FieldMapContext";
+import { OfflineMapProvider } from "../context/OfflineMapContext";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { colors } from "../theme/colors";
 import PersistentStorage from "../services/PersistentStorage";
@@ -219,7 +220,9 @@ export default function TabNavigator() {
   return (
     <FieldMapProvider>
       <BackendTrajectoryProvider>
-        <TabNavigatorInner />
+        <OfflineMapProvider>
+          <TabNavigatorInner />
+        </OfflineMapProvider>
       </BackendTrajectoryProvider>
     </FieldMapProvider>
   );

@@ -24,6 +24,7 @@ import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { MapBottomControlsBar } from "./MapBottomControlsBar";
 import type { MapStyleMode } from "./MapBottomControlsBar";
 import { TrajectoryStatusBanner } from "./TrajectoryStatusBanner";
+import { OfflineMapStatusBadge } from "./OfflineMapStatusBadge";
 import {
   BACKEND_LINE_RENDER,
   buildBackendTrajectoryCollection,
@@ -439,6 +440,8 @@ const FieldMapHostBase: React.FC = () => {
           </Text>
         </View>
       )}
+
+      <OfflineMapStatusBadge />
 
       <TrajectoryStatusBanner
         preview={preview}
