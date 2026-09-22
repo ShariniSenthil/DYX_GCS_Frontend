@@ -105,7 +105,7 @@ import { getMissionProgressRef } from "../utils/missionStatusPresentation";
 import {
   getMissionStartEligibility,
   isMissionStoredOnRover,
-  shouldAutoResumeAfterStart,
+  classifyMissionStartOutcome,
   shouldSkipExecutionModePost,
 } from "../utils/missionStartEligibility";
 import { shouldAcceptCanonicalReport } from "../utils/missionReportRunGuard";
@@ -3069,49 +3069,21 @@ export default function MissionReportScreen({
 
       clearCurrentMissionData();
 
-      let startedMission = response.mission;
+      // The backend response is synchronized with Mission Manager's
+      // acknowledged START status, so it is authoritative on its own:
+      // no follow-up GET and no automatic RESUME. Socket.IO confirms
+      // independently.
+      const startedMission = response.mission;
       setBackendMission(startedMission);
-
-      const leftoverPause = (mission: typeof startedMission) =>
-        shouldAutoResumeAfterStart({
-          state: mission?.state,
-          resumeAvailable: mission?.resume_available,
-          pauseReason: mission?.pause_reason,
-          emergencyStop: mission?.emergency_stop,
-        });
-
-      if (!leftoverPause(startedMission)) {
-        try {
-          const status = await getMissionStatus();
-          if (status?.success && status.mission) {
-            startedMission = status.mission;
-            setBackendMission(startedMission);
-          }
-        } catch {
-          // Start already succeeded; pause check is best-effort.
-        }
-      }
-
-      if (leftoverPause(startedMission)) {
-        logMissionStartTiming(
-          attemptId,
-          "backend_phase",
-          `auto_resume pause=${String(startedMission?.pause_reason ?? "")}`,
-        );
-
-        try {
-          const resumed = await resumeMission();
-          if (resumed?.mission) {
-            startedMission = resumed.mission;
-            setBackendMission(startedMission);
-          }
-        } catch (resumeError) {
-          console.log(
-            "[MissionReportScreen] Auto-resume after Start failed:",
-            resumeError,
-          );
-        }
-      }
+      const startOutcome = classifyMissionStartOutcome({
+        state: startedMission?.state,
+        pauseReason: startedMission?.pause_reason,
+      });
+      logMissionStartTiming(
+        attemptId,
+        "backend_phase",
+        `start_outcome=${startOutcome.kind}`,
+      );
 
       setIsMissionActive(true);
       setMissionStartTime(new Date());
@@ -3122,11 +3094,22 @@ export default function MissionReportScreen({
         lon: roverPosition?.lng ?? 0,
       };
 
-      showNotification(
-        "success",
-        "Mission Started",
-        "The rover mission started successfully.",
-      );
+      if (startOutcome.kind === "paused") {
+        showNotification(
+          "info",
+          "Mission Started — Paused",
+          startOutcome.pauseReason
+            ? `Rover paused (${startOutcome.pauseReason}). Press Resume when it is allowed.`
+            : "Rover paused. Press Resume when it is allowed.",
+          6000,
+        );
+      } else {
+        showNotification(
+          "success",
+          "Mission Started",
+          "The rover mission started successfully.",
+        );
+      }
 
       console.log("[MissionReportScreen] Mission start accepted:", {
         state: startedMission?.state,
@@ -3135,10 +3118,7 @@ export default function MissionReportScreen({
         pause_reason: startedMission?.pause_reason,
       });
 
-      return {
-        ...response,
-        mission: startedMission,
-      };
+      return response;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to start mission.";

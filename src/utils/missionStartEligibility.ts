@@ -140,36 +140,27 @@ export function shouldSkipExecutionModePost(
   return normalizeMode(currentMode) === requestedMode;
 }
 
-const SAFETY_PAUSE_REASON =
-  /RTK|ODOM|GPS|FAILSAFE|GEOFENCE/;
-
 /**
- * After Start, the rover can sit in PAUSED because a previous
- * Complete/Stop latched the shared STOP contract. That leftover
- * pause is cleared with Resume. Safety pauses must stay paused.
+ * START result as the operator should see it. There is deliberately no
+ * automatic RESUME: a PAUSED result is authoritative (RTK, odometry, a
+ * latched stop, ...) and needs the normal Resume contract.
  */
-export function shouldAutoResumeAfterStart(input: {
+export type MissionStartOutcome =
+  | { kind: "running" }
+  | { kind: "paused"; pauseReason: string | null }
+  | { kind: "other"; state: string };
+
+export function classifyMissionStartOutcome(input: {
   state: string | null | undefined;
-  resumeAvailable?: boolean | null;
   pauseReason?: string | null;
-  emergencyStop?: boolean | null;
-}): boolean {
-  if (normalizeState(input.state) !== "PAUSED") {
-    return false;
+}): MissionStartOutcome {
+  const state = normalizeState(input.state);
+  if (state === "PAUSED") {
+    const reason = normalizeState(input.pauseReason);
+    return { kind: "paused", pauseReason: reason || null };
   }
-
-  if (input.emergencyStop === true) {
-    return false;
+  if (state === "RUNNING") {
+    return { kind: "running" };
   }
-
-  if (input.resumeAvailable !== true) {
-    return false;
-  }
-
-  const reason = normalizeState(input.pauseReason);
-  if (reason && SAFETY_PAUSE_REASON.test(reason)) {
-    return false;
-  }
-
-  return true;
+  return { kind: "other", state };
 }

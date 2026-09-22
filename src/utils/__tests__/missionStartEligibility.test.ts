@@ -1,7 +1,7 @@
 import {
   getMissionStartEligibility,
   isMissionStoredOnRover,
-  shouldAutoResumeAfterStart,
+  classifyMissionStartOutcome,
   shouldSkipExecutionModePost,
 } from "../missionStartEligibility";
 
@@ -151,62 +151,26 @@ describe("start HTTP skips", () => {
 
 });
 
-describe("shouldAutoResumeAfterStart", () => {
-  test("resumes leftover OPERATOR pause after Start", () => {
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "PAUSED",
-        resumeAvailable: true,
-        pauseReason: "OPERATOR",
-        emergencyStop: false,
-      }),
-    ).toBe(true);
+describe("classifyMissionStartOutcome", () => {
+  test("RUNNING is a normal start", () => {
+    expect(classifyMissionStartOutcome({ state: "running" })).toEqual({
+      kind: "running",
+    });
   });
 
-  test("resumes empty leftover pause when Resume is available", () => {
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "PAUSED",
-        resumeAvailable: true,
-        pauseReason: null,
-      }),
-    ).toBe(true);
-  });
+  test.each(["OPERATOR", "RTK_LOST", "ESTOP", null])(
+    "PAUSED (%s) stays paused and keeps its reason; never auto-resumed",
+    (reason) => {
+      expect(
+        classifyMissionStartOutcome({ state: "PAUSED", pauseReason: reason }),
+      ).toEqual({ kind: "paused", pauseReason: reason });
+    },
+  );
 
-  test("does not resume RTK or odom safety pauses", () => {
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "PAUSED",
-        resumeAvailable: true,
-        pauseReason: "RTK_LOST",
-      }),
-    ).toBe(false);
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "PAUSED",
-        resumeAvailable: true,
-        pauseReason: "ODOM_STALE",
-      }),
-    ).toBe(false);
-  });
-
-  test("does not resume while E-stop is still latched", () => {
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "PAUSED",
-        resumeAvailable: true,
-        pauseReason: "ESTOP",
-        emergencyStop: true,
-      }),
-    ).toBe(false);
-  });
-
-  test("does not resume when not paused", () => {
-    expect(
-      shouldAutoResumeAfterStart({
-        state: "RUNNING",
-        resumeAvailable: true,
-      }),
-    ).toBe(false);
+  test("other states are reported as-is", () => {
+    expect(classifyMissionStartOutcome({ state: "waiting_for_next" })).toEqual({
+      kind: "other",
+      state: "WAITING_FOR_NEXT",
+    });
   });
 });
