@@ -5,7 +5,21 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { useRenderCounter } from "../utils/realtimeDiagnostics";
+import {
+  countSocketPacket,
+  markPointEventReceived,
+  markPointRowDisplayed,
+  useRenderCounter,
+} from "../utils/realtimeDiagnostics";
+import {
+  EMPTY_POINT_RESULTS,
+  applyPointResult,
+  parsePointResultEvent,
+  pointResultsForRun,
+  pruneToIdentity,
+  type MissionIdentity,
+  type PointResultMap,
+} from "../utils/pointResultStore";
 import {
   TouchableOpacity,
   View,
@@ -161,6 +175,7 @@ import {
 
 import {
   captureTerminalRppAccuracy,
+  formatTerminalRppAccuracy,
   isTerminalRppAccuracyStatus,
   selectMissionReportRemark,
   type TerminalRppAccuracySnapshot,
@@ -406,6 +421,57 @@ export default function MissionReportScreen({
       socket.off("mission_status", handleMissionStatus);
     };
   }, [socket, connectionState, setBackendMission]);
+
+  /*
+   * Current-run immutable point results from Socket.IO point events.
+   * One event updates exactly one entry; identity is checked against the
+   * current mission/run so a previous run's late event can never land.
+   */
+  const [socketPointResults, setSocketPointResults] =
+    useState<PointResultMap>(EMPTY_POINT_RESULTS);
+  const liveMissionId = String(backendMission?.mission_id ?? "").trim() || null;
+  const liveRunId = String(backendMission?.mission_run_id ?? "").trim() || null;
+  const liveIdentity = useMemo<MissionIdentity>(
+    () => ({ missionId: liveMissionId, runId: liveRunId }),
+    [liveMissionId, liveRunId],
+  );
+  const liveIdentityRef = useRef(liveIdentity);
+  liveIdentityRef.current = liveIdentity;
+
+  useEffect(() => {
+    setSocketPointResults((previous) => pruneToIdentity(previous, liveIdentity));
+  }, [liveIdentity]);
+
+  useEffect(() => {
+    if (!socket || connectionState !== "connected") return;
+    const names = [
+      "point_completed",
+      "point_failed",
+      "point_skipped",
+      "point_event",
+    ] as const;
+    const handlers = names.map((name) => {
+      const handler = (raw: unknown) => {
+        countSocketPacket(name);
+        const entry = parsePointResultEvent(raw);
+        if (!entry) return;
+        markPointEventReceived(`${entry.runId}:${entry.pointId}`);
+        setSocketPointResults((previous) =>
+          applyPointResult(previous, entry, liveIdentityRef.current),
+        );
+      };
+      socket.on(name, handler);
+      return { name, handler };
+    });
+    return () => {
+      handlers.forEach(({ name, handler }) => socket.off(name, handler));
+    };
+  }, [socket, connectionState]);
+
+  const currentRunSocketPointResults = useMemo(
+    () => pointResultsForRun(socketPointResults, liveIdentity),
+    [socketPointResults, liveIdentity],
+  );
 
   const clearRetainedMission = useCallback(() => {
     retainedMissionRef.current = null;
@@ -1157,10 +1223,13 @@ export default function MissionReportScreen({
        * Use that stored RPP result while /api/mission/report catches up.
        * This is copy/format only; no accuracy is reconstructed.
        */
-      const runtimePointResults =
-        backendMission?.point_results;
-
-      const runtimePointResult = findSocketPointResult(runtimePointResults, pointId, waypoint.sn - 1);
+      const runtimePointResult =
+        currentRunSocketPointResults[pointId] ??
+        findSocketPointResult(
+          backendMission?.point_results,
+          pointId,
+          waypoint.sn - 1,
+        );
 
       const runtimePointAccuracy =
         runtimePointResult &&
@@ -1308,9 +1377,13 @@ export default function MissionReportScreen({
             }
           : undefined;
 
-      const rppFallback =
-        terminalRppAccuracyFallbackMap[waypoint.sn]
-        ?? runtimeRppFallback;
+      // Authority: the exact RPP_TERMINAL_RESULT carried by the current-run
+      // point result outranks everything; the transitional live-telemetry
+      // capture is used only when no exact result or canonical remark exists.
+      const exactRemark = runtimeRppFallback
+        ? formatTerminalRppAccuracy(runtimeRppFallback)
+        : null;
+      const rppFallback = terminalRppAccuracyFallbackMap[waypoint.sn];
 
       if (displayRow) {
         next[waypoint.sn] = {
@@ -1329,6 +1402,7 @@ export default function MissionReportScreen({
           // Restore original RPP table output exactly:
           // Along ... | Cross ... | Overall ...
           remark:
+            exactRemark ??
             selectMissionReportRemark(
               displayRow.remark,
               rppFallback,
@@ -1353,6 +1427,7 @@ export default function MissionReportScreen({
         status: "pending",
 
         remark:
+          exactRemark ??
           selectMissionReportRemark(
             null,
             rppFallback,
@@ -1369,9 +1444,17 @@ export default function MissionReportScreen({
     canonicalReportProjection,
     canonicalMissionReport,
     backendMission?.point_results,
+    currentRunSocketPointResults,
     effectiveStatusMap,
     terminalRppAccuracyFallbackMap,
   ]);
+
+  // Development instrumentation: point event received -> row committed.
+  useEffect(() => {
+    for (const entry of Object.values(socketPointResults)) {
+      markPointRowDisplayed(`${entry.runId}:${entry.pointId}`);
+    }
+  }, [reportStatusMap, socketPointResults]);
 
   const effectiveWaitingForManual =
     backendMissionState === "WAITING_FOR_NEXT" ||
