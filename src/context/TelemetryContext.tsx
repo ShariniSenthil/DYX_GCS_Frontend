@@ -12,9 +12,15 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import {
+  LiveTelemetryStoreContext,
+  createLiveTelemetryStore,
+  type LiveTelemetryStore,
+} from "./liveTelemetryStore";
 import useRoverTelemetry, {
   type RoverServices,
 } from "../hooks/useRoverTelemetry";
@@ -177,6 +183,19 @@ export interface TelemetryContextValue {
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
 
+/**
+ * Everything in TelemetryContextValue except the per-packet `telemetry` and
+ * `roverPosition`. Its identity changes only when a control field changes,
+ * so large screens can use it without re-rendering at telemetry rate; they
+ * read live values through useLiveTelemetrySelector instead.
+ */
+export type TelemetryControlValue = Omit<
+  TelemetryContextValue,
+  "telemetry" | "roverPosition"
+>;
+
+const TelemetryControlContext = createContext<TelemetryControlValue | null>(null);
+
 interface TelemetryProviderProps {
   children: ReactNode;
 }
@@ -208,6 +227,24 @@ export function TelemetryProvider({
   }, [isRoverConnected, rover.telemetry, nowMs]);
 
   const visibleRoverPosition = isRoverConnected ? rover.roverPosition : null;
+
+  const storeRef = useRef<LiveTelemetryStore | null>(null);
+  if (storeRef.current === null) {
+    storeRef.current = createLiveTelemetryStore({
+      telemetry: visibleTelemetry,
+      roverPosition: visibleRoverPosition,
+      connectionState: rover.connectionState,
+    });
+  }
+  const liveStore = storeRef.current;
+
+  useEffect(() => {
+    liveStore.publish({
+      telemetry: visibleTelemetry,
+      roverPosition: visibleRoverPosition,
+      connectionState: rover.connectionState,
+    });
+  }, [liveStore, visibleTelemetry, visibleRoverPosition, rover.connectionState]);
 
   const [gpsFailsafeMode, setGpsFailsafeModeState] =
     useState<GpsFailsafeMode>("disable");
@@ -317,9 +354,13 @@ export function TelemetryProvider({
   );
 
   return React.createElement(
-    TelemetryContext.Provider,
-    { value: contextValue },
-    React.createElement(PointEventsBridge, null, children),
+    LiveTelemetryStoreContext.Provider,
+    { value: liveStore },
+    React.createElement(
+      TelemetryContext.Provider,
+      { value: contextValue },
+      React.createElement(PointEventsBridge, null, children),
+    ),
   );
 }
 
@@ -341,11 +382,59 @@ function PointEventsBridge({
     [parent, pointEvents],
   );
 
-  return React.createElement(
-    TelemetryContext.Provider,
-    { value },
-    children,
+  const controlValue = useMemo<TelemetryControlValue>(
+    () => ({
+      connectionState: parent.connectionState,
+      socketTransport: parent.socketTransport,
+      reconnect: parent.reconnect,
+      services: parent.services,
+      onMissionEvent: parent.onMissionEvent,
+      socket: parent.socket,
+      gpsFailsafeMode: parent.gpsFailsafeMode,
+      setGpsFailsafeMode: parent.setGpsFailsafeMode,
+      gpsFailsafeStatus: parent.gpsFailsafeStatus,
+      onFailsafeAcknowledge: parent.onFailsafeAcknowledge,
+      onFailsafeResume: parent.onFailsafeResume,
+      onFailsafeRestart: parent.onFailsafeRestart,
+      reportGpsSafetyAbort: parent.reportGpsSafetyAbort,
+      missionLifecycle: parent.missionLifecycle,
+      setMissionLifecycle: parent.setMissionLifecycle,
+      pointEvents,
+    }),
+    [
+      parent.connectionState,
+      parent.socketTransport,
+      parent.reconnect,
+      parent.services,
+      parent.onMissionEvent,
+      parent.socket,
+      parent.gpsFailsafeMode,
+      parent.setGpsFailsafeMode,
+      parent.gpsFailsafeStatus,
+      parent.onFailsafeAcknowledge,
+      parent.onFailsafeResume,
+      parent.onFailsafeRestart,
+      parent.reportGpsSafetyAbort,
+      parent.missionLifecycle,
+      parent.setMissionLifecycle,
+      pointEvents,
+    ],
   );
+
+  return React.createElement(
+    TelemetryControlContext.Provider,
+    { value: controlValue },
+    React.createElement(TelemetryContext.Provider, { value }, children),
+  );
+}
+
+/** Control/lifecycle context that does not change at telemetry rate. */
+export function useTelemetryControl(): TelemetryControlValue {
+  const ctx = useContext(TelemetryControlContext);
+  if (!ctx) {
+    throw new Error("useTelemetryControl must be used within a TelemetryProvider");
+  }
+  return ctx;
 }
 
 export function useTelemetry(): TelemetryContextValue {

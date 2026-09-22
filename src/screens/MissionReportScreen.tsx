@@ -31,26 +31,17 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 import { Toast } from "../components/shared/Toast";
-import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard";
-import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
 import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
-import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
 import {
   CoalescedRefresh,
   classifyMissionEventForReport,
   isTerminalPointEventPayload,
 } from "../utils/reportRefreshScheduler";
-import {
-  resolveRppAccuracyDataState,
-  resolveRppDebugDataState,
-} from "../utils/liveAccuracyState";
-import type { LiveDataState } from "../utils/liveDataState";
 import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
 import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
 import { ManualDrivePanel } from "../components/manual/ManualDrivePanel";
 import MissionControlCard from "../components/missionreport/MissionControlCard";
 import { WaypointsTable } from "../components/missionreport/WaypointsTable";
-import { MissionMapNative as MissionMap } from "../components/missionreport/MissionMapNative";
 import { DraggableCard } from "../components/shared/DraggableCard";
 import { MissionTableHeader } from "../components/missionreport/MissionTableHeader";
 import { MissionTableToolbarActions } from "../components/missionreport/MissionTableToolbarActions";
@@ -65,11 +56,24 @@ import {
 import { PATH_PLAN_GLASS } from "../constants/pathPlanGlass";
 import {
   Mode,
-  VehicleStatus,
   Waypoint,
 } from "../components/missionreport/types";
 import { RTKInjectionScreen } from "../components/missionreport/RTKInjectionScreen";
-import { useTelemetry } from "../context/TelemetryContext";
+import { useTelemetryControl } from "../context/TelemetryContext";
+import type { RoverTelemetry } from "../types/telemetry";
+import {
+  shallowEqual,
+  useLiveTelemetrySelector,
+  useLiveTelemetryStore,
+  type LiveTelemetrySnapshot,
+} from "../context/liveTelemetryStore";
+import {
+  LiveAccuracyMonitorPanel,
+  LiveDistanceToTargetPanel,
+  LiveMissionMap,
+  LiveVehicleStatusCard,
+  isTelemetryMissionActive,
+} from "../components/missionreport/LiveTelemetryPanels";
 import { useFieldMap } from "../context/FieldMapContext";
 import { useBackendTrajectory } from "../context/BackendTrajectoryContext";
 import { useConnection } from "../context/ConnectionContext";
@@ -95,10 +99,6 @@ import {
 // NOTE: calculateAccuracy and formatAccuracyDisplay commented out - now using backend wp_dist_cm
 // import { calculateAccuracy, formatAccuracyDisplay } from '../utils/accuracyCalculation';
 import { getAccuracyLevel } from "../utils/accuracyCalculation";
-import {
-  isRobotStatusDebugEnabled,
-  patchRobotStatusDebug,
-} from "../utils/robotStatusDebug";
 import type { UsePointMissionEventsResult } from "../hooks/usePointMissionEvents";
 
 const EMPTY_POINT_EVENTS: UsePointMissionEventsResult = {
@@ -252,6 +252,13 @@ interface MissionReportScreenProps {
   embedMap?: boolean;
 }
 
+/** The only telemetry the screen itself re-renders for (slow-changing). */
+function selectScreenTelemetry(snapshot: LiveTelemetrySnapshot) {
+  return {
+    missionStatus: snapshot.telemetry.mission?.status,
+  };
+}
+
 /** Canonical report confirmation read after a meaningful mission event. */
 const LIVE_REPORT_REFRESH_DELAY_MS = 80;
 
@@ -274,7 +281,12 @@ export default function MissionReportScreen({
     if (normalized === "dash") return "DASH";
     return null;
   };
-  const { telemetry, roverPosition, onMissionEvent, socket, socketTransport, pointEvents, missionLifecycle } = useTelemetry();
+  // High-rate telemetry is NOT subscribed here: the screen re-renders only
+  // when its slow slice changes. Live panels subscribe to their own slices.
+  const { onMissionEvent, socket, socketTransport, pointEvents, missionLifecycle } =
+    useTelemetryControl();
+  const liveStore = useLiveTelemetryStore();
+  const screenTelemetry = useLiveTelemetrySelector(selectScreenTelemetry, shallowEqual);
   const { setMissionSnapshot } = useFieldMap();
   const {
     preview,
@@ -699,11 +711,10 @@ export default function MissionReportScreen({
 
   const px4LegacyStatusMap = useMemo(
     () =>
-      buildLegacyStatusMapFromPointMap(pointStatusMap, waypoints, {
-        hrms: telemetry.hrms,
-        vrms: telemetry.vrms,
-      }),
-    [pointStatusMap, waypoints, telemetry.hrms, telemetry.vrms],
+      // Live HRMS/VRMS are not stamped onto historical rows (never displayed,
+      // and they made every row rebuild at telemetry rate).
+      buildLegacyStatusMapFromPointMap(pointStatusMap, waypoints),
+    [pointStatusMap, waypoints],
   );
 
   const verifiedLegacyMap = useMemo(
@@ -743,7 +754,24 @@ export default function MissionReportScreen({
    *
    * It also does NOT continuously follow telemetry after capture.
    */
-  useEffect(() => {
+  // Transitional live-telemetry terminal capture, driven by a store
+  // subscription so it never re-renders the screen at telemetry rate.
+  const terminalCaptureInputsRef = useRef({
+    pointStatusMap,
+    px4CurrentPointIndex,
+    waypoints,
+  });
+  terminalCaptureInputsRef.current = {
+    pointStatusMap,
+    px4CurrentPointIndex,
+    waypoints,
+  };
+  const runTerminalCaptureRef = useRef<(telemetry: RoverTelemetry) => void>(
+    () => {},
+  );
+  runTerminalCaptureRef.current = (telemetry: RoverTelemetry) => {
+    const { pointStatusMap, px4CurrentPointIndex, waypoints } =
+      terminalCaptureInputsRef.current;
     const currentPx4PointIndex =
       px4CurrentPointIndex;
 
@@ -939,46 +967,22 @@ export default function MissionReportScreen({
         },
       );
     }
-  }, [
-    pointStatusMap,
-    px4CurrentPointIndex,
-    waypoints,
+  };
 
-    telemetry.accuracy_available,
+  useEffect(() => {
+    runTerminalCaptureRef.current(liveStore.getSnapshot().telemetry);
+    return liveStore.subscribe(() =>
+      runTerminalCaptureRef.current(liveStore.getSnapshot().telemetry),
+    );
+  }, [liveStore]);
 
-    telemetry.front_back_error_mm,
-    telemetry.cross_track_error_mm,
-    telemetry.radial_error_mm,
+  useEffect(() => {
+    runTerminalCaptureRef.current(liveStore.getSnapshot().telemetry);
+  }, [liveStore, pointStatusMap, px4CurrentPointIndex, waypoints]);
 
-    telemetry.accuracy
-      ?.front_back_error_mm,
-    telemetry.accuracy
-      ?.cross_track_error_mm,
-    telemetry.accuracy
-      ?.radial_error_mm,
-
-    telemetry.accuracy
-      ?.goal_number,
-
-    telemetry.mission
-      ?.active_point_index,
-
-    telemetry.mission
-      ?.active_point_number,
-  ]);
-
-  const telemetryMissionActive = useMemo(() => {
-    const ms = String(telemetry.mission?.status ?? "").toLowerCase();
-    return [
-      "running",
-      "paused",
-      "waiting_for_next",
-      "arming",
-      "switching_offboard",
-      "loading",
-      "stopping",
-    ].includes(ms);
-  }, [telemetry.mission?.status]);
+  const telemetryMissionActive = isTelemetryMissionActive(
+    screenTelemetry.missionStatus,
+  );
 
   const effectiveMissionActive = isMissionActive || telemetryMissionActive;
 
@@ -986,73 +990,8 @@ export default function MissionReportScreen({
     .trim()
     .toUpperCase();
 
-  /**
-   * Live accuracy must depend on the backend mission state,
-   * not the locally persisted isMissionActive value.
-   */
-  const accuracyMissionActive =
-    telemetryMissionActive ||
-    ["RUNNING", "PAUSED", "ARMING", "SWITCHING_OFFBOARD", "LOADING"].includes(
-      backendMissionState,
-    );
-
-  const overallAccuracyMeasurementPresent =
-    telemetry.accuracy_available === true &&
-    typeof telemetry.radial_error_mm === "number" &&
-    Number.isFinite(telemetry.radial_error_mm);
-
-  const rppMeasurementsPresent = [
-    telemetry.rpp_along_remaining_mm,
-    telemetry.rpp_cross_track_error_mm,
-    telemetry.rpp_actual_speed_mps,
-    telemetry.rpp_guidance_bearing_deg,
-    telemetry.rpp_heading_error_deg,
-    telemetry.rpp_distance_to_goal_m,
-  ].some((value) => typeof value === "number" && Number.isFinite(value));
-
-  // Raw telemetry remains untouched. These are presentation states only, so
-  // each backend metric can say live/stale/waiting without fabricating a value.
-  const missionTelemetryState: LiveDataState =
-    connectionState !== "connected"
-      ? "offline"
-      : telemetry.stale === true
-        ? "stale"
-        : !accuracyMissionActive
-          ? "inactive"
-          : "live";
-
-  // LIVE requires a backend-confirmed fresh /rpp/debug sample. The mere
-  // presence of cached rpp_* numbers is never evidence that they are current.
-  const rppDataState: LiveDataState = resolveRppDebugDataState(
-    {
-      connectionState,
-      socketStale: telemetry.stale === true,
-      missionActive: accuracyMissionActive,
-    },
-    {
-      available: telemetry.rpp_debug_available,
-      fresh: telemetry.rpp_debug_fresh,
-      valuesPresent: rppMeasurementsPresent,
-    },
-  );
-
-  // /rpp/accuracy is retained (TRANSIENT_LOCAL); LIVE needs its own
-  // backend-confirmed freshness, independent of /rpp/debug.
-  const overallAccuracyDataState: LiveDataState = resolveRppAccuracyDataState(
-    {
-      connectionState,
-      socketStale: telemetry.stale === true,
-      missionActive: accuracyMissionActive,
-    },
-    {
-      available: telemetry.accuracy_available,
-      fresh: telemetry.rpp_accuracy_stream_fresh,
-      measurementPresent: overallAccuracyMeasurementPresent,
-    },
-  );
-
-  const overallAccuracyDataAvailable =
-    overallAccuracyDataState === "live";
+  // Live accuracy panel states are derived inside LiveAccuracyMonitorPanel /
+  // LiveDistanceToTargetPanel from their own telemetry subscriptions.
 
   /**
    * Controls whether the main button displays
@@ -1458,7 +1397,7 @@ export default function MissionReportScreen({
 
   const effectiveWaitingForManual =
     backendMissionState === "WAITING_FOR_NEXT" ||
-    String(telemetry.mission?.status ?? "")
+    String(screenTelemetry.missionStatus ?? "")
       .trim()
       .toUpperCase() === "WAITING_FOR_NEXT" ||
     waitingForManual ||
@@ -1480,7 +1419,15 @@ export default function MissionReportScreen({
   const isMissionActiveRef = useRef(isMissionActive);
   const modeRef = useRef(mode);
   const missionModeRef = useRef(missionMode);
-  const telemetryRef = useRef(telemetry);
+  // Always the latest live telemetry, read on demand (no render dependency).
+  const telemetryRef = useMemo(
+    () => ({
+      get current(): RoverTelemetry {
+        return liveStore.getSnapshot().telemetry;
+      },
+    }),
+    [liveStore],
+  );
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -1514,10 +1461,6 @@ export default function MissionReportScreen({
   useEffect(() => {
     missionModeRef.current = missionMode;
   }, [missionMode]);
-
-  useEffect(() => {
-    telemetryRef.current = telemetry;
-  }, [telemetry]);
 
   const showNotification = (
     type: "success" | "error" | "info",
@@ -1827,7 +1770,7 @@ export default function MissionReportScreen({
       return;
     }
 
-    const phase = backendMissionState || String(telemetry.mission?.status ?? "");
+    const phase = backendMissionState || String(screenTelemetry.missionStatus ?? "");
     if (!phase || lastLoggedStartPhaseRef.current === phase) {
       return;
     }
@@ -1836,11 +1779,14 @@ export default function MissionReportScreen({
     logMissionStartTiming(attemptId, "backend_phase", phase);
   }, [
     backendMissionState,
-    telemetry.mission?.status,
+    screenTelemetry.missionStatus,
     isMissionActive,
   ]);
 
-  useEffect(() => {
+  // First-motion start timing, checked on position updates without
+  // re-rendering the screen.
+  const checkFirstMotionRef = useRef<() => void>(() => {});
+  checkFirstMotionRef.current = () => {
     const attemptId = startTimingAttemptRef.current;
     const origin = startOriginRef.current;
     if (
@@ -1852,6 +1798,7 @@ export default function MissionReportScreen({
       return;
     }
 
+    const roverPosition = liveStore.getSnapshot().roverPosition;
     const lat = roverPosition?.lat ?? 0;
     const lon = roverPosition?.lng ?? 0;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -1871,7 +1818,11 @@ export default function MissionReportScreen({
       "first_motion",
       `lat=${lat.toFixed(7)} lon=${lon.toFixed(7)}`,
     );
-  }, [roverPosition?.lat, roverPosition?.lng, isMissionActive]);
+  };
+  useEffect(() => {
+    checkFirstMotionRef.current();
+    return liveStore.subscribe(() => checkFirstMotionRef.current());
+  }, [liveStore, isMissionActive]);
 
   const refreshQuickNtripStatus = useCallback(async () => {
     if (connectionState !== "connected") {
@@ -1988,7 +1939,8 @@ export default function MissionReportScreen({
 
     setIsManualPreparing(true);
     try {
-      const currentMode = String(telemetry.state?.mode || "").toUpperCase();
+      const liveTelemetry = liveStore.getSnapshot().telemetry;
+      const currentMode = String(liveTelemetry.state?.mode || "").toUpperCase();
       if (currentMode !== "MANUAL") {
         console.log(
           "[ManualDrive] Setting mode to MANUAL from",
@@ -2004,7 +1956,7 @@ export default function MissionReportScreen({
         }
       }
 
-      if (!telemetry.state?.armed) {
+      if (!liveTelemetry.state?.armed) {
         console.log("[ManualDrive] Arming vehicle before opening joystick");
         const armResponse = await armVehicle();
         if (!armResponse.success) {
@@ -2264,95 +2216,8 @@ export default function MissionReportScreen({
     setMissionWaypoints(next.map((wp, i) => ({ ...wp, sn: i + 1 })));
   };
 
-  // Depend on individual primitive fields, not the full telemetry object.
-  // telemetry is a new object reference every 50ms (from useRoverTelemetry),
-  // so [telemetry] never actually caches. Primitives only change when values change.
-  const vehicleStatus = useMemo((): VehicleStatus => {
-    // Handle hrms/vrms as strings or numbers (backend sends strings currently)
-    const hrmsValue =
-      typeof telemetry.hrms === "string"
-        ? parseFloat(telemetry.hrms)
-        : telemetry.hrms;
-    const vrmsValue =
-      typeof telemetry.vrms === "string"
-        ? parseFloat(telemetry.vrms)
-        : telemetry.vrms;
-
-    const gpsLabel =
-      telemetry.gps_fix_name?.trim() || getFixTypeLabel(telemetry.rtk.fix_type);
-
-    const rppLabel = telemetry.rpp_state_name?.trim();
-
-    return {
-      battery: `${telemetry.battery.percentage.toFixed(1)}% (${telemetry.battery.voltage.toFixed(2)}V)`,
-      gps: gpsLabel,
-      satellites: telemetry.global.satellites_visible,
-      hrms: `${(hrmsValue || 0).toFixed(3)} m`,
-      vrms: `${(vrmsValue || 0).toFixed(3)} m`,
-      imu: rppLabel ? `RPP ${rppLabel}` : telemetry.imu_status,
-      mode: telemetry.state?.mode || "UNKNOWN",
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    telemetry.battery.percentage,
-    telemetry.battery.voltage,
-    telemetry.rtk.fix_type,
-    telemetry.global.satellites_visible,
-    telemetry.hrms,
-    telemetry.vrms,
-    telemetry.imu_status,
-    telemetry.gps_fix_name,
-    telemetry.rpp_state_name,
-    telemetry.state?.mode,
-  ]);
-
-  useEffect(() => {
-    if (!isRobotStatusDebugEnabled()) return;
-    patchRobotStatusDebug({
-      uiStatus: vehicleStatus,
-      uiConnected:
-        connectionState === "connected" && telemetry.fcu_connected !== false,
-      lastMessageTs: telemetry.lastMessageTs,
-    });
-  }, [
-    vehicleStatus,
-    connectionState,
-    telemetry.fcu_connected,
-    telemetry.lastMessageTs,
-  ]);
-
-  // Depend on individual primitive fields, not the full telemetry/roverPosition objects.
-  // These objects are new references every 50ms, so the memo would never cache.
-  const mapProps = useMemo(() => {
-    const props = {
-      roverLat: roverPosition?.lat ?? 0,
-      roverLon: roverPosition?.lng ?? 0,
-      heading: telemetry.attitude?.yaw_deg ?? null,
-      armed: telemetry.state?.armed ?? false,
-      rtkFixType: telemetry.rtk?.fix_type ?? 0,
-    };
-
-    // Debug log map props updates (10% sample rate)
-    if (DEBUG_MISSION_LOGS && Math.random() < 0.1) {
-      missionLog("[MissionReportScreen] ✦ Map props updated:", {
-        lat: props.roverLat.toFixed(7),
-        lon: props.roverLon.toFixed(7),
-        heading:
-          props.heading !== null ? props.heading.toFixed(1) + "°" : "N/A",
-        armed: props.armed,
-        rtkFixType: props.rtkFixType,
-      });
-    }
-
-    return props;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    roverPosition?.lat,
-    roverPosition?.lng,
-    telemetry.attitude?.yaw_deg,
-    telemetry.state?.armed,
-    telemetry.rtk?.fix_type,
-  ]);
+  // Vehicle status and map pose are rendered by LiveVehicleStatusCard and
+  // LiveMissionMap, which subscribe to live telemetry themselves.
 
   const missionProgressStats = useMemo(() => {
     const totalPoints = waypoints.length;
@@ -3280,9 +3145,10 @@ export default function MissionReportScreen({
       setMissionStartTime(new Date());
       setMissionEndTime(null);
       setCurrentIndex(0);
+      const startPosition = liveStore.getSnapshot().roverPosition;
       startOriginRef.current = {
-        lat: roverPosition?.lat ?? 0,
-        lon: roverPosition?.lng ?? 0,
+        lat: startPosition?.lat ?? 0,
+        lon: startPosition?.lng ?? 0,
       };
 
       if (startOutcome.kind === "paused") {
@@ -3797,7 +3663,7 @@ export default function MissionReportScreen({
         if (data.isActive) {
           // 🔧 FIX: Only restore mission active state if backend telemetry confirms mission is actually running
           // This prevents showing STOP button when backend mission is not running
-          const currentBackendStatus = telemetry?.mission?.status
+          const currentBackendStatus = liveStore.getSnapshot().telemetry?.mission?.status
             ?.toString()
             .toLowerCase();
           const isBackendActuallyRunning =
@@ -5075,15 +4941,10 @@ export default function MissionReportScreen({
 
       <View style={styles.absoluteMapContainer}>
         {embedMap && (
-        <MissionMap
+        <LiveMissionMap
           waypoints={displayData.waypoints}
-          roverLat={mapProps.roverLat}
-          roverLon={mapProps.roverLon}
-          heading={mapProps.heading}
           activeWaypointIndex={effectiveCurrentIndex}
           statusMap={displayData.statusMap}
-          armed={mapProps.armed}
-          rtkFixType={mapProps.rtkFixType}
           edgeToEdge
           isVisible={isVisible}
         />
@@ -5096,13 +4957,7 @@ export default function MissionReportScreen({
           handleType="custom"
           onLayout={(e) => setRobotPanelHeight(e.nativeEvent.layout.height)}
         >
-          <VehicleStatusCard
-            status={vehicleStatus}
-            telemetry={telemetry}
-            isConnected={
-              connectionState === "connected" &&
-              telemetry.fcu_connected !== false
-            }
+          <LiveVehicleStatusCard
             socketTransport={socketTransport}
             onClose={() => setPanelVisible("robotStatus", false)}
           />
@@ -5167,17 +5022,8 @@ export default function MissionReportScreen({
           style={styles.floatingAccuracyMonitorPanel}
           handleType="custom"
         >
-          <AccuracyMonitorCard
-            isMissionActive={accuracyMissionActive}
-            dataState={rppDataState}
-            alongSideMm={telemetry.rpp_along_remaining_mm}
-            alongSidePosition={telemetry.rpp_along_position}
-            crossTrackMm={telemetry.rpp_cross_track_error_mm}
-            crossTrackSide={telemetry.rpp_cross_track_side}
-            actualSpeedMps={telemetry.rpp_actual_speed_mps}
-            targetHeadingDeg={telemetry.rpp_guidance_bearing_deg}
-            headingErrorDeg={telemetry.rpp_heading_error_deg}
-            distanceToGoalM={telemetry.rpp_distance_to_goal_m}
+          <LiveAccuracyMonitorPanel
+            backendMissionState={backendMissionState}
             onClose={() => setPanelVisible("accuracyMonitor", false)}
           />
         </DraggableCard>
@@ -5188,15 +5034,7 @@ export default function MissionReportScreen({
           style={styles.floatingDistanceToTargetPanel}
           handleType="custom"
         >
-          <DistanceToTargetCard
-            isMissionActive={accuracyMissionActive}
-            dataState={overallAccuracyDataState}
-            accuracyAvailable={overallAccuracyDataAvailable}
-            overallAccuracyMm={
-              overallAccuracyDataAvailable ? telemetry.radial_error_mm : null
-            }
-            accuracyStatus={telemetry.accuracy_status}
-          />
+          <LiveDistanceToTargetPanel backendMissionState={backendMissionState} />
         </DraggableCard>
       )}
 
@@ -5402,19 +5240,6 @@ export default function MissionReportScreen({
       />
     </SafeAreaView>
   );
-}
-
-function getFixTypeLabel(fixType: number): string {
-  const labels: { [key: number]: string } = {
-    0: "No GPS",
-    1: "No Fix",
-    2: "2D Fix",
-    3: "3D Fix",
-    4: "DGPS",
-    5: "RTK Float",
-    6: "RTK Fixed",
-  };
-  return labels[fixType] || "Unknown";
 }
 
 const bottomTableInsets = getMissionProgressBottomTableInsets();

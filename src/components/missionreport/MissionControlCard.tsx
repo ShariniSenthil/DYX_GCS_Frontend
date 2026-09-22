@@ -17,7 +17,7 @@ import {
   PATH_PLAN_HEADER,
 } from "../../constants/pathPlanGlass";
 import { useRover } from "../../context/RoverContext";
-import { useTelemetry } from "../../context/TelemetryContext";
+import { useTelemetryControl } from "../../context/TelemetryContext";
 import { isUnknownControlOutcome } from "../../services/apiError";
 import { Waypoint } from "./types";
 import { Toast } from "../shared/Toast";
@@ -126,7 +126,8 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   onClose,
 }) => {
   const { services, telemetry } = useRover();
-  const { missionLifecycle } = useTelemetry();
+  // Control context: lifecycle only, no telemetry-rate re-renders.
+  const { missionLifecycle } = useTelemetryControl();
   const [isLoadingMission, setIsLoadingMission] = React.useState(false);
 
   const [isStarting, setIsStarting] = React.useState(false);
