@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Platform } from "react-native";
+import { AppState, InteractionManager, Platform } from "react-native";
 import { useTelemetry } from "./TelemetryContext";
 import { useFieldMap } from "./FieldMapContext";
 import {
@@ -26,6 +26,7 @@ const WAITING: OfflineMapStatus = {
   progress: 0,
   message: "Waiting for mission or rover location",
 };
+const OFFLINE_DOWNLOAD_DELAY_MS = 3_000;
 
 export function OfflineMapProvider({ children }: { children: ReactNode }): React.ReactElement {
   const { marking, mission } = useFieldMap();
@@ -52,15 +53,25 @@ export function OfflineMapProvider({ children }: { children: ReactNode }): React
 
     requestedKeyRef.current = region.key;
     let active = true;
-    void ensureOfflineMapRegion(region, (next) => {
-      if (active) setStatus(next);
-    }).catch((error: unknown) => {
-      if (!active) return;
-      const message = error instanceof Error ? error.message : "Offline map download failed";
-      setStatus({ phase: "failed", progress: 0, message });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Native offline pack enumeration can block Mapbox's UI thread. Let the
+    // first visible map render and only start while the app is foregrounded.
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        if (!active || AppState.currentState !== "active") return;
+        void ensureOfflineMapRegion(region, (next) => {
+          if (active) setStatus(next);
+        }).catch((error: unknown) => {
+          if (!active) return;
+          const message = error instanceof Error ? error.message : "Offline map download failed";
+          setStatus({ phase: "failed", progress: 0, message });
+        });
+      }, OFFLINE_DOWNLOAD_DELAY_MS);
     });
     return () => {
       active = false;
+      interaction.cancel();
+      if (timer) clearTimeout(timer);
     };
   }, [region, attempt]);
 

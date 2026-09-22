@@ -104,10 +104,10 @@ function TabNavigatorInner() {
   const isMarkingPlanVisible = activeTab === "Marking Plan";
   const isMissionProgressVisible = activeTab === "Mission Progress";
 
-  // Keep the shared FieldMapHost dedicated to Marking Plan.
-  // Mission Progress mounts its own native MissionMap so the backend-generated
-  // trajectory is passed directly from MissionReportScreen to MissionMapNative.
-  const sharedMapActive = isMarkingPlanVisible;
+  // Keep exactly one native Mapbox surface alive for the whole map workflow.
+  // Replacing a MapView while moving between these tabs destroys its EGL
+  // surface; on release builds that can leave a permanently white map.
+  const sharedMapActive = true;
 
   return (
     <MissionProgressOverlayProvider>
@@ -204,7 +204,9 @@ function TabNavigatorInner() {
             >
               <ErrorBoundary componentName="Mission Progress Screen">
                 <MemoMissionReportScreen
-                  embedMap={isMissionProgressVisible}
+                  // FieldMapHost is the process-wide native map. Mission
+                  // Progress supplies it with live snapshots via FieldMapContext.
+                  embedMap={false}
                   isVisible={isMissionProgressVisible}
                 />
               </ErrorBoundary>

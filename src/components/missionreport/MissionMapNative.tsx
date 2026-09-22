@@ -75,12 +75,13 @@ const MissionMapNativeBase: React.FC<Props> = ({
     usingFallback,
     mapReady,
     canMount,
+    mapKey,
     onLayout,
     onMapReady,
     onStyleLoaded,
     onMapError,
   } = useMapboxSurface();
-  const { preview } = useBackendTrajectory();
+  const { preview, authoringChanged } = useBackendTrajectory();
   const { sharedCamera, setSharedCamera } = useFieldMap();
 
   const rawHasRoverPosition =
@@ -158,7 +159,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
     };
   }, [waypoints, statusMap, activeWaypointIndex]);
 
-  const showTrajectory = canDrawBackendLine(preview);
+  const showTrajectory = !authoringChanged && canDrawBackendLine(preview);
   const trajectoryCollection = useMemo(() => {
     if (!showTrajectory) return null;
     return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
@@ -271,6 +272,7 @@ const MissionMapNativeBase: React.FC<Props> = ({
     >
       {canMount && (
       <MapView
+        key={mapKey}
         style={styles.map}
         {...mapStyleProps}
         compassEnabled={false}

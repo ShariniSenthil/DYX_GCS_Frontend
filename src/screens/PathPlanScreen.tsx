@@ -443,6 +443,8 @@ export default function PathPlanScreen({
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
   const [isReloadPreparing, setIsReloadPreparing] = useState(false);
+  const [isAutoTrajectoryUpdating, setIsAutoTrajectoryUpdating] = useState(false);
+  const autoTrajectoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (canLoadBackendPreview(preview)) {
@@ -598,6 +600,15 @@ export default function PathPlanScreen({
   );
 
   const planNeedsUpload = authoringChanged;
+  // A stable revision lets an edit burst (dragging, drawing, reversing) settle
+  // into one backend update instead of uploading every intermediate point.
+  const waypointRevision = useMemo(
+    () =>
+      waypoints
+        .map((wp) => [wp.id, wp.lat, wp.lon, wp.alt, wp.block, wp.row, wp.pile, wp.mark ? 1 : 0].join(":"))
+        .join("|"),
+    [waypoints],
+  );
 
   useEffect(() => {
     waypointsRef.current = waypoints;
@@ -1642,39 +1653,17 @@ export default function PathPlanScreen({
     }
 
     const reversed = reverseWaypointOrder(waypoints);
-    const applyAndUploadReversedMission = (extensionMode: MissionExtensionMode) => {
-      // Load Mission works from the server's staged CSV, not from local React
-      // state. Update both from this same snapshot so the rover can never load
-      // the pre-reversal order after an operator reverses a plan.
-      recordAndApply(reversed);
-      void uploadWaypointsToBackend(reversed, extensionMode);
-    };
-
-    if (roverUploadBlockedReason) {
-      recordAndApply(reversed);
-      showPathPlanToast(
-        "info",
-        "Path Reversed Locally",
-        "Connect the rover and upload this reversed plan before loading it.",
-        5000,
-      );
-      return;
-    }
-
-    Alert.alert(
-      "Reverse & Update Mission",
-      "This replaces the staged mission with the reversed waypoint order before it can be loaded to the rover.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "DISABLE Extension",
-          onPress: () => applyAndUploadReversedMission("DISABLE"),
-        },
-        {
-          text: "ENABLE Extension",
-          onPress: () => applyAndUploadReversedMission("ENABLE"),
-        },
-      ],
+    // Reversal is an editor change, not a separate mission-control action.
+    // The debounced revision uploader below stages this exact order once it
+    // settles, so the operator never has to answer a second dialog.
+    recordAndApply(reversed);
+    showPathPlanToast(
+      roverUploadBlockedReason ? "info" : "success",
+      roverUploadBlockedReason ? "Path Reversed Locally" : "Trajectory Updating",
+      roverUploadBlockedReason
+        ? "Connect the rover and this revision will update automatically."
+        : "Reversed path detected. Updating the trajectory…",
+      3500,
     );
   }, [
     reverseWaypointOrder,
@@ -2533,12 +2522,17 @@ export default function PathPlanScreen({
 
   function applyImportedWaypoints(sanitized: PathPlanWaypoint[]): void {
     recordAndApply(sanitized);
-
+    // Importing is an editor revision just like drawing or reversing. The
+    // shared debounced updater stages it once, preventing a chooser from
+    // racing an automatic upload with a different extension setting.
     if (roverUploadBlockedReason) {
-      return;
+      showPathPlanToast(
+        "info",
+        "Plan Saved Locally",
+        "Connect the rover and this trajectory will update automatically.",
+        4000,
+      );
     }
-
-    askExtensionAndUpload(sanitized);
   }
 
   async function handleLoadMissionToController(): Promise<void> {
@@ -2598,10 +2592,67 @@ export default function PathPlanScreen({
       );
       return;
     }
-    // Upload this exact visible order. Backend confirmation (socket push or
-    // verified preview) is still required before Load becomes available.
-    askExtensionAndUpload(waypoints);
+    // The operator has already edited this visible plan. Update it directly
+    // with the deterministic default rather than prompting a second time.
+    if (autoTrajectoryTimerRef.current) {
+      clearTimeout(autoTrajectoryTimerRef.current);
+      autoTrajectoryTimerRef.current = null;
+    }
+    setIsAutoTrajectoryUpdating(true);
+    void uploadWaypointsToBackend(waypoints.map((waypoint) => ({ ...waypoint })), "DISABLE")
+      .finally(() => {
+        if (mountedRef.current) setIsAutoTrajectoryUpdating(false);
+      });
   }
+
+  useEffect(() => {
+    if (autoTrajectoryTimerRef.current) {
+      clearTimeout(autoTrajectoryTimerRef.current);
+      autoTrajectoryTimerRef.current = null;
+    }
+
+    if (
+      !isVisible ||
+      !planNeedsUpload ||
+      waypoints.length < 2 ||
+      roverUploadBlockedReason ||
+      isUploadingRef.current
+    ) {
+      if (!planNeedsUpload && mountedRef.current) {
+        setIsAutoTrajectoryUpdating(false);
+      }
+      return undefined;
+    }
+
+    setIsAutoTrajectoryUpdating(true);
+    const snapshot = waypoints.map((waypoint) => ({ ...waypoint }));
+    // Let rapid drawing, dragging and reordering settle into one request.
+    autoTrajectoryTimerRef.current = setTimeout(() => {
+      autoTrajectoryTimerRef.current = null;
+      if (!mountedRef.current || isUploadingRef.current) {
+        if (mountedRef.current) setIsAutoTrajectoryUpdating(false);
+        return;
+      }
+      void uploadWaypointsToBackend(snapshot, "DISABLE").finally(() => {
+        if (mountedRef.current) setIsAutoTrajectoryUpdating(false);
+      });
+    }, 900);
+
+    return () => {
+      if (autoTrajectoryTimerRef.current) {
+        clearTimeout(autoTrajectoryTimerRef.current);
+        autoTrajectoryTimerRef.current = null;
+      }
+    };
+    // waypointRevision is intentionally the trigger: identity churn in the
+    // context must not restart the debounce unless the visible plan changed.
+  }, [
+    isVisible,
+    planNeedsUpload,
+    roverUploadBlockedReason,
+    waypointRevision,
+    waypoints.length,
+  ]);
 
   const restoreLatestMission = useCallback(
     async ({
@@ -3704,6 +3755,7 @@ export default function PathPlanScreen({
                     planNeedsUpload ? handleUpdateTrajectory : handleRequestUpload
                   }
                   planNeedsUpload={planNeedsUpload}
+                  trajectoryUpdating={isAutoTrajectoryUpdating}
                   onLoadMission={handleLoadMissionToController}
                   roverUploadBlockedReason={roverUploadBlockedReason}
                   loadEnabled={

@@ -59,7 +59,7 @@ const FieldMapHostBase: React.FC = () => {
     sharedCamera,
     setSharedCamera,
   } = useFieldMap();
-  const { preview } = useBackendTrajectory();
+  const { preview, authoringChanged } = useBackendTrajectory();
   const { telemetry, roverPosition } = useTelemetry();
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const zoomRef = useRef(DEFAULT_ZOOM);
@@ -79,6 +79,7 @@ const FieldMapHostBase: React.FC = () => {
     usingFallback,
     mapReady,
     canMount,
+    mapKey,
     onLayout,
     onMapReady,
     onStyleLoaded,
@@ -187,7 +188,7 @@ const FieldMapHostBase: React.FC = () => {
     fallbackSnapshot.activeWaypointIndex,
   ]);
 
-  const showTrajectory = canDrawBackendLine(preview);
+  const showTrajectory = !authoringChanged && canDrawBackendLine(preview);
   const trajectoryCollection = useMemo(() => {
     if (!showTrajectory) return null;
     return buildBackendTrajectoryCollection(preview.points, BACKEND_LINE_RENDER);
@@ -376,6 +377,7 @@ const FieldMapHostBase: React.FC = () => {
     <View style={styles.root} collapsable={false} onLayout={onLayout}>
       {canMount ? (
         <MapView
+          key={mapKey}
           style={styles.map}
           {...mapStyleProps}
           compassEnabled={false}

@@ -32,6 +32,8 @@ type Props = {
     onRequestUpload?: () => void;
     /** The edited point order differs from the backend-verified trajectory. */
     planNeedsUpload?: boolean;
+    /** A settled editor revision is being staged with the rover. */
+    trajectoryUpdating?: boolean;
     /**
      * Called when user selects Manual Control mode to open fullscreen control UI
      */
@@ -68,6 +70,7 @@ const MissionOpsPanel = React.memo(({
     onExportMission,
     onRequestUpload,
     planNeedsUpload = false,
+    trajectoryUpdating = false,
     onManualControlOpen,
     dragGesture,
     isDraggingActive,
@@ -365,13 +368,14 @@ const MissionOpsPanel = React.memo(({
             {/* Action Buttons */}
             <View style={styles.buttonsRow}>
                 <TouchableOpacity
-                    style={[styles.button, styles.uploadBtn, planNeedsUpload && styles.updateTrajectoryBtn]}
+                    style={[styles.button, styles.uploadBtn, planNeedsUpload && styles.updateTrajectoryBtn, trajectoryUpdating && styles.disabledBtn]}
                     onPress={onRequestUpload}
+                    disabled={trajectoryUpdating}
                     activeOpacity={0.75}
                 >
-                    <MaterialCommunityIcons name={planNeedsUpload ? "upload-sync" : "upload"} size={20} color="#10B981" />
+                    <MaterialCommunityIcons name="upload" size={20} color={trajectoryUpdating ? "rgba(255,255,255,0.45)" : "#10B981"} />
                     <Text style={[styles.buttonText, { color: '#10B981' }]}>
-                        {planNeedsUpload ? "Update Trajectory" : "Upload"}
+                        {trajectoryUpdating ? "Updating…" : planNeedsUpload ? "Update Trajectory" : "Upload"}
                     </Text>
                 </TouchableOpacity>
                 <TouchableOpacity

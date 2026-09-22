@@ -551,6 +551,9 @@ export default function MissionReportScreen({
   const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const liveReportRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const mountedRef = useRef(true);
 
   // Use waypoints from shared context for persistence across screens
@@ -1479,6 +1482,29 @@ export default function MissionReportScreen({
       );
     }
   }, []);
+
+  const refreshLiveMarkingPoints = useCallback(() => {
+    if (!isVisible || connectionState !== "connected" || isOfflineMode()) return;
+    if (liveReportRefreshTimerRef.current) {
+      clearTimeout(liveReportRefreshTimerRef.current);
+    }
+    // Socket events update the lightweight row state immediately. This short,
+    // coalesced read fills in the canonical status/accuracy details without
+    // waiting for the next periodic poll.
+    liveReportRefreshTimerRef.current = setTimeout(() => {
+      liveReportRefreshTimerRef.current = null;
+      void Promise.all([refreshBackendMission(), refreshCanonicalMissionReport()]);
+    }, 80);
+  }, [connectionState, isVisible, refreshBackendMission, refreshCanonicalMissionReport]);
+
+  useEffect(
+    () => () => {
+      if (liveReportRefreshTimerRef.current) {
+        clearTimeout(liveReportRefreshTimerRef.current);
+      }
+    },
+    [],
+  );
 
   /*
    * ============================================================
@@ -3760,6 +3786,7 @@ export default function MissionReportScreen({
     // Subscribe to mission events from backend
     const unsubscribe = onMissionEvent((event: any) => {
       if (!mountedRef.current) return;
+      refreshLiveMarkingPoints();
 
       const rawEventType = event.type || event.event || event.event_type;
       const eventType = (() => {
@@ -4851,7 +4878,7 @@ export default function MissionReportScreen({
       // Cleanup subscription
       unsubscribe();
     };
-  }, [onMissionEvent]);
+  }, [onMissionEvent, refreshLiveMarkingPoints]);
 
   // Mission mode is now managed by RoverContext and synced with Mission Ops Panel
   // Initial mode is set to 'DGPS Mark' by default in context
