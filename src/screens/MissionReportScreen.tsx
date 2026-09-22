@@ -5,6 +5,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
+import { shareUnchangedRows } from "../utils/markingPointTableRows";
 import {
   countSocketPacket,
   markPointEventReceived,
@@ -1110,6 +1111,20 @@ export default function MissionReportScreen({
    * Live rover-to-target distance is displayed separately
    * by DistanceToTargetCard and must not overwrite report accuracy.
    */
+  // O(1) canonical lookup per waypoint (was an O(N) find per row: O(N^2)).
+  const canonicalPointsBySequence = useMemo(() => {
+    const bySequence = new Map<
+      number,
+      NonNullable<CanonicalMissionReport["points"]>[number]
+    >();
+    for (const point of canonicalMissionReport?.points ?? []) {
+      bySequence.set(Number(point.sequence), point);
+    }
+    return bySequence;
+  }, [canonicalMissionReport]);
+
+  const previousReportStatusMapRef = useRef<Record<number, WpStatus> | null>(null);
+
   const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
     const next: Record<number, WpStatus> = {};
 
@@ -1146,12 +1161,7 @@ export default function MissionReportScreen({
 
       const canonicalPoint =
         canonicalMatchesLiveRun
-          ? canonicalMissionReport?.points
-          ?.find(
-            (point) =>
-              Number(point.sequence) ===
-              waypoint.sn,
-          )
+          ? canonicalPointsBySequence.get(waypoint.sn)
           : undefined;
 
       /*
@@ -1377,11 +1387,16 @@ export default function MissionReportScreen({
       };
     }
 
-    return next;
+    // Unchanged rows keep their identity; an unchanged rebuild returns the
+    // previous map so WaypointsTable does no work at all.
+    const shared = shareUnchangedRows(previousReportStatusMapRef.current, next);
+    previousReportStatusMapRef.current = shared;
+    return shared;
   }, [
     waypoints,
     canonicalReportProjection,
     canonicalMissionReport,
+    canonicalPointsBySequence,
     backendMission?.point_results,
     currentRunSocketPointResults,
     effectiveStatusMap,

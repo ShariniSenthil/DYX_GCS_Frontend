@@ -109,3 +109,51 @@ describe("markingPointTableRows", () => {
     expect(rows[0].revision).not.toBe(rows[1].revision);
   });
 });
+
+describe("shareUnchangedRows (P0025 completes in a 1000-point mission)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { shareUnchangedRows } = require("../markingPointTableRows");
+
+  function build(completedUpTo: number, p25Remark = "Along — | Cross — | Overall —") {
+    const map: Record<number, any> = {};
+    for (let sn = 1; sn <= 1000; sn += 1) {
+      const done = sn <= completedUpTo;
+      map[sn] = {
+        reached: done,
+        marked: done,
+        status: done ? "completed" : "pending",
+        timestamp: done ? `t${sn}` : undefined,
+        remark: sn === 25 ? p25Remark : "Along — | Cross — | Overall —",
+        survey: done ? { available: true, radial_error_mm: sn / 10, reason: null } : null,
+      };
+    }
+    return map;
+  }
+
+  test("only the completed row gets a new object", () => {
+    const before = shareUnchangedRows(null, build(24));
+    const after = shareUnchangedRows(
+      before,
+      build(25, "Along -4.5 mm | Cross +12.3 mm | Overall 13.1 mm"),
+    );
+    expect(after).not.toBe(before);
+    const changed = Object.keys(after).filter(
+      (k) => after[Number(k)] !== before[Number(k)],
+    );
+    expect(changed).toEqual(["25"]);
+  });
+
+  test("a rebuild with no displayed change returns the previous map", () => {
+    const before = shareUnchangedRows(null, build(10));
+    expect(shareUnchangedRows(before, build(10))).toBe(before);
+  });
+
+  test("a survey detail change is not swallowed", () => {
+    const before = shareUnchangedRows(null, build(10));
+    const next = build(10);
+    next[5] = { ...next[5], survey: { ...next[5].survey, extra: 1 } };
+    const after = shareUnchangedRows(before, next);
+    expect(after[5]).toBe(next[5]);
+    expect(after[6]).toBe(before[6]);
+  });
+});

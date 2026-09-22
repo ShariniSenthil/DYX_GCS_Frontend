@@ -134,3 +134,50 @@ export function buildMarkingPointListRevision(
 
   return parts.join(";");
 }
+
+type SharableRow = MarkingPointStatus & {
+  reached?: boolean;
+  marked?: boolean;
+};
+
+function sameRow(a: SharableRow | undefined, b: SharableRow | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    markingPointStatusRevision(a) === markingPointStatusRevision(b) &&
+    a.reached === b.reached &&
+    a.marked === b.marked &&
+    // Export reads the whole survey object, not just the revisioned fields.
+    JSON.stringify(a.survey ?? null) === JSON.stringify(b.survey ?? null)
+  );
+}
+
+/**
+ * Structural sharing for the mission table status map.
+ *
+ * Reuses the previous row object for every point whose displayed content is
+ * unchanged, and returns `previous` itself when no row changed. A point event
+ * for P0025 therefore changes exactly one row object, and a rebuild that
+ * changes nothing does not invalidate the table at all.
+ */
+export function shareUnchangedRows<T extends SharableRow>(
+  previous: Record<number, T> | null | undefined,
+  next: Record<number, T>,
+): Record<number, T> {
+  if (!previous) return next;
+  const nextKeys = Object.keys(next);
+  let changed = nextKeys.length !== Object.keys(previous).length;
+  const shared: Record<number, T> = {};
+  for (const key of nextKeys) {
+    const index = Number(key);
+    const before = previous[index];
+    const after = next[index];
+    if (before !== undefined && sameRow(before, after)) {
+      shared[index] = before;
+    } else {
+      shared[index] = after;
+      changed = true;
+    }
+  }
+  return changed ? shared : previous;
+}
