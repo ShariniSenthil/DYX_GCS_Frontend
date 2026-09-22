@@ -20,6 +20,7 @@ import { VehicleStatusCard } from "../components/missionreport/VehicleStatusCard
 import { DistanceToTargetCard } from "../components/missionreport/DistanceToTargetCard";
 import { MissionProgressCard } from "../components/missionreport/MissionProgressCard";
 import { AccuracyMonitorCard } from "../components/missionreport/AccuracyMonitorCard";
+import { resolveRppDebugDataState } from "../utils/liveAccuracyState";
 import type { LiveDataState } from "../utils/liveDataState";
 import { SystemStatusPanel } from "../components/missionreport/SystemStatusPanel";
 import { QuickNtripStartCard } from "../components/missionreport/QuickNtripStartCard";
@@ -943,12 +944,20 @@ export default function MissionReportScreen({
           ? "inactive"
           : "live";
 
-  const rppDataState: LiveDataState =
-    missionTelemetryState !== "live"
-      ? missionTelemetryState
-      : rppMeasurementsPresent
-        ? "live"
-        : "waiting";
+  // LIVE requires a backend-confirmed fresh /rpp/debug sample. The mere
+  // presence of cached rpp_* numbers is never evidence that they are current.
+  const rppDataState: LiveDataState = resolveRppDebugDataState(
+    {
+      connectionState,
+      socketStale: telemetry.stale === true,
+      missionActive: accuracyMissionActive,
+    },
+    {
+      available: telemetry.rpp_debug_available,
+      fresh: telemetry.rpp_debug_fresh,
+      valuesPresent: rppMeasurementsPresent,
+    },
+  );
 
   const overallAccuracyDataState: LiveDataState =
     missionTelemetryState !== "live"

@@ -104,7 +104,17 @@ const RPP_DEBUG_FIELD_MAP: Array<{ flat: string; aliases: string[] }> = [
   },
   {
     flat: "rpp_debug_fresh",
-    aliases: ["rpp_debug_fresh", "debug_fresh", "fresh"],
+    aliases: [
+      "rpp_debug_fresh",
+      "rpp_debug_stream_fresh",
+      "debug_fresh",
+      "stream_fresh",
+      "fresh",
+    ],
+  },
+  {
+    flat: "rpp_debug_receive_age_ms",
+    aliases: ["rpp_debug_receive_age_ms", "receive_age_ms"],
   },
   {
     flat: "rpp_control_mode",
@@ -233,6 +243,16 @@ export function flattenRppFields(
     flattened.rpp_state_name = rppStateName;
   }
 
+  // rover_backend publishes the canonical name `rpp_debug_stream_fresh`.
+  // The UI contract calls it `rpp_debug_fresh`; map it explicitly so a
+  // backend STALE verdict can never be lost to a naming mismatch.
+  if (
+    isAbsent(flattened.rpp_debug_fresh) &&
+    !isAbsent(raw.rpp_debug_stream_fresh)
+  ) {
+    flattened.rpp_debug_fresh = raw.rpp_debug_stream_fresh;
+  }
+
   const nestedSources = [rppDebug, rpp].filter(
     (value): value is Record<string, unknown> => Boolean(value),
   );
@@ -333,6 +353,10 @@ export function toTelemetryEnvelopeFromRoverData(
   envelope.rpp_state_name = optStr(flat.rpp_state_name);
 
   const rppDebugAvailable = optBool(flat.rpp_debug_available);
+  envelope.rpp_debug_fresh = isAbsent(flat.rpp_debug_fresh)
+    ? undefined
+    : safeBool(flat.rpp_debug_fresh, false);
+  envelope.rpp_debug_receive_age_ms = optNum(flat.rpp_debug_receive_age_ms);
   envelope.rpp_debug_available =
     rppDebugAvailable ??
     (optNum(flat.rpp_actual_speed_mps) !== undefined ||
@@ -662,15 +686,20 @@ const hasRppDebugValues =
 
 const hasExplicitRppDebugFlag = !isAbsent(flat.rpp_debug_available);
 
-const rppDebugAvailable = hasRppDebugValues
-  ? true
-  : hasExplicitRppDebugFlag
-    ? safeBool(flat.rpp_debug_available, false)
+// An explicit backend verdict always wins. Values alone only imply
+// availability for older payloads that never sent the flag.
+const rppDebugAvailable = hasExplicitRppDebugFlag
+  ? safeBool(flat.rpp_debug_available, false)
+  : hasRppDebugValues
+    ? true
     : undefined;
 
+// Absent freshness stays undefined -- it must never become `true` by default.
 const rppDebugFresh = isAbsent(flat.rpp_debug_fresh)
   ? undefined
   : safeBool(flat.rpp_debug_fresh, false);
+
+const rppDebugReceiveAgeMs = firstOptionalNum(flat.rpp_debug_receive_age_ms);
 
   return {
     state,
@@ -741,6 +770,7 @@ within_test_tolerance:
 
 rpp_debug_available: rppDebugAvailable,
 rpp_debug_fresh: rppDebugFresh,
+rpp_debug_receive_age_ms: rppDebugReceiveAgeMs ?? undefined,
 rpp_control_mode: rppControlMode,
 rpp_goal_number: rppGoalNumber ?? undefined,
 
@@ -828,6 +858,7 @@ export function toLiveTelemetryEnvelope(
     rpp_state_name: adapted.rpp_state_name,
     rpp_debug_available: adapted.rpp_debug_available,
     rpp_debug_fresh: adapted.rpp_debug_fresh,
+    rpp_debug_receive_age_ms: adapted.rpp_debug_receive_age_ms,
     rpp_control_mode: adapted.rpp_control_mode,
     rpp_goal_number: adapted.rpp_goal_number,
     rpp_actual_speed_mps: adapted.rpp_actual_speed_mps,

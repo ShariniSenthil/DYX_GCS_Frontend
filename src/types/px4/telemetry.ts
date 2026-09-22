@@ -146,6 +146,9 @@ export interface Px4TelemetryData {
 
   // Exact live RPP controller telemetry from backend /rpp/debug.
   rpp_debug_available?: boolean;
+  /** Canonical backend freshness name; mapped onto rpp_debug_fresh. */
+  rpp_debug_stream_fresh?: boolean;
+  rpp_debug_receive_age_ms?: number | null;
   rpp_control_mode?: string | null;
   rpp_goal_number?: number | null;
 

@@ -203,6 +203,66 @@ describe("px4 telemetry adapter — RPP and live backend ingest", () => {
     expect(envelope.mission?.rpp_state).toBeUndefined();
   });
 
+  describe("RPP debug freshness contract (backend rpp_debug_stream_fresh)", () => {
+    const livePacket = {
+      lat: 25.1,
+      lon: 55.2,
+      rpp_debug_available: true,
+      rpp_debug_receive_age_ms: 42,
+      rpp_cross_track_error_mm: -7.5,
+      rpp_along_remaining_mm: 310,
+    };
+
+    test("backend true maps to frontend true", () => {
+      const adapted = toRoverTelemetry({
+        ...livePacket,
+        rpp_debug_stream_fresh: true,
+      } as never);
+      expect(adapted.rpp_debug_fresh).toBe(true);
+      expect(adapted.rpp_debug_receive_age_ms).toBe(42);
+      const envelope = toLiveTelemetryEnvelope(adapted, 1);
+      expect(envelope.rpp_debug_fresh).toBe(true);
+      expect(envelope.rpp_debug_receive_age_ms).toBe(42);
+    });
+
+    test("backend false maps to frontend false", () => {
+      const adapted = toRoverTelemetry({
+        ...livePacket,
+        rpp_debug_stream_fresh: false,
+        rpp_debug_receive_age_ms: 900,
+      } as never);
+      expect(adapted.rpp_debug_fresh).toBe(false);
+      expect(adapted.rpp_debug_receive_age_ms).toBe(900);
+      // Values are preserved exactly; only their presentation changes.
+      expect(adapted.rpp_cross_track_error_mm).toBe(-7.5);
+    });
+
+    test("absent freshness does not become true", () => {
+      const adapted = toRoverTelemetry(livePacket as never);
+      expect(adapted.rpp_debug_fresh).toBeUndefined();
+      const envelope = toTelemetryEnvelopeFromRoverData(livePacket);
+      expect(envelope.rpp_debug_fresh).toBeUndefined();
+    });
+
+    test("REST rover-data envelope honours the canonical name", () => {
+      const envelope = toTelemetryEnvelopeFromRoverData({
+        ...livePacket,
+        rpp_debug_stream_fresh: false,
+      });
+      expect(envelope.rpp_debug_fresh).toBe(false);
+      expect(envelope.rpp_debug_receive_age_ms).toBe(42);
+    });
+
+    test("explicit rpp_debug_available=false wins over cached values", () => {
+      const adapted = toRoverTelemetry({
+        ...livePacket,
+        rpp_debug_available: false,
+        rpp_debug_stream_fresh: false,
+      } as never);
+      expect(adapted.rpp_debug_available).toBe(false);
+    });
+  });
+
   test("toTelemetryEnvelopeFromRoverData forwards nested RPP debug", () => {
     const envelope = toTelemetryEnvelopeFromRoverData({
       lat: 25.1,

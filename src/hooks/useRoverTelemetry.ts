@@ -1171,6 +1171,9 @@ if (envelope.within_test_tolerance !== undefined) {
     if (envelope.rpp_debug_fresh !== undefined) {
       next.rpp_debug_fresh = envelope.rpp_debug_fresh;
     }
+    if (envelope.rpp_debug_receive_age_ms !== undefined) {
+      next.rpp_debug_receive_age_ms = envelope.rpp_debug_receive_age_ms;
+    }
     if (envelope.rpp_control_mode !== undefined) {
       next.rpp_control_mode = envelope.rpp_control_mode;
     }
@@ -1272,6 +1275,10 @@ if (envelope.within_test_tolerance !== undefined) {
       changed = changed || prev.rpp_debug_available !== next.rpp_debug_available;
     if (envelope.rpp_debug_fresh !== undefined)
       changed = changed || prev.rpp_debug_fresh !== next.rpp_debug_fresh;
+    if (envelope.rpp_debug_receive_age_ms !== undefined)
+      changed =
+        changed ||
+        prev.rpp_debug_receive_age_ms !== next.rpp_debug_receive_age_ms;
     if (envelope.rpp_control_mode !== undefined)
       changed = changed || prev.rpp_control_mode !== next.rpp_control_mode;
     if (envelope.rpp_goal_number !== undefined)
