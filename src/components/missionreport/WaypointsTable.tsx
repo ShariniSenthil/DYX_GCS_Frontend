@@ -65,16 +65,13 @@ function finiteSurveyNumber(value: unknown): number | null {
 
 function formatRawGnssOverall(
   survey: RawGnssSurveySnapshot | null | undefined,
-  status?: string,
 ): string {
   if (!survey) {
-    return ["completed", "failed", "skipped"].includes(String(status ?? "").toLowerCase())
-      ? "UNAVAILABLE"
-      : "—";
+    return "—";
   }
 
   if (survey.available !== true) {
-    return "UNAVAILABLE";
+    return "—";
   }
 
   const radialMm = finiteSurveyNumber(
@@ -203,7 +200,6 @@ const WaypointRow = React.memo(
         >
           {formatRawGnssOverall(
             wpStatus?.survey,
-            wpStatus?.status,
           )}
         </Text>
 
@@ -312,19 +308,21 @@ export const WaypointsTable = React.memo<Props>(
     embedded = false,
   }) => {
     useRenderCounter("WaypointsTable");
-    const currentWaypointNumber =
-      currentIndex != null ? currentIndex + 1 : null;
-
     const safeWaypoints = Array.isArray(waypoints) ? waypoints : [];
+    // `sn` is a Path Plan identifier and may have gaps after editing points.
+    // The mission's active index is array-based, so resolve it to the actual
+    // waypoint identifier before using it for row highlighting.
+    const currentWaypointSn =
+      currentIndex != null ? safeWaypoints[currentIndex]?.sn ?? null : null;
 
     const listRevision = useMemo(
       () =>
         buildMarkingPointListRevision(
           safeWaypoints,
           statusMap as Record<number, MarkingPointStatus | undefined>,
-          currentWaypointNumber,
+          currentWaypointSn,
         ),
-      [safeWaypoints, statusMap, currentWaypointNumber],
+      [safeWaypoints, statusMap, currentWaypointSn],
     );
 
     const rows = useMemo(
@@ -332,18 +330,18 @@ export const WaypointsTable = React.memo<Props>(
         buildMarkingPointRows(
           safeWaypoints,
           statusMap as Record<number, MarkingPointStatus | undefined>,
-          currentWaypointNumber,
+          currentWaypointSn,
         ),
-      [listRevision, safeWaypoints, statusMap, currentWaypointNumber],
+      [listRevision, safeWaypoints, statusMap, currentWaypointSn],
     );
 
     const extraData = useMemo<TableExtraData>(
       () => ({
         statusMap,
-        currentWaypointNumber,
+        currentWaypointNumber: currentWaypointSn,
         revision: listRevision,
       }),
-      [listRevision, statusMap, currentWaypointNumber],
+      [listRevision, statusMap, currentWaypointSn],
     );
 
     const renderItem = useCallback(

@@ -1153,13 +1153,30 @@ export default function MissionReportScreen({
   const reportStatusMap = useMemo<Record<number, WpStatus>>(() => {
     const next: Record<number, WpStatus> = {};
 
-    for (const waypoint of waypoints) {
+    for (const [waypointIndex, waypoint] of waypoints.entries()) {
+      // Backend report points are sequenced P0001, P0002, ... in mission
+      // order. `waypoint.sn` comes from the editable Path Plan ID and can
+      // contain gaps, so it must not be used to look up backend point data.
+      const pointNumber = waypointIndex + 1;
+      // Keep a terminal row while the backend transitions from the live
+      // mission to its persisted terminal report. The active mission slot is
+      // intentionally cleared during that transition, so without this small
+      // bridge the last point can briefly lose its status/survey/remark.
+      const previousRow = previousReportStatusMapRef.current?.[waypoint.sn];
+      const previousRowIsTerminal = [
+        "completed",
+        "failed",
+        "skipped",
+        "aborted",
+        "stopped",
+        "mission_end",
+      ].includes(String(previousRow?.status ?? ""));
       const liveRunId = String(backendMission?.mission_run_id ?? "").trim();
       const reportRunId = String(canonicalMissionReport?.mission_run_id ?? "").trim();
       const canonicalMatchesLiveRun =
         !liveRunId || (Boolean(reportRunId) && liveRunId === reportRunId);
       const reportRow = canonicalMatchesLiveRun
-        ? canonicalReportProjection?.statusMap[waypoint.sn]
+        ? canonicalReportProjection?.statusMap[pointNumber]
         : undefined;
 
       const runtimeRow =
@@ -1182,11 +1199,11 @@ export default function MissionReportScreen({
       //
       // No frontend accuracy calculation is performed.
       const pointId =
-        `P${String(waypoint.sn).padStart(4, "0")}`;
+        `P${String(pointNumber).padStart(4, "0")}`;
 
       const canonicalPoint =
         canonicalMatchesLiveRun
-          ? canonicalPointsBySequence.get(waypoint.sn)
+          ? canonicalPointsBySequence.get(pointNumber)
           : undefined;
 
       /*
@@ -1201,7 +1218,7 @@ export default function MissionReportScreen({
       const runtimePointResult = newerPointResult(
         currentRunSocketPointResults[pointId],
         currentRunBackendPointResults.byId.get(pointId) ??
-          currentRunBackendPointResults.byIndex.get(waypoint.sn - 1),
+          currentRunBackendPointResults.byIndex.get(waypointIndex),
       );
 
       const runtimePointAccuracy =
@@ -1241,6 +1258,9 @@ export default function MissionReportScreen({
           extractRawGnssSurvey(runtimeSurveyCandidate),
           extractRawGnssSurvey(reportSurveyCandidate),
           extractRawGnssSurvey((runtimeRow as any)?.survey),
+          // A missing/unavailable follow-up payload must never erase a real
+          // frozen RAW GNSS measurement already displayed for this run.
+          previousRowIsTerminal ? previousRow?.survey : null,
         );
 
       // DYX FINAL POINT RUNTIME STATUS
@@ -1313,7 +1333,7 @@ export default function MissionReportScreen({
             ...runtimeTerminalRow,
             remark: reconciledRow?.remark ?? "Along — | Cross — | Overall —",
           }
-        : reconciledRow;
+        : reconciledRow ?? (previousRowIsTerminal ? previousRow : null);
 
       const runtimeAlong =
         typeof runtimeAccuracy?.along_track_error_mm === "number" &&
@@ -1342,7 +1362,7 @@ export default function MissionReportScreen({
         runtimeCross !== null &&
         runtimeOverall !== null
           ? {
-              pointIndex: waypoint.sn - 1,
+              pointIndex: waypointIndex,
               alongTrackErrorMm: runtimeAlong,
               crossTrackErrorMm: runtimeCross,
               overallAccuracyMm: runtimeOverall,
@@ -2795,6 +2815,8 @@ export default function MissionReportScreen({
     );
     setStatusMap({});
     resetPointStatusMap();
+    // Do not let terminal rows from the prior mission bridge into a new run.
+    previousReportStatusMapRef.current = null;
 
     /*
      * Never allow terminal accuracy from the

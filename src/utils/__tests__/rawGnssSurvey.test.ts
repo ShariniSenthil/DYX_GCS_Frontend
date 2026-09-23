@@ -28,6 +28,14 @@ describe("rawGnssSurvey", () => {
     expect(surveyFromRadialMm(null)).toBeNull();
   });
 
+  test("does not treat RPP overall accuracy as a RAW GNSS survey", () => {
+    expect(
+      extractRawGnssSurvey({
+        accuracy: { overall_accuracy_mm: 12.5 },
+      }),
+    ).toBeNull();
+  });
+
   test("does not let an unavailable runtime survey hide a good report", () => {
     const chosen = pickBestRawGnssSurvey(
       { available: false, reason: "pending" },

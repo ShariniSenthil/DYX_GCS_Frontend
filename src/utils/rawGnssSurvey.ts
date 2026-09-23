@@ -53,10 +53,11 @@ export function extractRawGnssSurvey(
 
   const candidate = nested ?? (root.available !== undefined ? root : null);
   if (!candidate) {
+    // `overall_accuracy_mm` is an RPP accuracy value, not a RAW GNSS survey
+    // measurement.  Never use it as a fallback here: doing so can put a
+    // plausible-but-wrong RPP value in the RAW GNSS column.
     return surveyFromRadialMm(
-      root.radial_error_mm ??
-        root.overall_accuracy_mm ??
-        asRecord(root.accuracy)?.radial_error_mm,
+      root.radial_error_mm,
     );
   }
 

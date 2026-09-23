@@ -65,19 +65,22 @@ export function getStatusPresentation(
   return PENDING_PRESENTATION;
 }
 
-/** Current waypoint S/N and total count for progress labels, e.g. (3/25) or (0/0). */
+/** Current waypoint position and total count for progress labels, e.g. (3/25) or (0/0). */
 export function getMissionProgressRef(
   waypoints: { sn: number }[],
   currentIndex: number | null | undefined,
   isMissionActive: boolean,
 ): { current: number; total: number } {
   const total = waypoints.length;
-  const currentWp =
-    isMissionActive && currentIndex != null && currentIndex >= 0
-      ? waypoints[currentIndex]
-      : null;
+  const hasCurrentWaypoint =
+    isMissionActive &&
+    currentIndex != null &&
+    currentIndex >= 0 &&
+    currentIndex < total;
   return {
-    current: currentWp?.sn ?? 0,
+    // Path Plan `sn` is an editable identifier, not the one-based mission
+    // position. Showing it produced impossible progress such as 4/3.
+    current: hasCurrentWaypoint ? currentIndex + 1 : 0,
     total,
   };
 }
