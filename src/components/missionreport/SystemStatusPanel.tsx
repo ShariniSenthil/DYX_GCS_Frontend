@@ -3,7 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { OptionalGestureDetector } from '../shared/OptionalGestureDetector';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
 import { useRoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
-import { useTelemetry } from '../../context/TelemetryContext';
+import { useTelemetryControl } from '../../context/TelemetryContext';
+import {
+  shallowEqual,
+  useLiveTelemetrySelector,
+  type LiveTelemetrySnapshot,
+} from '../../context/liveTelemetryStore';
 import type { RoverStatusIndicators } from '../../hooks/useRoverStatusIndicators';
 import type { RtkUiState } from '../../adapters/px4RtkUiStateAdapter';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -86,40 +91,53 @@ function deriveVisuals(ind: RoverStatusIndicators): IconVisual[] {
   return [network, rtk, gcs, fcu, battery];
 }
 
+/**
+ * The only live (packet-rate) values this panel actually reads. Selecting
+ * just these fields -- instead of the whole `useTelemetry()` object -- means
+ * the panel re-renders only when one of them changes, not on every
+ * telemetry packet.
+ */
+function selectSystemStatusLive(s: LiveTelemetrySnapshot) {
+  const mission = s.telemetry.mission;
+  return {
+    rppOn: s.telemetry.rpp_debug_available === true,
+    sprayState: mission.spray_controller_state ?? null,
+    sprayFault: mission.spray_fault_reason ?? null,
+    alignmentActive: mission.alignment_active === true,
+    startStage: mission.start_stage ?? null,
+    resumeStage: mission.resume_stage ?? null,
+    stale: s.telemetry.stale === true,
+    ageMs: typeof s.telemetry.ageMs === "number" ? s.telemetry.ageMs : null,
+  };
+}
+
 export const SystemStatusPanel: React.FC<Props> = ({
   dragGesture,
   isDraggingActive,
   onClose,
 }) => {
   const indicators = useRoverStatusIndicators();
-  const { telemetry, missionLifecycle } = useTelemetry();
+  // Control context: lifecycle only, no telemetry-rate re-renders.
+  const { missionLifecycle } = useTelemetryControl();
+  const live = useLiveTelemetrySelector(selectSystemStatusLive, shallowEqual);
 
   const icons = useMemo(() => deriveVisuals(indicators), [indicators]);
 
   const extraRows = useMemo(() => {
-    const mission = telemetry.mission;
-    const rppOn = telemetry.rpp_debug_available === true;
-    const spray = mission.spray_controller_state ?? "—";
-    const sprayFault = mission.spray_fault_reason;
-    const align = mission.alignment_active === true;
-    const start =
-      missionLifecycle.start_stage ?? mission.start_stage ?? "IDLE";
-    const resume =
-      missionLifecycle.resume_stage ?? mission.resume_stage ?? "IDLE";
-    const stale = telemetry.stale === true;
+    const spray = live.sprayState ?? "—";
+    const start = missionLifecycle.start_stage ?? live.startStage ?? "IDLE";
+    const resume = missionLifecycle.resume_stage ?? live.resumeStage ?? "IDLE";
     const age =
-      typeof telemetry.ageMs === "number"
-        ? `${Math.round(telemetry.ageMs / 100) / 10}s`
-        : "—";
+      live.ageMs === null ? "—" : `${Math.round(live.ageMs / 100) / 10}s`;
     return [
-      { label: "RPP", value: rppOn ? "debug on" : "—" },
-      { label: "Spray", value: sprayFault ? String(sprayFault) : String(spray) },
-      { label: "Align", value: align ? "active" : "idle" },
+      { label: "RPP", value: live.rppOn ? "debug on" : "—" },
+      { label: "Spray", value: live.sprayFault ? String(live.sprayFault) : String(spray) },
+      { label: "Align", value: live.alignmentActive ? "active" : "idle" },
       { label: "Start", value: String(start) },
       { label: "Resume", value: String(resume) },
-      { label: "Link", value: stale ? `stale ${age}` : `ok ${age}` },
+      { label: "Link", value: live.stale ? `stale ${age}` : `ok ${age}` },
     ];
-  }, [telemetry, missionLifecycle]);
+  }, [live, missionLifecycle]);
 
   return (
     <View style={styles.container}>

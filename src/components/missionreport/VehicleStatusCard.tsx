@@ -6,11 +6,19 @@ import { colors } from '../../theme/colors';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
 import { VehicleStatus } from './types';
 import { RoverTelemetry } from '../../types/telemetry';
+import { resolveVehicleConnectionState } from '../../utils/vehicleStatusConnection';
 
 interface Props {
   status: VehicleStatus;
   telemetry?: RoverTelemetry;
   isConnected: boolean;
+  /**
+   * True when the socket reports connected but no telemetry packet has
+   * arrived recently (half-open socket). The card keeps showing the last
+   * known values -- they are still the best information available -- but
+   * marks them STALE instead of implying they are current.
+   */
+  dataStale?: boolean;
   socketTransport?: "websocket" | "polling" | null;
   /** Injected by DraggableCard (handleType="custom") */
   dragGesture?: any;
@@ -88,31 +96,20 @@ export const VehicleStatusCard: React.FC<Props> = ({
   status,
   telemetry,
   isConnected,
+  dataStale = false,
   socketTransport = null,
   dragGesture,
   isDraggingActive,
   onClose,
 }) => {
-  const connectionColor = isConnected ? colors.success : colors.danger;
+  const { stale, connectionColor, socketLabel, socketColor } =
+    resolveVehicleConnectionState(isConnected, dataStale, socketTransport);
 
   const rtkColor = useDebouncedColor(() => getRtkColor(telemetry), telemetry?.rtk?.fix_type);
   const batteryColor = useDebouncedColor(() => getBatteryColor(telemetry), telemetry?.battery?.percentage);
   const hrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.hrms ?? 0), (telemetry as any)?.hrms);
   const vrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.vrms ?? 0), (telemetry as any)?.vrms);
   const satColor = useDebouncedColor(() => getSatelliteColor(telemetry), telemetry?.global?.satellites_visible);
-
-  const socketLabel = !isConnected
-    ? 'Down'
-    : socketTransport === 'websocket'
-      ? 'WebSocket'
-      : socketTransport === 'polling'
-        ? 'Polling'
-        : 'Connecting';
-  const socketColor = socketTransport === 'websocket' && isConnected
-    ? colors.success
-    : isConnected
-      ? colors.warning
-      : colors.danger;
 
   const rows: StatusRowItem[] = [
     { key: 'websocket', label: 'WebSocket', value: socketLabel, color: socketColor, icon: 'pulse' },
@@ -135,6 +132,7 @@ export const VehicleStatusCard: React.FC<Props> = ({
             </View>
             <Text style={styles.headerTitle}>ROBOT STATUS</Text>
             <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
+            {stale && <Text style={styles.staleBadge}>STALE</Text>}
           </View>
           <View style={styles.headerRight}>
             {onClose && (
@@ -190,6 +188,12 @@ const styles = StyleSheet.create({
   headerDragging: {
     borderBottomColor: PATH_PLAN_GLASS.dragBorder,
     backgroundColor: PATH_PLAN_GLASS.dragBg,
+  },
+  staleBadge: {
+    color: colors.warning,
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   headerLeft: {
     flexDirection: 'row',

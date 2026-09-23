@@ -16,8 +16,12 @@ import {
   PATH_PLAN_GLASS,
   PATH_PLAN_HEADER,
 } from "../../constants/pathPlanGlass";
-import { useRover } from "../../context/RoverContext";
 import { useTelemetryControl } from "../../context/TelemetryContext";
+import {
+  shallowEqual,
+  useLiveTelemetrySelector,
+  type LiveTelemetrySnapshot,
+} from "../../context/liveTelemetryStore";
 import { isUnknownControlOutcome } from "../../services/apiError";
 import { Waypoint } from "./types";
 import { Toast } from "../shared/Toast";
@@ -97,6 +101,23 @@ export type MissionControlCardProps = {
   onClose?: () => void;
 };
 
+/**
+ * The only live (packet-rate) values this card actually reads. Selecting
+ * just these fields -- instead of the whole `useRover().telemetry` object --
+ * means the card re-renders only when one of them changes, not on every
+ * telemetry packet.
+ */
+function selectMissionControlLive(s: LiveTelemetrySnapshot) {
+  return {
+    missionStatus: s.telemetry.mission?.status,
+    startStage: s.telemetry.mission?.start_stage,
+    resumeStage: s.telemetry.mission?.resume_stage,
+    currentWp: s.telemetry.mission?.current_wp,
+    totalWp: s.telemetry.mission?.total_wp,
+    rtkFixType: s.telemetry.rtk?.fix_type,
+  };
+}
+
 const MissionControlCard: React.FC<MissionControlCardProps> = ({
   waypoints = [],
   onStart,
@@ -125,9 +146,14 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   isDraggingActive,
   onClose,
 }) => {
-  const { services, telemetry } = useRover();
   // Control context: lifecycle only, no telemetry-rate re-renders.
-  const { missionLifecycle } = useTelemetryControl();
+  const { services, missionLifecycle } = useTelemetryControl();
+  // Live values: re-renders only when one of these specific fields changes,
+  // not on every telemetry packet (see selectMissionControlLive above).
+  const telemetryLive = useLiveTelemetrySelector(
+    selectMissionControlLive,
+    shallowEqual,
+  );
   const [isLoadingMission, setIsLoadingMission] = React.useState(false);
 
   const [isStarting, setIsStarting] = React.useState(false);
@@ -151,12 +177,12 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     if (lockedState && Date.now() > lockedState.expiresAt) {
       setLockedState(null);
     }
-  }, [telemetry?.mission?.status, lockedState]);
+  }, [telemetryLive.missionStatus, lockedState]);
 
 
   // Derive button state directly from telemetry — single source of truth
   // Backend mission_status events set telemetry.mission.status to: running, paused, idle, stopped, completed, error, ready, loading
-  const missionStatus = (telemetry?.mission?.status ?? "").toLowerCase().trim();
+  const missionStatus = (telemetryLive.missionStatus ?? "").toLowerCase().trim();
   const isWaitingForNext =
     waitingForManual || missionStatus === "waiting_for_next";
 
@@ -174,7 +200,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
   const startStage = String(
     missionLifecycle.start_stage ??
-      telemetry?.mission?.start_stage ??
+      telemetryLive.startStage ??
       "",
   )
     .trim()
@@ -182,7 +208,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
 
   const resumeStage = String(
     missionLifecycle.resume_stage ??
-      telemetry?.mission?.resume_stage ??
+      telemetryLive.resumeStage ??
       "",
   )
     .trim()
@@ -219,13 +245,13 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
   React.useEffect(() => {
     console.log(
       "[MissionControlCard] telemetry.mission.status =",
-      telemetry?.mission?.status,
+      telemetryLive.missionStatus,
       "→ isRunning:",
       isRunning,
       "isPaused:",
       isPaused,
     );
-  }, [telemetry?.mission?.status]);
+  }, [telemetryLive.missionStatus]);
 
   const [confirmAction, setConfirmAction] = React.useState<null | {
     action: string;
@@ -812,8 +838,8 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                     setBulkError(null);
                     const from = parseInt(bulkFrom, 10);
                     const to = parseInt(bulkTo, 10);
-                    const current = telemetry?.mission?.current_wp ?? 0;
-                    const total = telemetry?.mission?.total_wp ?? 0;
+                    const current = telemetryLive.currentWp ?? 0;
+                    const total = telemetryLive.totalWp ?? 0;
 
                     const validationError = validateBulkSkip({
                       from,
@@ -827,7 +853,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                     }
 
                     // Ensure mission is paused on client before sending bulk skip
-                    const missionStatus = (telemetry?.mission?.status || "")
+                    const missionStatus = (telemetryLive.missionStatus || "")
                       .toString()
                       .toUpperCase();
                     if (missionStatus !== "PAUSED") {
@@ -982,23 +1008,23 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
                   {/* RTK Card */}
                   {(() => {
                     const rtkStatusColor = (() => {
-                      if (!telemetry) return colors.danger;
-                      const fixType = telemetry.rtk?.fix_type;
+                      if (telemetryLive.rtkFixType == null) return colors.danger;
+                      const fixType = telemetryLive.rtkFixType;
                       if (fixType >= 5) return colors.success;
                       if (fixType >= 4) return colors.warning;
                       return colors.danger;
                     })();
                     const rtkStatusBadge = (() => {
-                      if (!telemetry) return "LOST";
-                      const fixType = telemetry.rtk?.fix_type;
+                      if (telemetryLive.rtkFixType == null) return "LOST";
+                      const fixType = telemetryLive.rtkFixType;
                       if (fixType >= 6) return "LOCKED";
                       if (fixType >= 5) return "LOCKED";
                       if (fixType >= 4) return "WEAK";
                       return "LOST";
                     })();
                     const rtkStatusText = (() => {
-                      if (!telemetry) return "No Fix";
-                      const fixType = telemetry.rtk?.fix_type;
+                      if (telemetryLive.rtkFixType == null) return "No Fix";
+                      const fixType = telemetryLive.rtkFixType;
                       if (fixType >= 6) return "RTK Fixed";
                       if (fixType >= 5) return "RTK Float";
                       if (fixType >= 4) return "DGPS";
