@@ -220,6 +220,12 @@ export const LiveVehicleStatusCard: React.FC<
 > = ({ socketTransport, onClose, ...drag }) => {
   const telemetry = useLiveTelemetrySelector(selectTelemetry);
   const connectionState = useLiveTelemetrySelector(selectConnectionState);
+  // A logically "connected" socket (ping/pong still answering) does not
+  // guarantee telemetry is still arriving -- gate on the same receive-clock
+  // watchdog the RPP live panels already use, so cached FCU/RTK/battery
+  // values are never shown as current during a half-open socket.
+  const packetStalled = useSocketPacketStall();
+  const dataStale = telemetry.stale === true || packetStalled;
 
   const status = useMemo((): VehicleStatus => {
     const hrmsValue =
@@ -266,6 +272,7 @@ export const LiveVehicleStatusCard: React.FC<
       status={status}
       telemetry={telemetry}
       isConnected={isConnected}
+      dataStale={dataStale}
       socketTransport={socketTransport}
       onClose={onClose}
     />
