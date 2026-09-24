@@ -1541,6 +1541,14 @@ export default function MissionReportScreen({
     }, duration);
   };
 
+  const dismissNotification = useCallback(() => {
+    if (notificationTimeoutRef.current) {
+      clearTimeout(notificationTimeoutRef.current);
+      notificationTimeoutRef.current = null;
+    }
+    setNotification((previous) => ({ ...previous, visible: false }));
+  }, []);
+
   const refreshBackendMission = useCallback(async (): Promise<void> => {
     if (isOfflineMode()) {
       return;
@@ -5223,6 +5231,7 @@ export default function MissionReportScreen({
         type={notification.type}
         title={notification.title}
         message={notification.message}
+        onDismiss={dismissNotification}
       />
 
       {/* Undo prompt for recent bulk-skip */}

@@ -23,6 +23,7 @@ export const RtkRuntimeNotice: React.FC = () => {
   const previousRtkStateRef = useRef<string | null>(null);
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showRecovered, setShowRecovered] = useState(false);
+  const [floatWarningDismissed, setFloatWarningDismissed] = useState(false);
 
   const missionState = String(mission.state ?? "").trim().toUpperCase();
   const rtkState = String(mission.rtkState ?? "").trim().toUpperCase();
@@ -34,11 +35,18 @@ export const RtkRuntimeNotice: React.FC = () => {
     const previous = previousRtkStateRef.current;
 
     if (rtkState === "FLOAT") {
+      if (previous !== "FLOAT") {
+        setFloatWarningDismissed(false);
+      }
       if (recoveryTimerRef.current) {
         clearTimeout(recoveryTimerRef.current);
         recoveryTimerRef.current = null;
       }
       setShowRecovered(false);
+    }
+
+    if (rtkState !== "FLOAT") {
+      setFloatWarningDismissed(false);
     }
 
     if (
@@ -72,12 +80,13 @@ export const RtkRuntimeNotice: React.FC = () => {
   return (
     <>
       <Toast
-        visible={showFloatWarning}
+        visible={showFloatWarning && !floatWarningDismissed}
         type="info"
         title="RTK FLOAT"
         message="Position accuracy degraded. Mission continuing."
         position="top"
         style={styles.floatWarning}
+        onDismiss={() => setFloatWarningDismissed(true)}
       />
 
       <Toast
@@ -87,6 +96,13 @@ export const RtkRuntimeNotice: React.FC = () => {
         message="RTK FIXED recovered. Mission continuing normally."
         position="top"
         style={styles.recovered}
+        onDismiss={() => {
+          if (recoveryTimerRef.current) {
+            clearTimeout(recoveryTimerRef.current);
+            recoveryTimerRef.current = null;
+          }
+          setShowRecovered(false);
+        }}
       />
     </>
   );

@@ -262,6 +262,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     type: "success" | "error" | "info";
     message?: string;
   }>({ visible: false, type: "info", message: undefined });
+  const toastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track mission control readiness - must be called before useActionGuard
   // NOT critical - this is just a UI component, shouldn't block entire system
@@ -286,12 +287,34 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
     message?: string,
     duration = 3000,
   ) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
     setToast({ visible: true, type, message });
-    setTimeout(
-      () => setToast({ visible: false, type: "info", message: undefined }),
+    toastTimeoutRef.current = setTimeout(
+      () => {
+        setToast({ visible: false, type: "info", message: undefined });
+        toastTimeoutRef.current = null;
+      },
       duration,
     );
   };
+
+  const dismissLocalToast = () => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setToast({ visible: false, type: "info", message: undefined });
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // No sync effects or recovery fetch needed — isRunning/isPaused are derived
   // directly from telemetry.mission.status above. Backend mission_status events
@@ -1322,6 +1345,7 @@ const MissionControlCard: React.FC<MissionControlCardProps> = ({
           message={toast.message}
           position="bottom"
           style={{ left: 0, right: 0, bottom: 0 }}
+          onDismiss={dismissLocalToast}
         />
       </View>
     </View>

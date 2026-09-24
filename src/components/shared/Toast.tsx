@@ -11,7 +11,8 @@ export interface ToastProps {
   message?: string;
   position?: 'top' | 'bottom' | 'bottom-right';
   style?: any;
-  onDismiss?: () => void;
+  /** Called after a left or right swipe, or by the optional close button. */
+  onDismiss: () => void;
   showCloseButton?: boolean;
 }
 
@@ -35,15 +36,15 @@ export const Toast: React.FC<ToastProps> = ({
 
   const panResponder = useMemo(
     () => PanResponder.create({
-      onStartShouldSetPanResponder: () => Boolean(onDismiss),
+      // Do not claim a simple tap. This lets buttons inside the toast remain
+      // tappable; the responder is claimed only after a horizontal drag starts.
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) =>
-        Boolean(onDismiss) && Math.abs(gestureState.dx) > 8 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+        Math.abs(gestureState.dx) > 8 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
       onPanResponderMove: (_, gestureState) => {
         translateX.setValue(gestureState.dx);
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (!onDismiss) return;
-
         if (Math.abs(gestureState.dx) > 64) {
           Animated.timing(translateX, {
             toValue: gestureState.dx > 0 ? 420 : -420,
@@ -94,7 +95,7 @@ export const Toast: React.FC<ToastProps> = ({
         {title && <Text style={styles.title}>{title}</Text>}
         {message && <Text style={styles.message}>{message}</Text>}
       </View>
-      {showCloseButton && onDismiss && (
+      {showCloseButton && (
         <TouchableOpacity
           style={styles.closeButton}
           onPress={onDismiss}

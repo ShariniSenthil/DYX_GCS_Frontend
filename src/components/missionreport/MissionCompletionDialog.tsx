@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, Modal, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, StyleSheet, Modal, Text, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+
 import MissionReportExport from './MissionReportExport';
 import { Waypoint } from './types';
 import type { WaypointUiStatus } from '../../types/missionWaypointStatus';
@@ -29,10 +30,11 @@ interface MissionCompletionDialogProps {
   }>;
   missionMode: string | null;
   fetchExportData?: () => Promise<
-    MissionCompletionDialogProps["statusMap"] | null
+    MissionCompletionDialogProps['statusMap'] | null
   >;
 }
 
+/** A compact acknowledgement card shown after the rover confirms completion. */
 export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = ({
   visible,
   onDismiss,
@@ -43,86 +45,75 @@ export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = (
   missionMode,
   fetchExportData,
 }) => {
-  const { totalWaypoints, completedWaypoints, skippedWaypoints, missionDuration, startTime, endTime } = missionStats;
-
-  // Debug logging
-  React.useEffect(() => {
-    // console.log('[MissionCompletionDialog] Visibility changed:', visible);
-    if (visible) {
-      // console.log('[MissionCompletionDialog] 📊 Mission stats:', missionStats);
-    }
-  }, [visible, missionStats]);
+  const {
+    totalWaypoints,
+    completedWaypoints,
+    skippedWaypoints,
+    missionDuration,
+  } = missionStats;
 
   return (
-    <Modal visible={visible} transparent={true} animationType="fade" onRequestClose={onDismiss}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onDismiss}
+      statusBarTranslucent
+    >
       <View style={styles.overlay}>
-        <View style={styles.dialog}>
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Success Icon */}
-            <View style={styles.iconContainer}>
-              <MaterialIcons name="check-circle" size={64} color="#4CAF50" />
+        <View
+          style={styles.dialog}
+          accessibilityViewIsModal
+          accessibilityLabel="Mission complete"
+        >
+          <View style={styles.header}>
+            <View style={styles.successIcon}>
+              <MaterialIcons name="check" size={25} color="#052E1A" />
             </View>
-            
-            {/* Title */}
-            <Text style={styles.title}>Mission Completed Successfully!</Text>
-            
-            {/* Mission Summary Card */}
-            <View style={styles.summaryCard}>
-              <Text style={styles.sectionTitle}>Mission Summary</Text>
-              <View style={styles.divider} />
-              
-              <View style={styles.statsContainer}>
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Total Waypoints:</Text>
-                  <View style={styles.statChip}>
-                    <Text style={styles.statChipText}>{totalWaypoints}</Text>
-                  </View>
-                </View>
-                
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Completed:</Text>
-                  <View style={[styles.statChip, styles.completedChip]}>
-                    <Text style={[styles.statChipText, styles.completedChipText]}>{completedWaypoints}</Text>
-                  </View>
-                </View>
-                
-                {skippedWaypoints > 0 && (
-                  <View style={styles.statRow}>
-                    <Text style={styles.statLabel}>Skipped:</Text>
-                    <View style={[styles.statChip, styles.skippedChip]}>
-                      <Text style={[styles.statChipText, styles.skippedChipText]}>{skippedWaypoints}</Text>
-                    </View>
-                  </View>
-                )}
-                
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Duration:</Text>
-                  <Text style={styles.statValue}>{missionDuration}</Text>
-                </View>
-                
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Started:</Text>
-                  <Text style={styles.statValue}>{startTime}</Text>
-                </View>
-                
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Completed:</Text>
-                  <Text style={styles.statValue}>{endTime}</Text>
-                </View>
+            <View style={styles.heading}>
+              <Text style={styles.eyebrow}>MISSION COMPLETE</Text>
+              <Text style={styles.title}>All done</Text>
+            </View>
+            <TouchableOpacity
+              onPress={onDismiss}
+              style={styles.closeButton}
+              accessibilityRole="button"
+              accessibilityLabel="Close mission completion dialog"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialIcons name="close" size={19} color="#94A3B8" />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.message}>
+            The rover has finished processing this mission.
+          </Text>
+
+          <View style={styles.metrics}>
+            <View style={[styles.metric, styles.metricPrimary]}>
+              <Text style={styles.metricValue}>{completedWaypoints}/{totalWaypoints}</Text>
+              <Text style={styles.metricLabel}>COMPLETED</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>{missionDuration}</Text>
+              <Text style={styles.metricLabel}>DURATION</Text>
+            </View>
+            {skippedWaypoints > 0 && (
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>{skippedWaypoints}</Text>
+                <Text style={styles.metricLabel}>SKIPPED</Text>
               </View>
-            </View>
-            
-            {/* Success Message */}
-            <Text style={styles.successMessage}>
-              All waypoints have been processed successfully. You can now export the mission report or close this dialog.
-            </Text>
-          </ScrollView>
-          
-          {/* Action Buttons */}
+            )}
+          </View>
+
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.okButton} onPress={onDismiss}>
-              <MaterialIcons name="check" size={20} color="#fff" style={styles.okIcon} />
-              <Text style={styles.okButtonText}>OK</Text>
+            <TouchableOpacity
+              style={styles.doneButton}
+              onPress={onDismiss}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss mission completion dialog"
+            >
+              <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>
             <MissionReportExport
               waypoints={waypoints}
@@ -142,146 +133,117 @@ export const MissionCompletionDialog: React.FC<MissionCompletionDialogProps> = (
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(2, 12, 27, 0.58)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   dialog: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    maxWidth: 500,
     width: '100%',
-    maxHeight: '90%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  content: {
-    padding: 24,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    textAlign: 'center',
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2E7D32',
-    marginBottom: 16,
-  },
-  summaryCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    maxWidth: 380,
+    backgroundColor: '#0F1D32',
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#e9ecef',
+    borderColor: 'rgba(148, 163, 184, 0.22)',
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.36,
+    shadowRadius: 22,
+    elevation: 14,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#dee2e6',
-    marginBottom: 12,
-  },
-  statsContainer: {
-    gap: 8,
-  },
-  statRow: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
   },
-  statLabel: {
-    fontSize: 16,
-    color: '#666',
+  successIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#6EE7B7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  heading: {
     flex: 1,
   },
-  statValue: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
+  eyebrow: {
+    color: '#6EE7B7',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
   },
-  statChip: {
-    backgroundColor: '#e9ecef',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    minWidth: 60,
+  title: {
+    color: '#F8FAFC',
+    fontSize: 21,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
   },
-  statChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#495057',
+  message: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 16,
   },
-  completedChip: {
-    backgroundColor: '#d4edda',
+  metrics: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
   },
-  completedChipText: {
-    color: '#155724',
+  metric: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 10,
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
   },
-  skippedChip: {
-    backgroundColor: '#fff3cd',
+  metricPrimary: {
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.28)',
   },
-  skippedChipText: {
-    color: '#856404',
-  },
-  successMessage: {
-    textAlign: 'center',
+  metricValue: {
+    color: '#F8FAFC',
     fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  metricLabel: {
+    color: '#94A3B8',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+    marginTop: 4,
+    textAlign: 'center',
   },
   actions: {
     flexDirection: 'row',
-    padding: 16,
-    paddingTop: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 12,
+    marginTop: 18,
   },
-  okButton: {
-    flex: 1,
-    backgroundColor: '#10B981',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
+  doneButton: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(148, 163, 184, 0.13)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
   },
-  okButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginLeft: 4,
-  },
-  okIcon: {
-    marginRight: 0,
-  },
-  exportButton: {
-    flex: 1,
-    backgroundColor: '#0047AB',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  exportButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginLeft: 8,
-  },
-  exportIcon: {
-    marginRight: 4,
+  doneButtonText: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

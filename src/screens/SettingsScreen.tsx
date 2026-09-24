@@ -20,6 +20,7 @@ import { getRtkStatus, stopRtk } from "../services/rtkService";
 import { toRtkControlView } from "../adapters/rtkControlAdapter";
 import { useAuth } from "../hooks/useAuth";
 import { getSprayConfig, setSprayConfig } from "../services/sprayConfigService";
+import { Toast } from "../components/shared/Toast";
 
 interface SettingsScreenProps {
   visible: boolean;
@@ -885,12 +886,14 @@ const SettingsScreenComponent: React.FC<SettingsScreenProps> = ({
     >
       <View style={styles.overlay}>
         {/* Success Toast */}
-        {successMessage && (
-          <View style={styles.successToast}>
-            <Text style={styles.successIcon}>✅</Text>
-            <Text style={styles.successToastText}>{successMessage}</Text>
-          </View>
-        )}
+        <Toast
+          visible={Boolean(successMessage)}
+          type="success"
+          message={successMessage ? `✅ ${successMessage}` : undefined}
+          position="top"
+          style={styles.successToast}
+          onDismiss={() => setSuccessMessage("")}
+        />
 
         <View style={styles.container}>
           {/* Header */}
