@@ -53,6 +53,11 @@ type Props = {
     loadAgain?: boolean;
     /** An archived mission is regenerating its preview after Load Again. */
     loadPreparing?: boolean;
+    /** Clears the prepared controller trajectory and progress, but keeps the marking plan. */
+    onClearMission?: () => void;
+    /** Clear is unavailable until a controller mission exists and is not running. */
+    clearEnabled?: boolean;
+    clearInProgress?: boolean;
 };
 
 const MissionOpsPanel = React.memo(({
@@ -80,6 +85,9 @@ const MissionOpsPanel = React.memo(({
     loadVisible = false,
     loadAgain = false,
     loadPreparing = false,
+    onClearMission,
+    clearEnabled = false,
+    clearInProgress = false,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
     const [isLoadingMission, setIsLoadingMission] = useState(false);
@@ -389,6 +397,32 @@ const MissionOpsPanel = React.memo(({
                 </TouchableOpacity>
             </View>
 
+            <TouchableOpacity
+                style={[
+                    styles.clearButton,
+                    (!clearEnabled || clearInProgress) && styles.disabledBtn,
+                ]}
+                onPress={onClearMission}
+                disabled={!clearEnabled || clearInProgress}
+                activeOpacity={0.75}
+                accessibilityLabel="Clear prepared mission from the controller"
+                accessibilityRole="button"
+            >
+                <MaterialCommunityIcons
+                    name="broom"
+                    size={18}
+                    color={clearEnabled && !clearInProgress ? '#FCA5A5' : 'rgba(255,255,255,0.35)'}
+                />
+                <Text
+                    style={[
+                        styles.clearButtonText,
+                        (!clearEnabled || clearInProgress) && styles.clearButtonTextDisabled,
+                    ]}
+                >
+                    {clearInProgress ? 'Clearing…' : 'Clear'}
+                </Text>
+            </TouchableOpacity>
+
             {/* The button exists only after a preview. Its label belongs to that mission ID. */}
             {loadVisible && (
                 <TouchableOpacity
@@ -596,6 +630,26 @@ const styles = StyleSheet.create({
     buttonText: {
         fontWeight: '600',
         fontSize: 13,
+    },
+    clearButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 44,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(248, 113, 113, 0.42)',
+        backgroundColor: 'rgba(127, 29, 29, 0.22)',
+    },
+    clearButtonText: {
+        color: '#FCA5A5',
+        fontWeight: '700',
+        fontSize: 12,
+        letterSpacing: 0.4,
+    },
+    clearButtonTextDisabled: {
+        color: 'rgba(255,255,255,0.35)',
     },
 
     // ── LOAD MISSION ──

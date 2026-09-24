@@ -32,12 +32,64 @@ const VEHICLE_CARD_LAYOUT: { height?: number | string; minHeight?: number; width
   width: '100%',
 };
 
+type RtkCardTone = {
+  accent: string;
+  panelBg: string;
+  panelBorder: string;
+  innerBg: string;
+  innerBorder: string;
+};
+
+/** The card colour gives the RTK quality an immediate visual meaning. */
+const getRtkCardTone = (fixType: number): RtkCardTone => {
+  if (fixType >= 6) {
+    return {
+      accent: '#4ADE80',
+      panelBg: 'rgba(20, 83, 45, 0.94)',
+      panelBorder: 'rgba(74, 222, 128, 0.72)',
+      innerBg: 'rgba(6, 78, 59, 0.55)',
+      innerBorder: 'rgba(134, 239, 172, 0.28)',
+    };
+  }
+  if (fixType === 5) {
+    return {
+      accent: '#FBBF24',
+      panelBg: 'rgba(120, 53, 15, 0.94)',
+      panelBorder: 'rgba(251, 191, 36, 0.76)',
+      innerBg: 'rgba(120, 53, 15, 0.56)',
+      innerBorder: 'rgba(253, 230, 138, 0.28)',
+    };
+  }
+  if (fixType === 4) {
+    return {
+      accent: '#FB923C',
+      panelBg: 'rgba(124, 45, 18, 0.94)',
+      panelBorder: 'rgba(251, 146, 60, 0.76)',
+      innerBg: 'rgba(124, 45, 18, 0.56)',
+      innerBorder: 'rgba(254, 215, 170, 0.28)',
+    };
+  }
+  if (fixType === 3) {
+    return {
+      accent: '#F87171',
+      panelBg: 'rgba(127, 29, 29, 0.94)',
+      panelBorder: 'rgba(248, 113, 113, 0.76)',
+      innerBg: 'rgba(127, 29, 29, 0.56)',
+      innerBorder: 'rgba(254, 202, 202, 0.28)',
+    };
+  }
+  return {
+    accent: PATH_PLAN_GLASS.cyan,
+    panelBg: PATH_PLAN_GLASS.panelBg,
+    panelBorder: PATH_PLAN_GLASS.border,
+    innerBg: PATH_PLAN_GLASS.innerBg,
+    innerBorder: PATH_PLAN_GLASS.borderSubtle,
+  };
+};
+
 const getRtkColor = (telemetry: any): string => {
-  if (!telemetry) return colors.danger;
-  const fixType = telemetry.rtk?.fix_type ?? 0;
-  if (fixType >= 5) return colors.success;
-  if (fixType >= 3) return colors.warning;
-  return colors.danger;
+  const fixType = telemetry?.rtk?.fix_type ?? 0;
+  return getRtkCardTone(fixType).accent;
 };
 
 const getBatteryColor = (telemetry: any): string => {
@@ -106,6 +158,7 @@ export const VehicleStatusCard: React.FC<Props> = ({
     resolveVehicleConnectionState(isConnected, dataStale, socketTransport);
 
   const rtkColor = useDebouncedColor(() => getRtkColor(telemetry), telemetry?.rtk?.fix_type);
+  const rtkTone = getRtkCardTone(telemetry?.rtk?.fix_type ?? 0);
   const batteryColor = useDebouncedColor(() => getBatteryColor(telemetry), telemetry?.battery?.percentage);
   const hrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.hrms ?? 0), (telemetry as any)?.hrms);
   const vrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.vrms ?? 0), (telemetry as any)?.vrms);
@@ -123,12 +176,27 @@ export const VehicleStatusCard: React.FC<Props> = ({
   ];
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: rtkTone.panelBg,
+          borderColor: rtkTone.panelBorder,
+        },
+      ]}
+      accessibilityLabel={`Robot status. RTK fix type ${telemetry?.rtk?.fix_type ?? 0}`}
+    >
       <OptionalGestureDetector gesture={dragGesture}>
-        <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
+        <View
+          style={[
+            styles.header,
+            { borderBottomColor: rtkTone.innerBorder },
+            isDraggingActive && styles.headerDragging,
+          ]}
+        >
           <View style={styles.headerLeft}>
-            <View style={styles.headerIconWrap}>
-              <Ionicons name="hardware-chip" size={14} color={PATH_PLAN_GLASS.cyan} />
+            <View style={[styles.headerIconWrap, { backgroundColor: `${rtkTone.accent}20` }]}>
+              <Ionicons name="hardware-chip" size={14} color={rtkTone.accent} />
             </View>
             <Text style={styles.headerTitle}>ROBOT STATUS</Text>
             <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
@@ -144,7 +212,13 @@ export const VehicleStatusCard: React.FC<Props> = ({
         </View>
       </OptionalGestureDetector>
 
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={[
+          styles.list,
+          { backgroundColor: rtkTone.innerBg, borderColor: rtkTone.innerBorder },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {rows.map((row, idx) => (
           <View key={row.key} style={[styles.row, idx === rows.length - 1 && styles.rowLast]}>
             <View style={styles.rowLeft}>

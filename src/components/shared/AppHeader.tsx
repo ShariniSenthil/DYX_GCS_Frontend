@@ -13,6 +13,7 @@ import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import { SettingsScreen } from "../../screens/SettingsScreen";
 import { useRover } from "../../context/RoverContext";
 import { useConnection } from "../../context/ConnectionContext";
+import { useLiveTelemetrySelector } from "../../context/liveTelemetryStore";
 import { getBackendURL } from "../../config";
 import { ModeSelectionDialog } from "../pathplan/ModeSelectionDialog";
 import { DashConfigDialog } from "../pathplan/DashConfigDialog";
@@ -79,11 +80,48 @@ const VEHICLE_STATUS_CARD_HEIGHT = 345;
 const WIDGET_DROPDOWN_TOP = MISSION_PROGRESS_LAYOUT.HEADER_CLEARANCE;
 const WIDGET_DROPDOWN_LEFT = MISSION_PROGRESS_LAYOUT.EDGE;
 
+type RtkHeaderTone = {
+  accent: string;
+  surface: string;
+  border: string;
+  divider: string;
+  buttonSurface: string;
+  title: string;
+  muted: string;
+};
+
+/**
+ * RTK fix types follow the GPS convention used by the rover telemetry:
+ * 6 = RTK fixed, 5 = RTK float, 4 = DGPS, 3 = GPS 3D fix.
+ */
+const getRtkHeaderTone = (fixType: number, isLightMode = false): RtkHeaderTone => {
+  const quality = fixType >= 6 ? "fixed" : fixType === 5 ? "float" : fixType === 4 ? "dgps" : fixType === 3 ? "3d" : "neutral";
+
+  const tones = isLightMode
+    ? {
+        fixed: { accent: "#15803D", surface: "#DCFCE7", border: "#4ADE80", divider: "#86EFAC", buttonSurface: "rgba(255,255,255,0.72)", title: "#14532D", muted: "#166534" },
+        float: { accent: "#B45309", surface: "#FEF3C7", border: "#FBBF24", divider: "#FCD34D", buttonSurface: "rgba(255,255,255,0.72)", title: "#78350F", muted: "#92400E" },
+        dgps: { accent: "#C2410C", surface: "#FFEDD5", border: "#FB923C", divider: "#FDBA74", buttonSurface: "rgba(255,255,255,0.72)", title: "#7C2D12", muted: "#9A3412" },
+        "3d": { accent: "#B91C1C", surface: "#FEE2E2", border: "#F87171", divider: "#FCA5A5", buttonSurface: "rgba(255,255,255,0.72)", title: "#7F1D1D", muted: "#991B1B" },
+        neutral: { accent: PATH_PLAN_GLASS.cyan, surface: "rgba(255,255,255,0.96)", border: "#CBD5E1", divider: "#CBD5E1", buttonSurface: "#F8FAFC", title: "#0F172A", muted: "#475569" },
+      }
+    : {
+        fixed: { accent: "#4ADE80", surface: "rgba(20, 83, 45, 0.94)", border: "rgba(74, 222, 128, 0.72)", divider: "rgba(134, 239, 172, 0.38)", buttonSurface: "rgba(255,255,255,0.10)", title: "#F0FDF4", muted: "#BBF7D0" },
+        float: { accent: "#FBBF24", surface: "rgba(120, 53, 15, 0.94)", border: "rgba(251, 191, 36, 0.76)", divider: "rgba(253, 230, 138, 0.38)", buttonSurface: "rgba(255,255,255,0.10)", title: "#FFFBEB", muted: "#FDE68A" },
+        dgps: { accent: "#FB923C", surface: "rgba(124, 45, 18, 0.94)", border: "rgba(251, 146, 60, 0.76)", divider: "rgba(254, 215, 170, 0.38)", buttonSurface: "rgba(255,255,255,0.10)", title: "#FFF7ED", muted: "#FED7AA" },
+        "3d": { accent: "#F87171", surface: "rgba(127, 29, 29, 0.94)", border: "rgba(248, 113, 113, 0.76)", divider: "rgba(254, 202, 202, 0.38)", buttonSurface: "rgba(255,255,255,0.10)", title: "#FEF2F2", muted: "#FECACA" },
+        neutral: { accent: PATH_PLAN_GLASS.cyan, surface: PATH_PLAN_GLASS.panelBg, border: PATH_PLAN_GLASS.border, divider: PATH_PLAN_GLASS.border, buttonSurface: "rgba(255, 255, 255, 0.04)", title: PATH_PLAN_GLASS.title, muted: PATH_PLAN_GLASS.muted },
+      };
+
+  return tones[quality];
+};
+
 const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, onToggleTheme }) => {
-  // Only destructure what AppHeader actually uses — not telemetry.
-  // Note: useRover() still triggers re-renders on every telemetry tick because
-  // it subscribes to the full context. Phase 2 (context split) will fix this.
   const { missionMode, setMissionMode } = useRover();
+  // Subscribe to exactly one primitive, so RTK colour changes do not make the
+  // header re-render for every position, battery, or IMU telemetry update.
+  const rtkFixType = useLiveTelemetrySelector((snapshot) => snapshot.telemetry.rtk?.fix_type ?? 0);
+  const rtkTone = getRtkHeaderTone(rtkFixType, isLightMode);
   const { connectionState, socketTransport, reconnect } = useConnection();
   const roverHost = getBackendURL().replace(/^https?:\/\//, "") || "no rover";
   const wsOnline = connectionState === "connected" && socketTransport === "websocket";
@@ -293,7 +331,13 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
       </View>
 
       {/* Right: Settings and Mode Unified Capsule */}
-      <View style={styles.rightSection}>
+      <View
+        style={[
+          styles.rightSection,
+          { backgroundColor: rtkTone.surface, borderColor: rtkTone.border },
+        ]}
+        accessibilityLabel={`RTK status controls. Fix type ${rtkFixType}`}
+      >
         <TouchableOpacity
           onPress={reconnect}
           style={styles.wsChip}
@@ -304,13 +348,13 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
           <View style={[styles.wsDot, { backgroundColor: wsColor }]} />
           <View>
             <Text style={[styles.wsLabel, { color: wsColor }]}>{wsLabel}</Text>
-            <Text style={styles.wsHost} numberOfLines={1}>
+            <Text style={[styles.wsHost, { color: rtkTone.muted }]} numberOfLines={1}>
               {roverHost}
             </Text>
           </View>
         </TouchableOpacity>
 
-        <View style={styles.rightDivider} />
+        <View style={[styles.rightDivider, { backgroundColor: rtkTone.divider }]} />
 
         {/* Mode Selector Button */}
         <TouchableOpacity
@@ -320,7 +364,7 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
           accessibilityLabel="Change mission mode"
           accessibilityRole="button"
         >
-          <Text style={styles.modeCapsuleLabel}>MODE</Text>
+          <Text style={[styles.modeCapsuleLabel, { color: rtkTone.muted }]}>MODE</Text>
           <View
             style={{
               flexDirection: "row",
@@ -329,17 +373,17 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
               marginTop: 1,
             }}
           >
-            <MaterialCommunityIcons name="near-me" size={12} color={PATH_PLAN_GLASS.cyan} />
-            <Text style={styles.modeCapsuleValue}>{missionMode}</Text>
+            <MaterialCommunityIcons name="near-me" size={12} color={rtkTone.accent} />
+            <Text style={[styles.modeCapsuleValue, { color: rtkTone.title }]}>{missionMode}</Text>
           </View>
         </TouchableOpacity>
 
-        <View style={styles.rightDivider} />
+        <View style={[styles.rightDivider, { backgroundColor: rtkTone.divider }]} />
 
         {/* Theme Toggle Button */}
         <TouchableOpacity
           onPress={onToggleTheme}
-          style={styles.settingsCapsuleBtn}
+          style={[styles.settingsCapsuleBtn, { backgroundColor: rtkTone.buttonSurface }]}
           accessibilityLabel="Toggle Theme"
           accessibilityRole="button"
           activeOpacity={0.7}
@@ -347,14 +391,14 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
           <MaterialCommunityIcons
             name={isLightMode ? "weather-night" : "white-balance-sunny"}
             size={18}
-            color={PATH_PLAN_GLASS.title}
+            color={rtkTone.title}
           />
         </TouchableOpacity>
 
         {/* Settings Button */}
         <TouchableOpacity
           onPress={() => setShowSettings(true)}
-          style={styles.settingsCapsuleBtn}
+          style={[styles.settingsCapsuleBtn, { backgroundColor: rtkTone.buttonSurface }]}
           accessibilityLabel="Open settings"
           accessibilityRole="button"
           activeOpacity={0.7}
@@ -362,7 +406,7 @@ const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, 
           <MaterialCommunityIcons
             name="cog-outline"
             size={18}
-            color={PATH_PLAN_GLASS.title}
+            color={rtkTone.title}
           />
         </TouchableOpacity>
       </View>

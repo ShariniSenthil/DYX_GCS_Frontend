@@ -102,6 +102,7 @@ import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
   loadMission,
+  clearMission,
   getMissionStatus,
   getMissionHistory,
   restoreMission,
@@ -444,6 +445,7 @@ export default function PathPlanScreen({
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
   const [isReloadPreparing, setIsReloadPreparing] = useState(false);
   const [isAutoTrajectoryUpdating, setIsAutoTrajectoryUpdating] = useState(false);
+  const [isClearingControllerMission, setIsClearingControllerMission] = useState(false);
   const autoTrajectoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -2579,6 +2581,80 @@ export default function PathPlanScreen({
     }
   }
 
+  const missionIsRunning = [
+    "running",
+    "paused",
+    "arming",
+    "switching_offboard",
+    "loading",
+    "stopping",
+  ].includes(String(telemetry.mission?.status ?? "").toLowerCase());
+  const canClearControllerMission =
+    preview.missionId !== null &&
+    !roverUploadBlockedReason &&
+    !missionIsRunning &&
+    !isClearingControllerMission;
+
+  const handleClearControllerMission = useCallback(() => {
+    if (roverUploadBlockedReason) {
+      Alert.alert("Connect Rover", roverUploadBlockedReason);
+      return;
+    }
+
+    if (missionIsRunning) {
+      Alert.alert(
+        "Mission Is Active",
+        "Stop the mission before clearing its controller trajectory.",
+      );
+      return;
+    }
+
+    if (!preview.missionId) {
+      return;
+    }
+
+    Alert.alert(
+      "Clear Loaded Mission?",
+      "This removes the prepared rover trajectory and resets mission progress. Your marking points and uploaded mission file are kept, so you can prepare and load the mission again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setIsClearingControllerMission(true);
+              try {
+                const result = await clearMission();
+                if (!result.success) {
+                  throw new Error(result.message || "The rover could not clear the mission.");
+                }
+                await refreshNow();
+                showPathPlanToast(
+                  "success",
+                  "Mission Cleared",
+                  "Controller trajectory and progress were cleared. Marking points were kept.",
+                  4500,
+                );
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                showPathPlanToast("error", "Clear Failed", message, 5000);
+              } finally {
+                if (mountedRef.current) setIsClearingControllerMission(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [
+    missionIsRunning,
+    preview.missionId,
+    refreshNow,
+    roverUploadBlockedReason,
+    showPathPlanToast,
+  ]);
+
   function handleUpdateTrajectory(): void {
     if (roverUploadBlockedReason) {
       Alert.alert("Connect Rover", roverUploadBlockedReason);
@@ -3766,6 +3842,9 @@ export default function PathPlanScreen({
                   loadVisible={canDrawBackendLine(preview) && preview.missionId !== null}
                   loadAgain={preview.acceptedForStart}
                   loadPreparing={isReloadPreparing}
+                  onClearMission={handleClearControllerMission}
+                  clearEnabled={canClearControllerMission}
+                  clearInProgress={isClearingControllerMission}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}
