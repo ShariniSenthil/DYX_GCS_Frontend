@@ -4,7 +4,6 @@ import { View, Text, StyleSheet } from "react-native";
 import { OptionalGestureDetector } from "../shared/OptionalGestureDetector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
-import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
 import { liveDataStateLabel, type LiveDataState } from "../../utils/liveDataState";
 
 interface Props {
@@ -97,17 +96,9 @@ export const DistanceToTargetCard: React.FC<Props> = ({
   const isLive = resolvedDataState === "live";
   const displayedAccuracy = isLive ? validAccuracy : null;
 
-  // Presentation-only smoothing. The raw accuracy remains available to
-  // the mission lifecycle and accuracy pass/fail logic.
-  const smoothedAccuracy = useSmoothedDisplayValue(displayedAccuracy, {
-    timeConstantMs: 280,
-    maxJump: 2_000,
-    settleEpsilon: 0.15,
-  });
-
   const accuracyText = useMemo(
-    () => formatMillimetres(smoothedAccuracy),
-    [smoothedAccuracy],
+    () => formatMillimetres(displayedAccuracy),
+    [displayedAccuracy],
   );
 
   const statusText = isLive

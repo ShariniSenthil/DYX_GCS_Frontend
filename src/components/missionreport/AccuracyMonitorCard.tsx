@@ -4,7 +4,6 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
-import { useSmoothedDisplayValue } from "../../hooks/useSmoothedDisplayValue";
 import { liveDataStateLabel, type LiveDataState } from "../../utils/liveDataState";
 
 interface AccuracyMonitorCardProps {
@@ -44,7 +43,7 @@ interface AccuracyMonitorCardProps {
   onClose?: () => void;
 }
 
-function getValidMillimetres(value: number | null | undefined): number | null {
+function getFiniteValue(value: number | null | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
   }
@@ -114,12 +113,12 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 }) => {
   useRenderCounter("AccuracyMonitorCard");
   const rawAlongSide = useMemo(
-    () => getValidMillimetres(alongSideMm),
+    () => getFiniteValue(alongSideMm),
     [alongSideMm],
   );
 
   const rawCrossTrack = useMemo(
-    () => getValidMillimetres(crossTrackMm),
+    () => getFiniteValue(crossTrackMm),
     [crossTrackMm],
   );
 
@@ -162,39 +161,16 @@ export const AccuracyMonitorCard: React.FC<AccuracyMonitorCardProps> = ({
 
   const crossTrackLive = acceptsLiveData && validCrossTrack !== null;
 
-  // Display smoothing is intentionally local to this panel. Mission control
-  // continues to receive the unsmoothed telemetry values.
-  const displayAlongSide = useSmoothedDisplayValue(validAlongSide, {
-    timeConstantMs: 240,
-    maxJump: 2_000,
-    settleEpsilon: 0.15,
-  });
-  const displayCrossTrack = useSmoothedDisplayValue(validCrossTrack, {
-    timeConstantMs: 240,
-    maxJump: 2_000,
-    settleEpsilon: 0.15,
-  });
-  const displayActualSpeed = useSmoothedDisplayValue(acceptsLiveData ? actualSpeedMps : null, {
-    timeConstantMs: 220,
-    maxJump: 4,
-    settleEpsilon: 0.005,
-  });
-  const displayTargetHeading = useSmoothedDisplayValue(acceptsLiveData ? targetHeadingDeg : null, {
-    timeConstantMs: 220,
-    maxJump: 120,
-    settleEpsilon: 0.05,
-    circular: true,
-  });
-  const displayHeadingError = useSmoothedDisplayValue(acceptsLiveData ? headingErrorDeg : null, {
-    timeConstantMs: 220,
-    maxJump: 90,
-    settleEpsilon: 0.05,
-  });
-  const displayDistanceToGoal = useSmoothedDisplayValue(acceptsLiveData ? distanceToGoalM : null, {
-    timeConstantMs: 260,
-    maxJump: 10,
-    settleEpsilon: 0.01,
-  });
+  // Render the latest sample directly so the readouts do not lag live telemetry.
+  const displayAlongSide = validAlongSide;
+  const displayCrossTrack = validCrossTrack;
+  const displayActualSpeed = acceptsLiveData ? getFiniteValue(actualSpeedMps) : null;
+  const validTargetHeading = acceptsLiveData ? getFiniteValue(targetHeadingDeg) : null;
+  const displayTargetHeading = validTargetHeading === null
+    ? null
+    : ((validTargetHeading % 360) + 360) % 360;
+  const displayHeadingError = acceptsLiveData ? getFiniteValue(headingErrorDeg) : null;
+  const displayDistanceToGoal = acceptsLiveData ? getFiniteValue(distanceToGoalM) : null;
 
   const alongSideText = useMemo(
     () => formatMillimetres(acceptsLiveData ? displayAlongSide : null),
