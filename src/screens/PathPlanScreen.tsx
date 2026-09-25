@@ -102,7 +102,7 @@ import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
   loadMission,
-  clearMission,
+  deleteMissionCsv,
   getMissionStatus,
   getMissionHistory,
   restoreMission,
@@ -412,6 +412,7 @@ export default function PathPlanScreen({
     roverPosition,
     missionWaypoints,
     setMissionWaypoints,
+    clearMissionWaypoints,
     gpsFailsafeMode,
     setGpsFailsafeMode,
     gpsFailsafeStatus,
@@ -488,12 +489,17 @@ export default function PathPlanScreen({
   };
 
   // Poll servo config, but pause when app is backgrounded to avoid unnecessary
-  // network requests and state updates that trigger re-renders.
+  // network requests and state updates that trigger re-renders. The visibility
+  // guard also covers embedded/retained uses of this screen.
   useEffect(() => {
     const { AppState } = require("react-native");
 
     let interval: ReturnType<typeof setInterval> | null = null;
     let appStateSubscription: any = null;
+
+    if (!isVisible) {
+      return undefined;
+    }
 
     const fetchServoConfig = async () => {
       try {
@@ -539,7 +545,7 @@ export default function PathPlanScreen({
       stopPolling();
       appStateSubscription?.remove();
     };
-  }, [services]);
+  }, [isVisible, services]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -645,7 +651,7 @@ export default function PathPlanScreen({
   );
 
   // Undo/Redo history — wraps updateWaypoints for all user-initiated changes
-  const { undo, redo, canUndo, canRedo, recordAndApply } = useWaypointHistory(
+  const { undo, redo, canUndo, canRedo, recordAndApply, resetHistory } = useWaypointHistory(
     waypoints,
     updateWaypoints,
   );
@@ -956,7 +962,7 @@ export default function PathPlanScreen({
 
   // Listen for GPS Failsafe servo_suppressed events
   useEffect(() => {
-    if (!socket) return;
+    if (!isVisible || !socket) return;
 
     const handleServoSuppressed = (event: any) => {
       console.log(
@@ -1002,7 +1008,7 @@ export default function PathPlanScreen({
         "[PathPlanScreen] 🔇 Stopped listening for servo_suppressed events",
       );
     };
-  }, [socket, gpsFailsafeMode]);
+  }, [isVisible, socket, gpsFailsafeMode]);
 
   // Consolidated auto-save using refs to prevent multiple useEffect triggers
   // This prevents infinite loops from cascading state updates
@@ -2589,14 +2595,15 @@ export default function PathPlanScreen({
     "loading",
     "stopping",
   ].includes(String(telemetry.mission?.status ?? "").toLowerCase());
+  const hasControllerMission = preview.missionId !== null;
   const canClearControllerMission =
-    preview.missionId !== null &&
-    !roverUploadBlockedReason &&
+    (hasControllerMission || waypoints.length > 0) &&
     !missionIsRunning &&
-    !isClearingControllerMission;
+    !isClearingControllerMission &&
+    (!hasControllerMission || !roverUploadBlockedReason);
 
   const handleClearControllerMission = useCallback(() => {
-    if (roverUploadBlockedReason) {
+    if (roverUploadBlockedReason && hasControllerMission) {
       Alert.alert("Connect Rover", roverUploadBlockedReason);
       return;
     }
@@ -2604,18 +2611,18 @@ export default function PathPlanScreen({
     if (missionIsRunning) {
       Alert.alert(
         "Mission Is Active",
-        "Stop the mission before clearing its controller trajectory.",
+        "Stop the mission before deleting it.",
       );
       return;
     }
 
-    if (!preview.missionId) {
+    if (!hasControllerMission && waypoints.length === 0) {
       return;
     }
 
     Alert.alert(
-      "Clear Loaded Mission?",
-      "This removes the prepared rover trajectory and resets mission progress. Your marking points and uploaded mission file are kept, so you can prepare and load the mission again.",
+      "Delete Mission?",
+      "This permanently removes the controller mission, trajectory preview, marking points, and local mission data. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2625,15 +2632,24 @@ export default function PathPlanScreen({
             void (async () => {
               setIsClearingControllerMission(true);
               try {
-                const result = await clearMission();
-                if (!result.success) {
-                  throw new Error(result.message || "The rover could not clear the mission.");
+                if (hasControllerMission) {
+                  const result = await deleteMissionCsv();
+                  if (!result.success) {
+                    throw new Error(result.message || "The rover could not delete the mission.");
+                  }
                 }
+                await clearMissionWaypoints();
+                resetHistory();
+                setSelectedWaypoint(null);
+                setEditingWaypoint(null);
+                setShowEditDialog(false);
+                setShowUploadPreview(false);
+                setShowManualConnectionCanvas(false);
                 await refreshNow();
                 showPathPlanToast(
                   "success",
-                  "Mission Cleared",
-                  "Controller trajectory and progress were cleared. Marking points were kept.",
+                  "Mission Deleted",
+                  "The mission, trajectory preview, and marking points were removed.",
                   4500,
                 );
               } catch (error) {
@@ -2649,10 +2665,15 @@ export default function PathPlanScreen({
     );
   }, [
     missionIsRunning,
-    preview.missionId,
+    hasControllerMission,
+    clearMissionWaypoints,
     refreshNow,
+    resetHistory,
     roverUploadBlockedReason,
+    setShowManualConnectionCanvas,
+    setShowUploadPreview,
     showPathPlanToast,
+    waypoints.length,
   ]);
 
   function handleUpdateTrajectory(): void {

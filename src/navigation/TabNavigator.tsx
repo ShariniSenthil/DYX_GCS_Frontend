@@ -20,13 +20,8 @@ const MemoMissionReportScreen = React.memo(MissionReportScreen);
 
 type TabName = "Dashboard" | "Marking Plan" | "Mission Progress";
 
-const MAP_TABS: TabName[] = ["Marking Plan", "Mission Progress"];
-
 function TabNavigatorInner() {
   const [activeTab, setActiveTab] = useState<TabName>("Mission Progress");
-  const [mountedTabs, setMountedTabs] = useState<Set<string>>(
-    new Set(MAP_TABS),
-  );
   const previousTabRef = useRef<string>("Mission Progress");
   const mountedRef = useRef(true);
   const { setActiveSurface } = useFieldMap();
@@ -41,14 +36,6 @@ function TabNavigatorInner() {
           lastTab === "Mission Progress"
         ) {
           setActiveTab(lastTab);
-          setMountedTabs((prev) => {
-            const next = new Set(prev);
-            next.add(lastTab);
-            if (lastTab !== "Dashboard") {
-              MAP_TABS.forEach((tab) => next.add(tab));
-            }
-            return next;
-          });
           previousTabRef.current = lastTab;
         }
       } catch (error) {
@@ -70,13 +57,6 @@ function TabNavigatorInner() {
         return;
       }
 
-      setMountedTabs((prev) => {
-        const next = new Set(prev).add(newTab);
-        if (newTab === "Marking Plan" || newTab === "Mission Progress") {
-          MAP_TABS.forEach((tab) => next.add(tab));
-        }
-        return next;
-      });
       setActiveTab(newTab);
 
       PersistentStorage.saveActiveTab(newTab).catch((error) => {
@@ -136,7 +116,7 @@ function TabNavigatorInner() {
             </View>
           )}
 
-          {mountedTabs.has("Dashboard") && (
+          {activeTab === "Dashboard" && (
             <View
               style={[
                 styles.screen,
@@ -154,7 +134,7 @@ function TabNavigatorInner() {
             </View>
           )}
 
-          {mountedTabs.has("Marking Plan") && (
+          {isMarkingPlanVisible && (
             <View
               style={[
                 styles.overlayScreen,
@@ -186,7 +166,7 @@ function TabNavigatorInner() {
             </View>
           )}
 
-          {mountedTabs.has("Mission Progress") && (
+          {isMissionProgressVisible && (
             <View
               style={[
                 styles.overlayScreen,
