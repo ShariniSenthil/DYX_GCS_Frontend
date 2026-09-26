@@ -1980,6 +1980,8 @@ export default function MissionReportScreen({
       const decision = decideMissionRtkQuickStart({
         connected: connectionState === "connected",
         activeProfileId: view.activeProfileId,
+        correctionSource: view.correctionSource,
+        loraConfigured: view.loraConfigured,
       });
 
       if (decision === "offline") {

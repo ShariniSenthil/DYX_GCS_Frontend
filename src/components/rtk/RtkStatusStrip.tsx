@@ -42,6 +42,27 @@ function asText(value: unknown): string {
   return "—";
 }
 
+function lastPathPart(path: string | null | undefined): string {
+  if (!path) {
+    return "no port";
+  }
+  const parts = path.split("/");
+  return parts[parts.length - 1] || path;
+}
+
+function sourceText(view: RtkControlViewModel): string {
+  if (view.correctionSource === "LORA") {
+    const lora = view.sourceSettings;
+    return `LoRa · ${lastPathPart(lora?.lora_serial_device)} @ ${
+      lora?.lora_serial_baud ?? "—"
+    }`;
+  }
+  if (view.correctionSource === "NTRIP") {
+    return `NTRIP · ${view.activeProfile?.mountpoint ?? "no active profile"}`;
+  }
+  return "—";
+}
+
 export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
   const color = toneColor(view.tone);
 
@@ -56,6 +77,7 @@ export const RtkStatusStrip: React.FC<Props> = ({ view }) => {
       </View>
 
       <View style={styles.grid}>
+        <Metric label="Source" value={sourceText(view)} />
         <Metric label="Corrections" value={asText(view.correctionState)} />
         <Metric label="Correction age" value={formatAge(view.correctionAgeSec)} />
         <Metric

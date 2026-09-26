@@ -126,6 +126,10 @@ export interface RtkProfile {
   gga_max_age_sec: number;
   tls_mode: RtkTlsMode;
   max_mavros_rtcm_frame_bytes: number;
+  /** Sent by the backend; used to pre-fill LoRa's receiver output port. */
+  direct_inject?: boolean;
+  direct_serial_device?: string | null;
+  direct_serial_baud?: number;
   enabled: boolean;
   revision: number;
   created_at_epoch: number;
@@ -356,6 +360,64 @@ export interface RtkGnssSolution {
   vdop: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Correction source (rover_ws feat/rtk-lora-source 804b2bb)
+// ---------------------------------------------------------------------------
+
+/** Global RTCM correction source. NTRIP is the backend default. */
+export const RTK_CORRECTION_SOURCES = ["NTRIP", "LORA"] as const;
+export type RtkCorrectionSourceName = (typeof RTK_CORRECTION_SOURCES)[number];
+
+/** GET/PUT /api/rtk/source `correction_source` object. */
+export interface RtkCorrectionSource {
+  source: RtkCorrectionSourceName;
+  lora_serial_device: string | null;
+  lora_serial_baud: number;
+  /** true = write RTCM straight to the GNSS receiver port; false = MAVROS. */
+  lora_direct_inject: boolean;
+  lora_direct_serial_device: string | null;
+  lora_direct_serial_baud: number;
+  revision: number;
+  updated_at: number;
+}
+
+/**
+ * PUT /api/rtk/source body. Omitted fields keep their stored value; an
+ * explicit null clears a port. While RTK is RUNNING the backend restarts the
+ * worker on a changed source, and rejects a change that could not start.
+ */
+export interface RtkCorrectionSourceUpdateRequest {
+  source?: RtkCorrectionSourceName;
+  lora_serial_device?: string | null;
+  lora_serial_baud?: number;
+  lora_direct_inject?: boolean;
+  lora_direct_serial_device?: string | null;
+  lora_direct_serial_baud?: number;
+}
+
+export interface RtkCorrectionSourceResponse {
+  correction_source: RtkCorrectionSource;
+}
+
+/** `gnss_receiver` = Septentrio port (correction output); `other` = radio. */
+export type RtkSerialPortRole = "gnss_receiver" | "other";
+
+/** GET /api/rtk/serial-ports item. The flight controller is never listed. */
+export interface RtkSerialPort {
+  path: string;
+  device: string;
+  label: string;
+  role: RtkSerialPortRole | string;
+}
+
+export interface RtkSerialPortsResponse {
+  ports: RtkSerialPort[];
+}
+
+export const RTK_LORA_BAUD_OPTIONS = [
+  9600, 19200, 38400, 57600, 115200, 230400,
+] as const;
+
 /** Inner `status` object of GET /api/rtk/status. */
 export interface RtkStatus {
   persisted: RtkPersistedRuntimeState;
@@ -363,6 +425,8 @@ export interface RtkStatus {
   runtime: RtkRuntimeSnapshot;
   correction_stream: RtkCorrectionStream;
   gnss_solution: RtkGnssSolution;
+  /** Absent on backends older than feat/rtk-lora-source (treat as NTRIP). */
+  correction_source?: RtkCorrectionSource;
 }
 
 /** Exact GET /api/rtk/status HTTP body. */
@@ -396,9 +460,10 @@ export interface RtkParsedApiError {
 }
 
 /**
- * Deprecated RoverServices compatibility types. LoRa is not part of the
- * production RTK API. These exist only so the telemetry service object still
- * typechecks; they are not a runtime NTRIP authority.
+ * Deprecated RoverServices compatibility types from the legacy RTK service,
+ * kept only so the telemetry service object still typechecks. Production
+ * LoRa is the backend correction source above (RtkCorrectionSource), not
+ * these.
  */
 export type LoraRTKStatusState =
   | "connecting"

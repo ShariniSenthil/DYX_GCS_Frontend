@@ -12,6 +12,9 @@
  *   GET    /api/rtk/status
  *   POST   /api/rtk/start
  *   POST   /api/rtk/stop
+ *   GET    /api/rtk/source          (feat/rtk-lora-source)
+ *   PUT    /api/rtk/source
+ *   GET    /api/rtk/serial-ports
  *
  * POST /start acknowledges desired RUNNING intent only.
  * It does not mean corrections are healthy or GNSS is RTK FIXED.
@@ -25,6 +28,7 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPut,
 } from "./apiClient";
 import { ApiError, NetworkError } from "./apiError";
 import { PX4_RTK } from "../config/px4Endpoints";
@@ -32,6 +36,9 @@ import type {
   FastApiErrorBody,
   RtkActivateResponse,
   RtkApiErrorDetail,
+  RtkCorrectionSource,
+  RtkCorrectionSourceResponse,
+  RtkCorrectionSourceUpdateRequest,
   RtkIntentResponse,
   RtkParsedApiError,
   RtkProfile,
@@ -40,6 +47,8 @@ import type {
   RtkProfileListResponse,
   RtkProfileResponse,
   RtkProfileUpdateRequest,
+  RtkSerialPort,
+  RtkSerialPortsResponse,
   RtkStatusResponse,
 } from "../types/rtk";
 
@@ -200,6 +209,31 @@ export async function stopRtk(): Promise<RtkIntentResponse> {
   return apiPost<RtkIntentResponse>(PX4_RTK.STOP);
 }
 
+export async function getRtkCorrectionSource(): Promise<RtkCorrectionSource> {
+  const response = await apiGet<RtkCorrectionSourceResponse>(PX4_RTK.SOURCE);
+  return response.correction_source;
+}
+
+/**
+ * Save the correction source. While RTK is RUNNING the backend restarts the
+ * worker on the new source; this call resolving does not mean corrections
+ * are healthy — read GET /api/rtk/status for that.
+ */
+export async function updateRtkCorrectionSource(
+  dto: RtkCorrectionSourceUpdateRequest,
+): Promise<RtkCorrectionSource> {
+  const response = await apiPut<RtkCorrectionSourceResponse>(
+    PX4_RTK.SOURCE,
+    dto,
+  );
+  return response.correction_source;
+}
+
+export async function listRtkSerialPorts(): Promise<RtkSerialPort[]> {
+  const response = await apiGet<RtkSerialPortsResponse>(PX4_RTK.SERIAL_PORTS);
+  return Array.isArray(response?.ports) ? response.ports : [];
+}
+
 export default {
   listRtkProfiles,
   getRtkProfile,
@@ -211,6 +245,9 @@ export default {
   getRtkStatus,
   startRtk,
   stopRtk,
+  getRtkCorrectionSource,
+  updateRtkCorrectionSource,
+  listRtkSerialPorts,
   buildRtkProfileUpdateBody,
   parseRtkApiError,
   formatRtkApiError,

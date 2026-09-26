@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,8 +9,10 @@ import {
   View,
 } from "react-native";
 
+import { RtkLoraSettings } from "../rtk/RtkLoraSettings";
 import { RtkProfileEditor } from "../rtk/RtkProfileEditor";
 import { RtkProfileList } from "../rtk/RtkProfileList";
+import { RtkSourceSelector } from "../rtk/RtkSourceSelector";
 import { RtkStatusStrip } from "../rtk/RtkStatusStrip";
 import { useRtkControl } from "../../hooks/useRtkControl";
 import {
@@ -19,6 +21,7 @@ import {
   type RtkLocalProfileSummary,
 } from "../../services/rtkLocalMigration";
 import type { RoverServices } from "../../hooks/useRoverTelemetry";
+import type { RtkCorrectionSourceName } from "../../types/rtk";
 import { colors } from "../../theme/colors";
 
 interface Props {
@@ -48,6 +51,53 @@ export const RTKInjectionScreen: React.FC<Props> = ({
   const [localProfiles, setLocalProfiles] =
     useState<RtkLocalProfileSummary[]>([]);
   const [importing, setImporting] = useState(false);
+  // Which settings panel is shown. Follows the saved backend source until the
+  // operator picks a panel; viewing never changes the backend by itself.
+  const [viewingSource, setViewingSource] =
+    useState<RtkCorrectionSourceName>("NTRIP");
+  const viewPickedRef = useRef(false);
+  const savedSource = control.view.correctionSource;
+  const { loadSerialPorts } = control;
+
+  useEffect(() => {
+    if (!visible) {
+      viewPickedRef.current = false;
+      return;
+    }
+    if (!viewPickedRef.current && savedSource) {
+      setViewingSource(savedSource);
+    }
+  }, [savedSource, visible]);
+
+  useEffect(() => {
+    if (visible && isConnected && viewingSource === "LORA") {
+      void loadSerialPorts();
+    }
+  }, [isConnected, loadSerialPorts, viewingSource, visible]);
+
+  const handleViewSource = (source: RtkCorrectionSourceName) => {
+    viewPickedRef.current = true;
+    setViewingSource(source);
+  };
+
+  const handleUseNtrip = () => {
+    const running = control.view.desiredState === "RUNNING";
+    Alert.alert(
+      "Use NTRIP for RTK corrections?",
+      running
+        ? "RTK is running on LoRa. It will restart on the active NTRIP profile now, and NTRIP will also start on every boot. Corrections pause for a few seconds."
+        : "NTRIP becomes the saved correction source and is used whenever RTK starts, including after a reboot.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm",
+          onPress: () => {
+            void control.updateCorrectionSource({ source: "NTRIP" });
+          },
+        },
+      ],
+    );
+  };
 
   const loadLocal = useCallback(async () => {
     try {
@@ -177,6 +227,61 @@ export const RTKInjectionScreen: React.FC<Props> = ({
               <Text style={styles.loadingText}>Loading backend RTK state…</Text>
             </View>
           ) : (
+            <>
+            <RtkSourceSelector
+              viewing={viewingSource}
+              savedSource={savedSource}
+              disabled={controlsBusy}
+              onView={handleViewSource}
+            />
+            {viewingSource === "LORA" ? (
+              <View style={styles.body}>
+                <RtkLoraSettings
+                  settings={control.view.sourceSettings}
+                  savedSource={savedSource}
+                  desiredState={control.view.desiredState}
+                  ports={control.serialPorts}
+                  portsLoading={control.serialPortsLoading}
+                  portsError={control.serialPortsError}
+                  suggestedOutputDevice={
+                    control.activeProfile?.direct_inject
+                      ? control.activeProfile.direct_serial_device ?? null
+                      : null
+                  }
+                  busy={controlsBusy}
+                  disabled={!isConnected}
+                  disabledReason={
+                    savedSource === "LORA" ? control.disabledReason : null
+                  }
+                  canStart={savedSource === "LORA" && control.canStart}
+                  canStop={savedSource === "LORA" && control.canStop}
+                  onRefreshPorts={loadSerialPorts}
+                  onSave={(dto) => control.updateCorrectionSource(dto)}
+                  onStart={() => control.start()}
+                  onStop={() => control.stop()}
+                />
+              </View>
+            ) : (
+            <>
+            {savedSource === "LORA" ? (
+              <View style={styles.sourceBanner}>
+                <Text style={styles.sourceBannerText}>
+                  LoRa is the correction source in use. NTRIP profiles can be
+                  edited here but are not used until you switch back.
+                </Text>
+                <Pressable
+                  onPress={handleUseNtrip}
+                  disabled={controlsBusy || !isConnected || control.view.activeProfileId == null}
+                  style={[
+                    styles.useNtripButton,
+                    (controlsBusy || !isConnected || control.view.activeProfileId == null) &&
+                      styles.disabled,
+                  ]}
+                >
+                  <Text style={styles.useNtripText}>Use NTRIP</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={styles.body}>
               <RtkProfileList
                 profiles={control.profiles}
@@ -196,8 +301,10 @@ export const RTKInjectionScreen: React.FC<Props> = ({
                 disabledReason={
                   importing ? "Legacy RTK profile import in progress" : control.disabledReason
                 }
-                canStart={control.canStart}
-                canStop={control.canStop}
+                // While LoRa is in use these buttons would drive LoRa, not the
+                // profile on screen, so NTRIP Start/Stop are disabled.
+                canStart={savedSource !== "LORA" && control.canStart}
+                canStop={savedSource !== "LORA" && control.canStop}
                 canDelete={control.canDelete}
                 onCreate={async (dto) => {
                   const result = await control.createProfile(dto);
@@ -226,6 +333,9 @@ export const RTKInjectionScreen: React.FC<Props> = ({
                 }}
               />
             </View>
+            </>
+            )}
+            </>
           )}
 
           {control.error ? (
@@ -352,6 +462,35 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     flexDirection: "row",
+  },
+  sourceBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "#1f2937",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sourceBannerText: {
+    flex: 1,
+    color: colors.warning,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  useNtripButton: {
+    minHeight: 48,
+    minWidth: 112,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  useNtripText: {
+    color: "#fff",
+    fontWeight: "800",
   },
   error: {
     color: colors.danger,

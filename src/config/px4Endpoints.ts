@@ -164,6 +164,8 @@ export const PX4_RTK = {
   PROFILE: (id: number) => `/api/rtk/profiles/${id}`,
   ACTIVATE: (id: number) => `/api/rtk/profiles/${id}/activate`,
   ACTIVE_PROFILE: "/api/rtk/active-profile",
+  SOURCE: "/api/rtk/source",
+  SERIAL_PORTS: "/api/rtk/serial-ports",
 } as const;
 
 // ── Legacy spray compatibility ────────────────────────────────────────────────

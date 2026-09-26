@@ -8,6 +8,8 @@
  */
 
 import type {
+  RtkCorrectionSource,
+  RtkCorrectionSourceName,
   RtkCorrectionStream,
   RtkDesiredState,
   RtkErrorReason,
@@ -81,6 +83,12 @@ export interface RtkControlViewModel {
   ggaState: string | null;
   activeProfile: RtkProfile | null;
   activeProfileId: number | null;
+  /** Saved backend source; NTRIP when an older backend omits it. */
+  correctionSource: RtkCorrectionSourceName | null;
+  sourceSettings: RtkCorrectionSource | null;
+  /** LoRa has the ports it needs to start (radio, plus output if direct). */
+  loraConfigured: boolean;
+  loraProblem: string | null;
   canStart: boolean;
   canStop: boolean;
   canEdit: boolean;
@@ -117,12 +125,36 @@ const IDLE_VIEW: RtkControlViewModel = {
   ggaState: null,
   activeProfile: null,
   activeProfileId: null,
+  correctionSource: null,
+  sourceSettings: null,
+  loraConfigured: false,
+  loraProblem: null,
   canStart: false,
   canStop: false,
   canEdit: false,
   canDelete: false,
   disabledReason: "Rover Offline",
 };
+
+/**
+ * Mirrors the backend's LoRa start check (rtk_profile_store
+ * _lora_start_problem): the radio port is required, and the receiver output
+ * port too when injecting directly. Null means LoRa can start.
+ */
+export function loraStartProblem(
+  source: RtkCorrectionSource | null | undefined,
+): string | null {
+  if (!source) {
+    return "LoRa settings not loaded";
+  }
+  if (!source.lora_serial_device) {
+    return "Select the LoRa radio port";
+  }
+  if (source.lora_direct_inject && !source.lora_direct_serial_device) {
+    return "Select the GNSS receiver output port";
+  }
+  return null;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -248,6 +280,8 @@ function deriveDisabledReason(args: {
   canStop: boolean;
   activeProfile: RtkProfile | null;
   activeEnabled: boolean;
+  correctionSource?: RtkCorrectionSourceName | null;
+  loraProblem?: string | null;
 }): string | null {
   if (!args.connected) {
     return "Rover Offline";
@@ -259,6 +293,9 @@ function deriveDisabledReason(args: {
     return "Terminal RTK error — Stop to reset";
   }
   if (!args.canStart && !args.canStop) {
+    if (args.correctionSource === "LORA") {
+      return args.loraProblem ?? null;
+    }
     if (!args.activeProfile) {
       return "Activate a backend RTK profile before starting";
     }
@@ -316,11 +353,21 @@ export function toRtkControlView(
   const activeEnabled = Boolean(activeProfile?.enabled);
   const hasActiveProfile =
     activeProfile != null && status.persisted?.active_profile_id != null;
+  const sourceSettings = status.correction_source ?? null;
+  const correctionSource: RtkCorrectionSourceName =
+    sourceSettings?.source === "LORA" ? "LORA" : "NTRIP";
+  const loraProblem =
+    correctionSource === "LORA" ? loraStartProblem(sourceSettings) : null;
+  const loraConfigured = correctionSource === "LORA" && loraProblem == null;
+  // LoRa needs no NTRIP profile; NTRIP keeps the active-profile rule.
+  const sourceReady =
+    correctionSource === "LORA"
+      ? loraConfigured
+      : hasActiveProfile && activeEnabled;
 
   const canStart =
     !mutationBusy &&
-    hasActiveProfile &&
-    activeEnabled &&
+    sourceReady &&
     desired === "STOPPED" &&
     managerState !== "STOPPING" &&
     managerState !== "ERROR";
@@ -379,6 +426,10 @@ export function toRtkControlView(
     ggaState: typeof gga?.state === "string" ? gga.state : null,
     activeProfile,
     activeProfileId: status.persisted?.active_profile_id ?? null,
+    correctionSource,
+    sourceSettings,
+    loraConfigured,
+    loraProblem,
     canStart,
     canStop,
     canEdit,
@@ -391,6 +442,8 @@ export function toRtkControlView(
       canStop,
       activeProfile,
       activeEnabled,
+      correctionSource,
+      loraProblem,
     }),
   };
   } catch (error) {
@@ -436,9 +489,14 @@ export function isRuntimeSignificantProfileChange(
 export function decideMissionRtkQuickStart(args: {
   connected: boolean;
   activeProfileId: number | null | undefined;
+  correctionSource?: RtkCorrectionSourceName | null;
+  loraConfigured?: boolean;
 }): "offline" | "open_config" | "start" {
   if (!args.connected) {
     return "offline";
+  }
+  if (args.correctionSource === "LORA") {
+    return args.loraConfigured ? "start" : "open_config";
   }
   if (args.activeProfileId == null) {
     return "open_config";

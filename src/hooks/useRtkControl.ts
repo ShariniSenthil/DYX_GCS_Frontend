@@ -21,17 +21,22 @@ import {
   formatRtkApiError,
   getRtkStatus,
   listRtkProfiles,
+  listRtkSerialPorts,
   parseRtkApiError,
   startRtk,
   stopRtk,
+  updateRtkCorrectionSource,
   updateRtkProfile,
 } from "../services/rtkService";
 import type {
+  RtkCorrectionSource,
+  RtkCorrectionSourceUpdateRequest,
   RtkIntentResponse,
   RtkParsedApiError,
   RtkProfile,
   RtkProfileCreateRequest,
   RtkProfileUpdateRequest,
+  RtkSerialPort,
   RtkStatusResponse,
 } from "../types/rtk";
 
@@ -84,6 +89,14 @@ export interface UseRtkControlResult {
   clearActive: () => Promise<RtkMutationOutcome<true>>;
   start: () => Promise<RtkMutationOutcome<RtkIntentResponse>>;
   stop: () => Promise<RtkMutationOutcome<RtkIntentResponse>>;
+  /** Rover serial ports for the LoRa settings; loaded on demand only. */
+  serialPorts: RtkSerialPort[];
+  serialPortsLoading: boolean;
+  serialPortsError: RtkParsedApiError | null;
+  loadSerialPorts: () => Promise<void>;
+  updateCorrectionSource: (
+    dto: RtkCorrectionSourceUpdateRequest,
+  ) => Promise<RtkMutationOutcome<RtkCorrectionSource>>;
 }
 
 function fail(error: unknown, fallback: string): RtkMutationFailure {
@@ -110,6 +123,11 @@ export function useRtkControl(
   const [refreshing, setRefreshing] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [error, setError] = useState<RtkParsedApiError | null>(null);
+  const [serialPorts, setSerialPorts] = useState<RtkSerialPort[]>([]);
+  const [serialPortsLoading, setSerialPortsLoading] = useState(false);
+  const [serialPortsError, setSerialPortsError] =
+    useState<RtkParsedApiError | null>(null);
+  const serialPortsRequestRef = useRef(0);
 
   const generationRef = useRef(0);
   const visibleRef = useRef(visible);
@@ -451,6 +469,52 @@ export function useRtkControl(
     [runMutation],
   );
 
+  const loadSerialPorts = useCallback(async (): Promise<void> => {
+    if (!visibleRef.current || !connectedRef.current) {
+      return;
+    }
+    const generation = generationRef.current;
+    const requestId = ++serialPortsRequestRef.current;
+    setSerialPortsLoading(true);
+    setSerialPortsError(null);
+    try {
+      const ports = await listRtkSerialPorts();
+      if (
+        !applyIfCurrent(generation) ||
+        requestId !== serialPortsRequestRef.current
+      ) {
+        return;
+      }
+      setSerialPorts(
+        ports.filter(
+          (port): port is RtkSerialPort =>
+            !!port && typeof port.path === "string" && port.path.length > 0,
+        ),
+      );
+    } catch (loadError) {
+      if (
+        !applyIfCurrent(generation) ||
+        requestId !== serialPortsRequestRef.current
+      ) {
+        return;
+      }
+      setSerialPortsError(parseRtkApiError(loadError));
+    } finally {
+      if (mountedRef.current && requestId === serialPortsRequestRef.current) {
+        setSerialPortsLoading(false);
+      }
+    }
+  }, [applyIfCurrent]);
+
+  const updateCorrectionSource = useCallback(
+    (dto: RtkCorrectionSourceUpdateRequest) =>
+      runMutation(
+        () => updateRtkCorrectionSource(dto),
+        "Unable to save the RTK correction source",
+      ),
+    [runMutation],
+  );
+
   const view = useMemo(
     () =>
       toRtkControlView(status, {
@@ -500,6 +564,11 @@ export function useRtkControl(
     clearActive,
     start,
     stop,
+    serialPorts,
+    serialPortsLoading,
+    serialPortsError,
+    loadSerialPorts,
+    updateCorrectionSource,
   };
 }
 
