@@ -1089,6 +1089,30 @@ export default function MissionReportScreen({
   const isBackendMissionPaused =
     (effectiveLifecycle.state ?? backendMissionState) === "PAUSED";
 
+  // A start/restore HTTP request can finish after the rover has already
+  // transitioned through Socket.IO. Never leave the operator behind a
+  // "Preparing Mission" overlay once the authoritative live lifecycle says
+  // the run is active.
+  useEffect(() => {
+    if (!isPreparingMission) return;
+    const state = String(
+      effectiveLifecycle.state ||
+        backendMissionState ||
+        screenTelemetry.missionStatus ||
+        "",
+    )
+      .trim()
+      .toUpperCase();
+    if (["RUNNING", "PAUSED", "WAITING_FOR_NEXT"].includes(state)) {
+      setIsPreparingMission(false);
+    }
+  }, [
+    isPreparingMission,
+    effectiveLifecycle.state,
+    backendMissionState,
+    screenTelemetry.missionStatus,
+  ]);
+
   const backendResumeAvailable = effectiveLifecycle.resumeAvailable;
 
   const backendPauseReason = effectiveLifecycle.pauseReason;
@@ -2873,14 +2897,26 @@ export default function MissionReportScreen({
     let restoredMission = restoredResponse.mission;
     setBackendMission(restoredMission);
 
-    // restore starts trajectory preparation asynchronously. Wait for the
-    // canonical status instead of racing immediately into Load/Start.
+    // Restore starts trajectory preparation asynchronously. Prefer the live
+    // Socket.IO status already kept in backendMissionRef; REST is only a
+    // recovery path. This avoids a dense status-poll loop competing with the
+    // rover while it is regenerating its trajectory for a second run.
     const deadline = Date.now() + 30_000;
+    const isReadyForLoad = (mission: MissionRuntimeState | null | undefined) =>
+      mission?.loaded === true && mission.trajectory_ready === true;
+    const isSameMission = (mission: MissionRuntimeState | null | undefined) =>
+      String(mission?.mission_id ?? "").trim() === missionId;
     while (
       Date.now() < deadline &&
       mountedRef.current &&
-      !(restoredMission.loaded === true && restoredMission.trajectory_ready === true)
+      !isReadyForLoad(restoredMission)
     ) {
+      const liveMission = backendMissionRef.current;
+      if (isSameMission(liveMission) && isReadyForLoad(liveMission)) {
+        restoredMission = liveMission;
+        break;
+      }
+
       const status = await getMissionStatus();
       if (status?.success && status.mission) {
         restoredMission = status.mission;
@@ -2897,20 +2933,16 @@ export default function MissionReportScreen({
         }
       }
 
-      if (
-        restoredMission.loaded === true &&
-        restoredMission.trajectory_ready === true
-      ) {
+      if (isReadyForLoad(restoredMission)) {
         break;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Socket.IO will normally make the next iteration finish immediately;
+      // this is only a bounded REST fallback and must not flood the backend.
+      await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
-    if (
-      restoredMission.loaded !== true ||
-      restoredMission.trajectory_ready !== true
-    ) {
+    if (!isReadyForLoad(restoredMission)) {
       throw new Error("The restored mission path is still preparing. Please try Start again shortly.");
     }
 
@@ -2987,7 +3019,7 @@ export default function MissionReportScreen({
     if (authoringChanged) {
       return {
         success: false,
-        message: "Update Trajectory in Marking Plan before starting this mission.",
+        message: "Wait for the automatic path update to finish before starting this mission.",
       };
     }
 

@@ -387,14 +387,14 @@ const MissionOpsPanel = React.memo(({
             {/* Action Buttons */}
             <View style={styles.buttonsRow}>
                 <TouchableOpacity
-                    style={[styles.button, styles.uploadBtn, planNeedsUpload && styles.updateTrajectoryBtn, trajectoryUpdating && styles.disabledBtn]}
-                    onPress={onRequestUpload}
-                    disabled={trajectoryUpdating}
+                    style={[styles.button, styles.uploadBtn, (trajectoryUpdating || clearInProgress) && styles.disabledBtn]}
+                    onPress={handleUpload}
+                    disabled={trajectoryUpdating || clearInProgress}
                     activeOpacity={0.75}
                 >
                     <MaterialCommunityIcons name="upload" size={20} color={trajectoryUpdating ? "rgba(255,255,255,0.45)" : "#10B981"} />
                     <Text style={[styles.buttonText, { color: '#10B981' }]}>
-                        {trajectoryUpdating ? "Updating…" : planNeedsUpload ? "Update Trajectory" : "Upload"}
+                        {trajectoryUpdating ? "Updating…" : "Upload"}
                     </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -419,7 +419,7 @@ const MissionOpsPanel = React.memo(({
                     <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
                     <Text style={styles.loadText}>
                         {planNeedsUpload
-                            ? "Update trajectory first"
+                            ? "Waiting for update…"
                             : isLoadingMission
                                 ? "Loading..."
                                 : loadPreparing

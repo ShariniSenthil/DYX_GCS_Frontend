@@ -11,7 +11,7 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { PATH_PLAN_GLASS } from "../../constants/pathPlanGlass";
 import { SettingsScreen } from "../../screens/SettingsScreen";
-import { useRover } from "../../context/RoverContext";
+import { useMission } from "../../context/MissionContext";
 import { useConnection } from "../../context/ConnectionContext";
 import { useLiveTelemetrySelector } from "../../context/liveTelemetryStore";
 import { getBackendURL } from "../../config";
@@ -117,7 +117,10 @@ const getRtkHeaderTone = (fixType: number, isLightMode = false): RtkHeaderTone =
 };
 
 const AppHeaderInner: React.FC<Props> = ({ activeTab, onTabChange, isLightMode, onToggleTheme }) => {
-  const { missionMode, setMissionMode } = useRover();
+  // The header only owns mission-mode UI.  Reading the legacy RoverContext
+  // here made this always-mounted component re-render for every telemetry
+  // packet, even though its live RTK indicator already has a narrow selector.
+  const { missionMode, setMissionMode } = useMission();
   // Subscribe to exactly one primitive, so RTK colour changes do not make the
   // header re-render for every position, battery, or IMU telemetry update.
   const rtkFixType = useLiveTelemetrySelector((snapshot) => snapshot.telemetry.rtk?.fix_type ?? 0);
@@ -678,7 +681,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// Memoize AppHeader to prevent unnecessary re-renders from parent.
-// Note: This cannot prevent context-driven re-renders from useRover().
-// Phase 2 (context split) is needed to fully isolate AppHeader from 20Hz telemetry.
+// The header is isolated from the high-rate legacy RoverContext. Its only
+// telemetry subscription is the RTK primitive above.
 export const AppHeader = React.memo(AppHeaderInner);
