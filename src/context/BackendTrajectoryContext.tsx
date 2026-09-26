@@ -35,6 +35,8 @@ export interface BackendTrajectoryContextValue {
   markAuthoringChanged: () => void;
   invalidateForUpload: () => void;
   resumePreviewAfterFailedUpload: () => void;
+  /** Clear the local trajectory identity after the rover mission is deleted. */
+  clearTrajectory: () => void;
   markLoadAccepted: () => void;
   refreshNow: () => Promise<void>;
 }
@@ -62,6 +64,10 @@ export function BackendTrajectoryProvider({
   const missionIdAtHoldRef = useRef<string | null>(null);
   const authoringVersionRef = useRef(0);
   const awaitingAuthoringVersionRef = useRef<number | null>(null);
+  // A Socket.IO packet can arrive after a successful delete. Keep the deleted
+  // ID as a small tombstone until the next intentional upload so that packet
+  // cannot redraw a mission that no longer exists on the rover.
+  const clearedMissionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     previewRef.current = preview;
@@ -79,6 +85,7 @@ export function BackendTrajectoryProvider({
   );
 
   const invalidateForUpload = useCallback(() => {
+    clearedMissionIdRef.current = null;
     epochRef.current += 1;
     lastReadyRef.current = false;
     holdPreviewRef.current = true;
@@ -99,6 +106,28 @@ export function BackendTrajectoryProvider({
     holdPreviewRef.current = false;
     missionIdAtHoldRef.current = null;
     awaitingAuthoringVersionRef.current = null;
+  }, []);
+
+  const clearTrajectory = useCallback(() => {
+    // Invalidate every in-flight status/path response before clearing. A late
+    // response from the deleted mission must never repopulate the map or turn
+    // the Upload button back into an update state.
+    clearedMissionIdRef.current = previewRef.current.missionId;
+    epochRef.current += 1;
+    lastReadyRef.current = false;
+    lastStatusAtRef.current = 0;
+    holdPreviewRef.current = false;
+    missionIdAtHoldRef.current = null;
+    awaitingAuthoringVersionRef.current = null;
+    authoringVersionRef.current += 1;
+
+    const cleared = {
+      ...EMPTY_TRAJECTORY_PREVIEW,
+      epoch: epochRef.current,
+    };
+    previewRef.current = cleared;
+    setPreview(cleared);
+    setAuthoringChanged(false);
   }, []);
 
   useEffect(() => {
@@ -258,7 +287,7 @@ export function BackendTrajectoryProvider({
     }
     const onPath = (raw: unknown) => {
       const push = parseTrajectoryPathPush(raw);
-      if (push) {
+      if (push && push.mission_id !== clearedMissionIdRef.current) {
         apply({ type: "PUSH_PATH", push });
       }
     };
@@ -335,6 +364,7 @@ export function BackendTrajectoryProvider({
       markAuthoringChanged,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
+      clearTrajectory,
       markLoadAccepted,
       refreshNow,
     }),
@@ -344,6 +374,7 @@ export function BackendTrajectoryProvider({
       markAuthoringChanged,
       invalidateForUpload,
       resumePreviewAfterFailedUpload,
+      clearTrajectory,
       markLoadAccepted,
       refreshNow,
     ],

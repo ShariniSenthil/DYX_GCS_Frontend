@@ -19,7 +19,10 @@ import {
 } from "../../config/mapboxConfig";
 import { useBackendTrajectory } from "../../context/BackendTrajectoryContext";
 import { useFieldMap } from "../../context/FieldMapContext";
-import { useTelemetry } from "../../context/TelemetryContext";
+import {
+  shallowEqual,
+  useLiveTelemetrySelector,
+} from "../../context/liveTelemetryStore";
 import { useMapboxSurface } from "../../hooks/useMapboxSurface";
 import { MapBottomControlsBar } from "./MapBottomControlsBar";
 import type { MapStyleMode } from "./MapBottomControlsBar";
@@ -35,6 +38,27 @@ import {
 const DEFAULT_ZOOM = 16;
 const ROVER_THROTTLE_MS = 200;
 const CHENNAI: [number, number] = [80.2707, 13.0827];
+
+/**
+ * Mapbox is an always-mounted native surface. Subscribe only to the values it
+ * actually draws; subscribing through the full telemetry context otherwise
+ * reconciles the whole map tree for battery/servo/debug packets as well.
+ */
+function selectMapTelemetry(snapshot: {
+  telemetry: {
+    attitude?: { yaw_deg?: number };
+    state?: { armed?: boolean };
+    rtk?: { fix_type?: number };
+  };
+  roverPosition: { lat: number; lng: number; timestamp: number } | null;
+}) {
+  return {
+    roverPosition: snapshot.roverPosition,
+    heading: snapshot.telemetry.attitude?.yaw_deg ?? null,
+    armed: snapshot.telemetry.state?.armed ?? false,
+    rtk: snapshot.telemetry.rtk?.fix_type ?? 0,
+  };
+}
 
 function isValidLngLat(lon: unknown, lat: unknown): lon is number {
   return (
@@ -60,7 +84,10 @@ const FieldMapHostBase: React.FC = () => {
     setSharedCamera,
   } = useFieldMap();
   const { preview, authoringChanged } = useBackendTrajectory();
-  const { telemetry, roverPosition } = useTelemetry();
+  const mapTelemetry = useLiveTelemetrySelector(
+    selectMapTelemetry,
+    shallowEqual,
+  );
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const zoomRef = useRef(DEFAULT_ZOOM);
   const initialCenterRef = useRef<[number, number] | null>(null);
@@ -87,13 +114,16 @@ const FieldMapHostBase: React.FC = () => {
   } = useMapboxSurface();
 
   useEffect(() => {
-    const yaw = telemetry.attitude?.yaw_deg;
     const next = {
-      lat: roverPosition?.lat ?? 0,
-      lon: roverPosition?.lng ?? 0,
-      heading: typeof yaw === "number" && Number.isFinite(yaw) ? yaw : null,
-      armed: telemetry.state?.armed ?? false,
-      rtk: telemetry.rtk?.fix_type ?? 0,
+      lat: mapTelemetry.roverPosition?.lat ?? 0,
+      lon: mapTelemetry.roverPosition?.lng ?? 0,
+      heading:
+        typeof mapTelemetry.heading === "number" &&
+        Number.isFinite(mapTelemetry.heading)
+          ? mapTelemetry.heading
+          : null,
+      armed: mapTelemetry.armed,
+      rtk: mapTelemetry.rtk,
     };
     const now = Date.now();
     const wait = ROVER_THROTTLE_MS - (now - lastRoverTs.current);
@@ -108,11 +138,10 @@ const FieldMapHostBase: React.FC = () => {
     }, wait);
     return () => clearTimeout(id);
   }, [
-    roverPosition?.lat,
-    roverPosition?.lng,
-    telemetry.attitude?.yaw_deg,
-    telemetry.state?.armed,
-    telemetry.rtk?.fix_type,
+    mapTelemetry.roverPosition,
+    mapTelemetry.heading,
+    mapTelemetry.armed,
+    mapTelemetry.rtk,
   ]);
 
   const snapshot = activeSurface === "marking" ? marking : mission;

@@ -901,16 +901,20 @@ export function useRoverTelemetry(): UseRoverTelemetryResult {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef<number>(INITIAL_BACKOFF_MS);
   const connectDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const missionEventCallbackRef = useRef<((event: MissionEventData) => void)[]>(
-    []
+  // Sets make subscriptions idempotent.  This prevents a retained screen or a
+  // reconnect edge case from multiplying callback work over a long session.
+  const missionEventCallbackRef = useRef<Set<(event: MissionEventData) => void>>(
+    new Set(),
   );
-  const loraStatusCallbackRef = useRef<((status: LoraRTKStatus) => void)[]>([]);
+  const loraStatusCallbackRef = useRef<Set<(status: LoraRTKStatus) => void>>(
+    new Set(),
+  );
   const uploadProgressCallbackRef = useRef<
-    ((progress: { percent: number; message?: string }) => void)[]
-  >([]);
+    Set<(progress: { percent: number; message?: string }) => void>
+  >(new Set());
   const downloadProgressCallbackRef = useRef<
-    ((progress: { percent: number; message?: string }) => void)[]
-  >([]);
+    Set<(progress: { percent: number; message?: string }) => void>
+  >(new Set());
   const mutableRef = useRef<MutableTelemetry>({
     telemetry: createDefaultTelemetry(),
     lastEnvelopeTs: null,
@@ -2686,34 +2690,25 @@ if (envelope.within_test_tolerance !== undefined) {
       stopLoraRTKStream: () => nrpRosLegacyDisabled("stopLoraRTKStream"),
       getLoraRTKStatus: () => nrpRosLegacyDisabled("getLoraRTKStatus"),
       onLoraRTKStatus: (cb: (status: LoraRTKStatus) => void) => {
-        loraStatusCallbackRef.current.push(cb);
+        loraStatusCallbackRef.current.add(cb);
         return () => {
-          const idx = loraStatusCallbackRef.current.indexOf(cb);
-          if (idx >= 0) {
-            loraStatusCallbackRef.current.splice(idx, 1);
-          }
+          loraStatusCallbackRef.current.delete(cb);
         };
       },
       onUploadProgress: (
         cb: (progress: { percent: number; message?: string }) => void
       ) => {
-        uploadProgressCallbackRef.current.push(cb);
+        uploadProgressCallbackRef.current.add(cb);
         return () => {
-          const idx = uploadProgressCallbackRef.current.indexOf(cb);
-          if (idx >= 0) {
-            uploadProgressCallbackRef.current.splice(idx, 1);
-          }
+          uploadProgressCallbackRef.current.delete(cb);
         };
       },
       onDownloadProgress: (
         cb: (progress: { percent: number; message?: string }) => void
       ) => {
-        downloadProgressCallbackRef.current.push(cb);
+        downloadProgressCallbackRef.current.add(cb);
         return () => {
-          const idx = downloadProgressCallbackRef.current.indexOf(cb);
-          if (idx >= 0) {
-            downloadProgressCallbackRef.current.splice(idx, 1);
-          }
+          downloadProgressCallbackRef.current.delete(cb);
         };
       },
       // NRP_ROS LEGACY DISABLED — servo PWM, TTS, mission config socket, LED, bulk MAVLink params
@@ -2792,12 +2787,9 @@ if (envelope.within_test_tolerance !== undefined) {
 
   const onMissionEvent = useCallback(
     (callback: (event: MissionEventData) => void) => {
-      missionEventCallbackRef.current.push(callback);
+      missionEventCallbackRef.current.add(callback);
       return () => {
-        const index = missionEventCallbackRef.current.indexOf(callback);
-        if (index > -1) {
-          missionEventCallbackRef.current.splice(index, 1);
-        }
+        missionEventCallbackRef.current.delete(callback);
       };
     },
     []

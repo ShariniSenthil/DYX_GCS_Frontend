@@ -406,7 +406,10 @@ export default function MissionReportScreen({
   // and on every backend tick. It is the live marking-point authority; REST
   // remains a slow recovery/export path only.
   useEffect(() => {
-    if (!socket || connectionState !== "connected") return;
+    // This also protects embedded/retained uses of the screen: do not keep
+    // reconciling the full lifecycle stream while the operator is working
+    // elsewhere. The visible screen rehydrates immediately from REST.
+    if (!isVisible || !socket || connectionState !== "connected") return;
     const handleMissionStatus = (raw: unknown) => {
       if (!raw || typeof raw !== "object") return;
       const incoming = raw as MissionRuntimeState;
@@ -430,7 +433,7 @@ export default function MissionReportScreen({
     return () => {
       socket.off("mission_status", handleMissionStatus);
     };
-  }, [socket, connectionState, setBackendMission]);
+  }, [isVisible, socket, connectionState, setBackendMission]);
 
   /*
    * Current-run immutable point results from Socket.IO point events.
@@ -456,7 +459,7 @@ export default function MissionReportScreen({
   }, [liveIdentity]);
 
   useEffect(() => {
-    if (!socket || connectionState !== "connected") return;
+    if (!isVisible || !socket || connectionState !== "connected") return;
     const names = [
       "point_completed",
       "point_failed",
@@ -479,7 +482,7 @@ export default function MissionReportScreen({
     return () => {
       handlers.forEach(({ name, handler }) => socket.off(name, handler));
     };
-  }, [socket, connectionState]);
+  }, [isVisible, socket, connectionState]);
 
   const currentRunSocketPointResults = useMemo(
     () => pointResultsForRun(socketPointResults, liveIdentity),
@@ -1085,6 +1088,30 @@ export default function MissionReportScreen({
 
   const isBackendMissionPaused =
     (effectiveLifecycle.state ?? backendMissionState) === "PAUSED";
+
+  // A start/restore HTTP request can finish after the rover has already
+  // transitioned through Socket.IO. Never leave the operator behind a
+  // "Preparing Mission" overlay once the authoritative live lifecycle says
+  // the run is active.
+  useEffect(() => {
+    if (!isPreparingMission) return;
+    const state = String(
+      effectiveLifecycle.state ||
+        backendMissionState ||
+        screenTelemetry.missionStatus ||
+        "",
+    )
+      .trim()
+      .toUpperCase();
+    if (["RUNNING", "PAUSED", "WAITING_FOR_NEXT"].includes(state)) {
+      setIsPreparingMission(false);
+    }
+  }, [
+    isPreparingMission,
+    effectiveLifecycle.state,
+    backendMissionState,
+    screenTelemetry.missionStatus,
+  ]);
 
   const backendResumeAvailable = effectiveLifecycle.resumeAvailable;
 
@@ -1726,7 +1753,7 @@ export default function MissionReportScreen({
   // Terminal point events are the meaningful trigger for a canonical
   // confirmation read. Row state itself is already updated from the event.
   useEffect(() => {
-    if (!socket || connectionState !== "connected") return;
+    if (!isVisible || !socket || connectionState !== "connected") return;
     const handler = () => refreshLiveMarkingPoints();
     const names = ["point_completed", "point_failed", "point_skipped"] as const;
     names.forEach((name) => socket.on(name, handler));
@@ -1738,7 +1765,7 @@ export default function MissionReportScreen({
       names.forEach((name) => socket.off(name, handler));
       socket.off("point_event", onGenericPointEvent);
     };
-  }, [socket, connectionState, refreshLiveMarkingPoints]);
+  }, [isVisible, socket, connectionState, refreshLiveMarkingPoints]);
 
   /*
    * ============================================================
@@ -2872,14 +2899,26 @@ export default function MissionReportScreen({
     let restoredMission = restoredResponse.mission;
     setBackendMission(restoredMission);
 
-    // restore starts trajectory preparation asynchronously. Wait for the
-    // canonical status instead of racing immediately into Load/Start.
+    // Restore starts trajectory preparation asynchronously. Prefer the live
+    // Socket.IO status already kept in backendMissionRef; REST is only a
+    // recovery path. This avoids a dense status-poll loop competing with the
+    // rover while it is regenerating its trajectory for a second run.
     const deadline = Date.now() + 30_000;
+    const isReadyForLoad = (mission: MissionRuntimeState | null | undefined) =>
+      mission?.loaded === true && mission.trajectory_ready === true;
+    const isSameMission = (mission: MissionRuntimeState | null | undefined) =>
+      String(mission?.mission_id ?? "").trim() === missionId;
     while (
       Date.now() < deadline &&
       mountedRef.current &&
-      !(restoredMission.loaded === true && restoredMission.trajectory_ready === true)
+      !isReadyForLoad(restoredMission)
     ) {
+      const liveMission = backendMissionRef.current;
+      if (isSameMission(liveMission) && isReadyForLoad(liveMission)) {
+        restoredMission = liveMission;
+        break;
+      }
+
       const status = await getMissionStatus();
       if (status?.success && status.mission) {
         restoredMission = status.mission;
@@ -2896,20 +2935,16 @@ export default function MissionReportScreen({
         }
       }
 
-      if (
-        restoredMission.loaded === true &&
-        restoredMission.trajectory_ready === true
-      ) {
+      if (isReadyForLoad(restoredMission)) {
         break;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Socket.IO will normally make the next iteration finish immediately;
+      // this is only a bounded REST fallback and must not flood the backend.
+      await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
-    if (
-      restoredMission.loaded !== true ||
-      restoredMission.trajectory_ready !== true
-    ) {
+    if (!isReadyForLoad(restoredMission)) {
       throw new Error("The restored mission path is still preparing. Please try Start again shortly.");
     }
 
@@ -2986,7 +3021,7 @@ export default function MissionReportScreen({
     if (authoringChanged) {
       return {
         success: false,
-        message: "Update Trajectory in Marking Plan before starting this mission.",
+        message: "Wait for the automatic path update to finish before starting this mission.",
       };
     }
 
@@ -3923,6 +3958,10 @@ export default function MissionReportScreen({
     isBottomTableExpanded,
   ]);
   useEffect(() => {
+    if (!isVisible) {
+      return undefined;
+    }
+
     // Subscribe to mission events from backend
     const unsubscribe = onMissionEvent((event: any) => {
       if (!mountedRef.current) return;
@@ -5021,7 +5060,7 @@ export default function MissionReportScreen({
       // Cleanup subscription
       unsubscribe();
     };
-  }, [onMissionEvent, refreshLiveMarkingPoints]);
+  }, [isVisible, onMissionEvent, refreshLiveMarkingPoints]);
 
   // Mission mode is now managed by RoverContext and synced with Mission Ops Panel
   // Initial mode is set to 'DGPS Mark' by default in context
@@ -5049,14 +5088,13 @@ export default function MissionReportScreen({
         )}
       </View>
 
-      {isRobotStatusVisible && (
+      {isVisible && isRobotStatusVisible && (
         <DraggableCard
           style={styles.floatingRobotStatusPanel}
           handleType="custom"
           onLayout={(e) => setRobotPanelHeight(e.nativeEvent.layout.height)}
         >
           <LiveVehicleStatusCard
-            socketTransport={socketTransport}
             onClose={() => setPanelVisible("robotStatus", false)}
           />
         </DraggableCard>
@@ -5115,7 +5153,7 @@ export default function MissionReportScreen({
         </View>
       )}
 
-      {isAccuracyMonitorVisible && (
+      {isVisible && isAccuracyMonitorVisible && (
         <DraggableCard
           style={styles.floatingAccuracyMonitorPanel}
           handleType="custom"
@@ -5127,7 +5165,7 @@ export default function MissionReportScreen({
         </DraggableCard>
       )}
 
-      {isDistanceToTargetVisible && (
+      {isVisible && isDistanceToTargetVisible && (
         <DraggableCard
           style={styles.floatingDistanceToTargetPanel}
           handleType="custom"
@@ -5136,7 +5174,7 @@ export default function MissionReportScreen({
         </DraggableCard>
       )}
 
-      {isSystemStatusVisible && (
+      {isVisible && isSystemStatusVisible && (
         <DraggableCard
           style={styles.floatingSystemStatusPanel}
           handleType="custom"

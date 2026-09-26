@@ -23,10 +23,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 import { DxfMapEntity, PathPlanWaypoint } from "../types/pathplan";
 import { asFiniteNumber, formatCoord } from "../utils/formatCoord";
-import { useTelemetry } from "../context/TelemetryContext";
+import { useTelemetryControl } from "../context/TelemetryContext";
 import { useMission } from "../context/MissionContext";
 import { useConnection } from "../context/ConnectionContext";
-import { useRover } from "../context/RoverContext";
+import {
+  shallowEqual,
+  useLiveTelemetrySelector,
+} from "../context/liveTelemetryStore";
 import { PathSequenceSidebar } from "../components/pathplan/PathSequenceSidebar";
 import MissionOpsPanel from "../components/pathplan/MissionOpsPanel";
 import { MissionStatistics } from "../components/pathplan/MissionStatistics";
@@ -102,6 +105,7 @@ import { useWaypointHistory } from "../hooks/pathplan/useWaypointHistory";
 import {
   uploadMissionCsv,
   loadMission,
+  deleteMissionCsv,
   getMissionStatus,
   getMissionHistory,
   restoreMission,
@@ -393,6 +397,31 @@ type MissionControlResponseWithRestore = MissionControlResponse & {
   };
 };
 
+/**
+ * Path planning only needs position, altitude, heading, mission status and
+ * freshness from live telemetry. Keeping this selector narrow prevents CAD,
+ * lists and modal state from re-rendering for unrelated high-rate packets.
+ */
+function selectPathPlanTelemetry(snapshot: {
+  telemetry: {
+    global?: { lat?: number; lon?: number; alt_rel?: number };
+    attitude?: { yaw_deg?: number };
+    mission?: { status?: string };
+    stale?: boolean;
+  };
+  roverPosition: { lat: number; lng: number; timestamp: number } | null;
+}) {
+  return {
+    roverPosition: snapshot.roverPosition,
+    lat: snapshot.telemetry.global?.lat,
+    lon: snapshot.telemetry.global?.lon,
+    altRel: snapshot.telemetry.global?.alt_rel,
+    heading: snapshot.telemetry.attitude?.yaw_deg,
+    missionStatus: snapshot.telemetry.mission?.status,
+    stale: snapshot.telemetry.stale === true,
+  };
+}
+
 export default function PathPlanScreen({
   isVisible = true,
   embedMap = false,
@@ -407,32 +436,52 @@ export default function PathPlanScreen({
   onLoadMissionSuccess,
 }: PathPlanScreenProps) {
   const {
-    telemetry,
-    roverPosition,
     missionWaypoints,
     setMissionWaypoints,
+    clearMissionWaypoints,
+    showUploadPreview,
+    setShowUploadPreview,
+    showManualConnectionCanvas,
+    setShowManualConnectionCanvas,
+    isHydrated: missionStateHydrated,
+  } = useMission();
+  const {
     gpsFailsafeMode,
     setGpsFailsafeMode,
     gpsFailsafeStatus,
     onFailsafeAcknowledge,
     onFailsafeResume,
     onFailsafeRestart,
-    services,
-    socket,
-    showUploadPreview,
-    setShowUploadPreview,
-    showManualConnectionCanvas,
-    setShowManualConnectionCanvas,
-  } = useRover();
-  const { isHydrated: missionStateHydrated } = useMission();
+  } = useTelemetryControl();
+  const { connectionState, services, socket } = useConnection();
+  const pathPlanTelemetry = useLiveTelemetrySelector(
+    selectPathPlanTelemetry,
+    shallowEqual,
+  );
+  // Keep the existing render code readable while the subscription itself is
+  // limited to the fields this screen consumes.
+  const telemetry = useMemo(
+    () => ({
+      global: {
+        lat: pathPlanTelemetry.lat,
+        lon: pathPlanTelemetry.lon,
+        alt_rel: pathPlanTelemetry.altRel,
+      },
+      attitude: { yaw_deg: pathPlanTelemetry.heading },
+      mission: { status: pathPlanTelemetry.missionStatus },
+      stale: pathPlanTelemetry.stale,
+    }),
+    [pathPlanTelemetry],
+  );
+  const roverPosition = pathPlanTelemetry.roverPosition;
   const { setMarkingSnapshot, markingPressRef } = useFieldMap();
-  const { connectionState } = useConnection();
   const {
     preview,
     authoringChanged,
     markAuthoringChanged,
     invalidateForUpload,
     resumePreviewAfterFailedUpload,
+    clearTrajectory,
     markLoadAccepted,
     refreshNow,
   } = useBackendTrajectory();
@@ -443,14 +492,30 @@ export default function PathPlanScreen({
 
   const [globalServoEnabled, setGlobalServoEnabled] = useState(true);
   const [isReloadPreparing, setIsReloadPreparing] = useState(false);
+  // Restoring an archived run and loading it are separate backend operations.
+  // Keep the intent across the asynchronous preview regeneration, then perform
+  // the real Load exactly once when the backend says that preview is ready.
+  const pendingReloadMissionIdRef = useRef<string | null>(null);
   const [isAutoTrajectoryUpdating, setIsAutoTrajectoryUpdating] = useState(false);
+  const [isClearingControllerMission, setIsClearingControllerMission] = useState(false);
   const autoTrajectoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (canLoadBackendPreview(preview)) {
-      setIsReloadPreparing(false);
+    const missionId = pendingReloadMissionIdRef.current;
+    if (
+      !isReloadPreparing ||
+      !missionId ||
+      preview.missionId !== missionId ||
+      !canLoadBackendPreview(preview)
+    ) {
+      return;
     }
-  }, [preview]);
+
+    // Clear before invoking the handler so a status push or a React effect
+    // replay cannot submit the same Load request twice.
+    pendingReloadMissionIdRef.current = null;
+    void handleLoadMissionToController();
+  }, [isReloadPreparing, preview]);
 
   // Component mounted flag to prevent state updates after unmount
   const mountedRef = useRef(true);
@@ -486,12 +551,17 @@ export default function PathPlanScreen({
   };
 
   // Poll servo config, but pause when app is backgrounded to avoid unnecessary
-  // network requests and state updates that trigger re-renders.
+  // network requests and state updates that trigger re-renders. The visibility
+  // guard also covers embedded/retained uses of this screen.
   useEffect(() => {
     const { AppState } = require("react-native");
 
     let interval: ReturnType<typeof setInterval> | null = null;
     let appStateSubscription: any = null;
+
+    if (!isVisible) {
+      return undefined;
+    }
 
     const fetchServoConfig = async () => {
       try {
@@ -537,7 +607,7 @@ export default function PathPlanScreen({
       stopPolling();
       appStateSubscription?.remove();
     };
-  }, [services]);
+  }, [isVisible, services]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -643,7 +713,7 @@ export default function PathPlanScreen({
   );
 
   // Undo/Redo history — wraps updateWaypoints for all user-initiated changes
-  const { undo, redo, canUndo, canRedo, recordAndApply } = useWaypointHistory(
+  const { undo, redo, canUndo, canRedo, recordAndApply, resetHistory } = useWaypointHistory(
     waypoints,
     updateWaypoints,
   );
@@ -954,7 +1024,7 @@ export default function PathPlanScreen({
 
   // Listen for GPS Failsafe servo_suppressed events
   useEffect(() => {
-    if (!socket) return;
+    if (!isVisible || !socket) return;
 
     const handleServoSuppressed = (event: any) => {
       console.log(
@@ -1000,7 +1070,7 @@ export default function PathPlanScreen({
         "[PathPlanScreen] 🔇 Stopped listening for servo_suppressed events",
       );
     };
-  }, [socket, gpsFailsafeMode]);
+  }, [isVisible, socket, gpsFailsafeMode]);
 
   // Consolidated auto-save using refs to prevent multiple useEffect triggers
   // This prevents infinite loops from cascading state updates
@@ -2553,11 +2623,11 @@ export default function PathPlanScreen({
         if (!restored?.success) {
           throw new Error(restored?.message || "The rover rejected Load Again.");
         }
+        // `restoreMission` only rehydrates the completed mission. It is not a
+        // successful Load, so do not navigate yet. The effect above waits for
+        // the authoritative ready flags and then submits `loadMission`.
+        pendingReloadMissionIdRef.current = preview.missionId;
         await refreshNow();
-        Alert.alert(
-          "Mission Restored",
-          "The same mission is preparing its preview. Load Again will be ready as soon as the preview is available.",
-        );
         return;
       }
 
@@ -2566,6 +2636,7 @@ export default function PathPlanScreen({
         throw new Error(response.message || "The rover rejected Load Mission.");
       }
       markLoadAccepted();
+      setIsReloadPreparing(false);
       onLoadMissionSuccess?.();
       // Keep the status synchronized, but never turn a confirmed load into
       // an error merely because the following refresh is unavailable.
@@ -2573,37 +2644,109 @@ export default function PathPlanScreen({
         console.warn("[PathPlan] Mission status refresh after Load failed:", refreshError),
       );
     } catch (error) {
+      pendingReloadMissionIdRef.current = null;
       setIsReloadPreparing(false);
       const message = error instanceof Error ? error.message : String(error);
       Alert.alert("Load Failed", message);
     }
   }
 
-  function handleUpdateTrajectory(): void {
-    if (roverUploadBlockedReason) {
+  const missionIsRunning = [
+    "running",
+    "paused",
+    "arming",
+    "switching_offboard",
+    "loading",
+    "stopping",
+  ].includes(String(telemetry.mission?.status ?? "").toLowerCase());
+  const hasControllerMission = preview.missionId !== null;
+  const canClearControllerMission =
+    (hasControllerMission || waypoints.length > 0) &&
+    !missionIsRunning &&
+    !isClearingControllerMission &&
+    (!hasControllerMission || !roverUploadBlockedReason);
+
+  const handleClearControllerMission = useCallback(() => {
+    if (roverUploadBlockedReason && hasControllerMission) {
       Alert.alert("Connect Rover", roverUploadBlockedReason);
       return;
     }
-    if (waypoints.length < 2) {
-      showPathPlanToast(
-        "error",
-        "Not Enough Points",
-        "Add at least two marking points before updating the trajectory.",
+
+    if (missionIsRunning) {
+      Alert.alert(
+        "Mission Is Active",
+        "Stop the mission before deleting it.",
       );
       return;
     }
-    // The operator has already edited this visible plan. Update it directly
-    // with the deterministic default rather than prompting a second time.
-    if (autoTrajectoryTimerRef.current) {
-      clearTimeout(autoTrajectoryTimerRef.current);
-      autoTrajectoryTimerRef.current = null;
+
+    if (!hasControllerMission && waypoints.length === 0) {
+      return;
     }
-    setIsAutoTrajectoryUpdating(true);
-    void uploadWaypointsToBackend(waypoints.map((waypoint) => ({ ...waypoint })), "DISABLE")
-      .finally(() => {
-        if (mountedRef.current) setIsAutoTrajectoryUpdating(false);
-      });
-  }
+
+    Alert.alert(
+      "Delete Mission?",
+      "This permanently removes the controller mission, trajectory preview, marking points, and local mission data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setIsClearingControllerMission(true);
+              try {
+                if (hasControllerMission) {
+                  const result = await deleteMissionCsv();
+                  if (!result.success) {
+                    throw new Error(result.message || "The rover could not delete the mission.");
+                  }
+                }
+                await clearMissionWaypoints();
+                resetHistory();
+                setSelectedWaypoint(null);
+                setEditingWaypoint(null);
+                setShowEditDialog(false);
+                setShowUploadPreview(false);
+                setShowManualConnectionCanvas(false);
+                pendingReloadMissionIdRef.current = null;
+                if (autoTrajectoryTimerRef.current) {
+                  clearTimeout(autoTrajectoryTimerRef.current);
+                  autoTrajectoryTimerRef.current = null;
+                }
+                setIsAutoTrajectoryUpdating(false);
+                clearTrajectory();
+                await refreshNow();
+                showPathPlanToast(
+                  "success",
+                  "Mission Deleted",
+                  "The mission, trajectory preview, and marking points were removed.",
+                  4500,
+                );
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                showPathPlanToast("error", "Clear Failed", message, 5000);
+              } finally {
+                if (mountedRef.current) setIsClearingControllerMission(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [
+    missionIsRunning,
+    hasControllerMission,
+    clearMissionWaypoints,
+    clearTrajectory,
+    refreshNow,
+    resetHistory,
+    roverUploadBlockedReason,
+    setShowManualConnectionCanvas,
+    setShowUploadPreview,
+    showPathPlanToast,
+    waypoints.length,
+  ]);
 
   useEffect(() => {
     if (autoTrajectoryTimerRef.current) {
@@ -3751,9 +3894,7 @@ export default function PathPlanScreen({
                         }
                       : { lat: 0, lon: 0, alt: 0 }
                   }
-                  onRequestUpload={
-                    planNeedsUpload ? handleUpdateTrajectory : handleRequestUpload
-                  }
+                  onRequestUpload={handleRequestUpload}
                   planNeedsUpload={planNeedsUpload}
                   trajectoryUpdating={isAutoTrajectoryUpdating}
                   onLoadMission={handleLoadMissionToController}
@@ -3766,6 +3907,9 @@ export default function PathPlanScreen({
                   loadVisible={canDrawBackendLine(preview) && preview.missionId !== null}
                   loadAgain={preview.acceptedForStart}
                   loadPreparing={isReloadPreparing}
+                  onClearMission={handleClearControllerMission}
+                  clearEnabled={canClearControllerMission}
+                  clearInProgress={isClearingControllerMission}
                   onManualControlOpen={handleOpenManualControl}
                   onExportMission={handleExportMission}
                   onClose={() => setIsMissionOpsVisible(false)}

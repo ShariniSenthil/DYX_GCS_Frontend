@@ -53,6 +53,11 @@ type Props = {
     loadAgain?: boolean;
     /** An archived mission is regenerating its preview after Load Again. */
     loadPreparing?: boolean;
+    /** Deletes the controller mission and clears the local marking-plan UI. */
+    onClearMission?: () => void;
+    /** Clear is unavailable until a controller mission exists and is not running. */
+    clearEnabled?: boolean;
+    clearInProgress?: boolean;
 };
 
 const MissionOpsPanel = React.memo(({
@@ -80,6 +85,9 @@ const MissionOpsPanel = React.memo(({
     loadVisible = false,
     loadAgain = false,
     loadPreparing = false,
+    onClearMission,
+    clearEnabled = false,
+    clearInProgress = false,
 }: Props) => {
     const { missionMode, setMissionMode } = useRover();
     const [isLoadingMission, setIsLoadingMission] = useState(false);
@@ -342,12 +350,23 @@ const MissionOpsPanel = React.memo(({
                         <Text style={styles.headerTitle}>MISSION OPS</Text>
                     </View>
                     <View style={styles.headerRight}>
-                        <View style={styles.headerBadge}>
-                            <View style={[styles.headerBadgeDot, { backgroundColor: waypoints.length > 0 ? '#4ade80' : 'rgba(255,255,255,0.3)' }]} />
-                            <Text style={[styles.headerBadgeText, { color: waypoints.length > 0 ? '#4ade80' : 'rgba(255,255,255,0.3)' }]}>
-                                {waypoints.length > 0 ? 'ACTIVE' : 'IDLE'}
-                            </Text>
-                        </View>
+                        <TouchableOpacity
+                            style={[
+                                styles.headerClearBtn,
+                                (!clearEnabled || clearInProgress) && styles.headerClearBtnDisabled,
+                            ]}
+                            onPress={onClearMission}
+                            disabled={!clearEnabled || clearInProgress}
+                            activeOpacity={0.7}
+                            accessibilityLabel="Delete mission and clear the marking plan"
+                            accessibilityRole="button"
+                        >
+                            <MaterialCommunityIcons
+                                name="trash-can-outline"
+                                size={15}
+                                color={clearEnabled && !clearInProgress ? '#FCA5A5' : 'rgba(148,163,184,0.45)'}
+                            />
+                        </TouchableOpacity>
                         {onClose && (
                             <TouchableOpacity style={styles.headerCloseBtn} onPress={onClose} activeOpacity={0.7}>
                                 <MaterialCommunityIcons name="close" size={14} color="#94A3B8" />
@@ -368,14 +387,14 @@ const MissionOpsPanel = React.memo(({
             {/* Action Buttons */}
             <View style={styles.buttonsRow}>
                 <TouchableOpacity
-                    style={[styles.button, styles.uploadBtn, planNeedsUpload && styles.updateTrajectoryBtn, trajectoryUpdating && styles.disabledBtn]}
-                    onPress={onRequestUpload}
-                    disabled={trajectoryUpdating}
+                    style={[styles.button, styles.uploadBtn, (trajectoryUpdating || clearInProgress) && styles.disabledBtn]}
+                    onPress={handleUpload}
+                    disabled={trajectoryUpdating || clearInProgress}
                     activeOpacity={0.75}
                 >
                     <MaterialCommunityIcons name="upload" size={20} color={trajectoryUpdating ? "rgba(255,255,255,0.45)" : "#10B981"} />
                     <Text style={[styles.buttonText, { color: '#10B981' }]}>
-                        {trajectoryUpdating ? "Updating…" : planNeedsUpload ? "Update Trajectory" : "Upload"}
+                        {trajectoryUpdating ? "Updating…" : "Upload"}
                     </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -400,7 +419,7 @@ const MissionOpsPanel = React.memo(({
                     <MaterialCommunityIcons name="folder-open" size={20} color="#fff" />
                     <Text style={styles.loadText}>
                         {planNeedsUpload
-                            ? "Update trajectory first"
+                            ? "Waiting for update…"
                             : isLoadingMission
                                 ? "Loading..."
                                 : loadPreparing
@@ -535,26 +554,19 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 2,
     },
-    headerBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: 'rgba(16, 185, 129, 0.08)',
-        borderWidth: 1,
-        borderColor: 'rgba(16, 185, 129, 0.2)',
+    headerClearBtn: {
+        width: 24,
+        height: 24,
         borderRadius: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+        borderWidth: 1,
+        borderColor: 'rgba(248, 113, 113, 0.35)',
+        backgroundColor: 'rgba(127, 29, 29, 0.22)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    headerBadgeDot: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-    },
-    headerBadgeText: {
-        fontSize: 7,
-        fontWeight: '700',
-        letterSpacing: 1,
+    headerClearBtnDisabled: {
+        borderColor: 'rgba(148, 163, 184, 0.16)',
+        backgroundColor: 'rgba(255,255,255,0.03)',
     },
 
     // ── ACTION BUTTONS ──

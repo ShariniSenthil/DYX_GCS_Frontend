@@ -6,20 +6,10 @@ import { colors } from '../../theme/colors';
 import { PATH_PLAN_GLASS, PATH_PLAN_HEADER } from '../../constants/pathPlanGlass';
 import { VehicleStatus } from './types';
 import { RoverTelemetry } from '../../types/telemetry';
-import { resolveVehicleConnectionState } from '../../utils/vehicleStatusConnection';
 
 interface Props {
   status: VehicleStatus;
   telemetry?: RoverTelemetry;
-  isConnected: boolean;
-  /**
-   * True when the socket reports connected but no telemetry packet has
-   * arrived recently (half-open socket). The card keeps showing the last
-   * known values -- they are still the best information available -- but
-   * marks them STALE instead of implying they are current.
-   */
-  dataStale?: boolean;
-  socketTransport?: "websocket" | "polling" | null;
   /** Injected by DraggableCard (handleType="custom") */
   dragGesture?: any;
   isDraggingActive?: boolean;
@@ -32,12 +22,41 @@ const VEHICLE_CARD_LAYOUT: { height?: number | string; minHeight?: number; width
   width: '100%',
 };
 
-const getRtkColor = (telemetry: any): string => {
-  if (!telemetry) return colors.danger;
-  const fixType = telemetry.rtk?.fix_type ?? 0;
-  if (fixType >= 5) return colors.success;
-  if (fixType >= 3) return colors.warning;
-  return colors.danger;
+type RtkCardTone = {
+  panelBg: string;
+  panelBorder: string;
+};
+
+/** The card colour gives the RTK quality an immediate visual meaning. */
+const getRtkCardTone = (fixType: number): RtkCardTone => {
+  if (fixType >= 6) {
+    return {
+      panelBg: 'rgba(20, 83, 45, 0.94)',
+      panelBorder: 'rgba(74, 222, 128, 0.72)',
+    };
+  }
+  if (fixType === 5) {
+    return {
+      panelBg: 'rgba(120, 53, 15, 0.94)',
+      panelBorder: 'rgba(251, 191, 36, 0.76)',
+    };
+  }
+  if (fixType === 4) {
+    return {
+      panelBg: 'rgba(124, 45, 18, 0.94)',
+      panelBorder: 'rgba(251, 146, 60, 0.76)',
+    };
+  }
+  if (fixType === 3) {
+    return {
+      panelBg: 'rgba(127, 29, 29, 0.94)',
+      panelBorder: 'rgba(248, 113, 113, 0.76)',
+    };
+  }
+  return {
+    panelBg: PATH_PLAN_GLASS.panelBg,
+    panelBorder: PATH_PLAN_GLASS.border,
+  };
 };
 
 const getBatteryColor = (telemetry: any): string => {
@@ -95,26 +114,19 @@ type StatusRowItem = {
 export const VehicleStatusCard: React.FC<Props> = ({
   status,
   telemetry,
-  isConnected,
-  dataStale = false,
-  socketTransport = null,
   dragGesture,
   isDraggingActive,
   onClose,
 }) => {
-  const { stale, connectionColor, socketLabel, socketColor } =
-    resolveVehicleConnectionState(isConnected, dataStale, socketTransport);
-
-  const rtkColor = useDebouncedColor(() => getRtkColor(telemetry), telemetry?.rtk?.fix_type);
+  const rtkTone = getRtkCardTone(telemetry?.rtk?.fix_type ?? 0);
   const batteryColor = useDebouncedColor(() => getBatteryColor(telemetry), telemetry?.battery?.percentage);
   const hrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.hrms ?? 0), (telemetry as any)?.hrms);
   const vrmsColor = useDebouncedColor(() => getAccuracyColor((telemetry as any)?.vrms ?? 0), (telemetry as any)?.vrms);
   const satColor = useDebouncedColor(() => getSatelliteColor(telemetry), telemetry?.global?.satellites_visible);
 
   const rows: StatusRowItem[] = [
-    { key: 'websocket', label: 'WebSocket', value: socketLabel, color: socketColor, icon: 'pulse' },
     { key: 'battery', label: 'Battery', value: status.battery, color: batteryColor, icon: 'battery-charging' },
-    { key: 'gps', label: 'GPS / RTK', value: status.gps, color: rtkColor, icon: 'cellular' },
+    { key: 'gps', label: 'GPS / RTK', value: status.gps, color: colors.accent, icon: 'cellular' },
     { key: 'satellites', label: 'Satellites', value: status.satellites, color: satColor, icon: 'radio' },
     { key: 'hrms', label: 'HRMS', value: status.hrms, color: hrmsColor, icon: 'analytics' },
     { key: 'vrms', label: 'VRMS', value: status.vrms, color: vrmsColor, icon: 'analytics-outline' },
@@ -123,7 +135,16 @@ export const VehicleStatusCard: React.FC<Props> = ({
   ];
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: rtkTone.panelBg,
+          borderColor: rtkTone.panelBorder,
+        },
+      ]}
+      accessibilityLabel={`Robot status. RTK fix type ${telemetry?.rtk?.fix_type ?? 0}`}
+    >
       <OptionalGestureDetector gesture={dragGesture}>
         <View style={[styles.header, isDraggingActive && styles.headerDragging]}>
           <View style={styles.headerLeft}>
@@ -131,8 +152,6 @@ export const VehicleStatusCard: React.FC<Props> = ({
               <Ionicons name="hardware-chip" size={14} color={PATH_PLAN_GLASS.cyan} />
             </View>
             <Text style={styles.headerTitle}>ROBOT STATUS</Text>
-            <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
-            {stale && <Text style={styles.staleBadge}>STALE</Text>}
           </View>
           <View style={styles.headerRight}>
             {onClose && (
@@ -189,12 +208,6 @@ const styles = StyleSheet.create({
     borderBottomColor: PATH_PLAN_GLASS.dragBorder,
     backgroundColor: PATH_PLAN_GLASS.dragBg,
   },
-  staleBadge: {
-    color: colors.warning,
-    fontSize: 7,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -208,11 +221,6 @@ const styles = StyleSheet.create({
   headerCloseBtn: PATH_PLAN_HEADER.closeBtn,
   headerIconWrap: PATH_PLAN_HEADER.iconWrap,
   headerTitle: PATH_PLAN_HEADER.title,
-  connectionDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
   list: {
     flex: 1,
     borderRadius: 10,
